@@ -1,0 +1,141 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Horus — Unified Docker Compose
+# Boots Anvil (8100), Vault (8000), and Forge (8200) as a single stack.
+#
+# Usage:
+#   docker-compose -f docker-compose.horus.yml up --build
+#   docker-compose -f docker-compose.horus.yml down -v
+#
+# Prerequisites:
+#   All six Horus repos cloned as siblings under the same parent directory:
+#     Repositories/
+#     ├── Anvil-Old/          ← run from here
+#     ├── Anvil/
+#     ├── Vault/
+#     ├── Forge/
+#     ├── Forge-Registry/
+#     ├── Notes/
+#     └── knowledge-base/
+#
+# Environment:
+#   Copy .env.horus to .env and edit, or export variables before running.
+#   See .env.horus for all available overrides.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: '3.8'
+
+services:
+
+  # ── Anvil ──────────────────────────────────────────────────────────────────
+  # Notes system and MCP server. Indexes markdown files from the Notes repo.
+  anvil:
+    build:
+      context: ../Anvil
+      dockerfile: Dockerfile
+    ports:
+      - "${ANVIL_PORT:-8100}:8100"
+    volumes:
+      # Notes repo — read/write so Anvil can git-sync
+      - ../Notes:/data/notes:rw
+    environment:
+      - ANVIL_TRANSPORT=http
+      - ANVIL_PORT=8100
+      - ANVIL_HOST=0.0.0.0
+      - ANVIL_NOTES_PATH=/data/notes
+      - ANVIL_QMD_COLLECTION=${ANVIL_QMD_COLLECTION:-anvil}
+      - ANVIL_SYNC_INTERVAL=${ANVIL_SYNC_INTERVAL:-300}
+      - ANVIL_DEBOUNCE_SECONDS=${ANVIL_DEBOUNCE_SECONDS:-5}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    networks:
+      - horus-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  # ── Vault ──────────────────────────────────────────────────────────────────
+  # Knowledge service. Semantic search over the knowledge-base repo.
+  vault:
+    build:
+      context: ../Vault/knowledge-service
+      dockerfile: Dockerfile
+    ports:
+      - "${VAULT_PORT:-8000}:8000"
+    volumes:
+      # Knowledge-base repo — read-only; Vault writes PRs via git, not direct
+      - ../knowledge-base:/data/knowledge-repo:ro
+      # Write-path workspace: staging area for draft pages before PR
+      - vault-workspace:/data/workspace
+    environment:
+      - KNOWLEDGE_REPO_PATH=/data/knowledge-repo
+      - WORKSPACE_PATH=/data/workspace
+      # Repo is volume-mounted — skip git clone on startup
+      - SKIP_GIT_CLONE=true
+      - QMD_INDEX_NAME=${QMD_INDEX_NAME:-knowledge}
+      - SYNC_INTERVAL=${VAULT_SYNC_INTERVAL:-300}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - HOST=0.0.0.0
+      - PORT=8000
+    networks:
+      - horus-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ── Forge ──────────────────────────────────────────────────────────────────
+  # Workspace manager and package registry MCP server.
+  # Waits for Anvil and Vault to be healthy before starting — its entrypoint
+  # writes ~/.forge/config.yaml with the Anvil and Vault endpoint URLs.
+  forge:
+    build:
+      context: ../Forge
+      dockerfile: Dockerfile
+    ports:
+      - "${FORGE_PORT:-8200}:8200"
+    volumes:
+      # Forge Registry — read-only; skills/plugins/workspace-configs
+      - ../Forge-Registry:/data/registry:ro
+      # Workspaces: Forge creates workspace directories here
+      - forge-workspaces:/data/workspaces
+    environment:
+      - FORGE_PORT=8200
+      - FORGE_HOST=0.0.0.0
+      - FORGE_REGISTRY_PATH=/data/registry
+      - FORGE_WORKSPACES_PATH=/data/workspaces
+      # These are the Docker-internal service URLs — Forge writes them into
+      # ~/.forge/config.yaml and into every workspace's MCP config it creates
+      - FORGE_ANVIL_URL=http://anvil:8100
+      - FORGE_VAULT_URL=http://vault:8000
+    depends_on:
+      anvil:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  horus-net:
+    driver: bridge
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  # Vault write-path staging workspace (ephemeral for integration testing)
+  vault-workspace:
+  # Forge workspace directories (ephemeral for integration testing)
+  forge-workspaces:
