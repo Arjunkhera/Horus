@@ -36,7 +36,7 @@ echo ""
 echo "── Pre-flight ────────────────────────────────────────────────────────────"
 
 ALL_UP=true
-for svc in anvil vault forge; do
+for svc in anvil vault vault-mcp forge; do
   STATE=$(docker compose -f "$COMPOSE_FILE" ps --format json 2>/dev/null \
     | python3 -c "
 import sys, json
@@ -89,7 +89,7 @@ echo "── Exit codes ──────────────────�
 # Exit code 137 = killed by SIGKILL (143 = terminated by SIGTERM without handler,
 # which is still acceptable for services that don't register a SIGTERM handler).
 
-for svc in anvil vault forge; do
+for svc in anvil vault vault-mcp forge; do
   EXIT_CODE=$(docker compose -f "$COMPOSE_FILE" ps --all --format json 2>/dev/null \
     | python3 -c "
 import sys, json
