@@ -63,6 +63,18 @@ FORGE_CONTAINER=forge   # container name for docker exec in e2e test
 SKIP_DOCKER=0
 ```
 
+### Shutdown validation (run separately)
+
+```bash
+# Verifies all containers stop within the grace period and exit cleanly.
+# ⚠ This STOPS the stack — restart manually afterward.
+bash tests/smoke-shutdown.sh
+```
+
+The shutdown test checks:
+- `docker compose stop` completes within 30s (grace period)
+- All three containers exit with code 0 or 143 (clean SIGTERM), not 137 (SIGKILL)
+
 ## What the e2e test validates
 
 1. **Pre-flight** — all three services respond to health checks

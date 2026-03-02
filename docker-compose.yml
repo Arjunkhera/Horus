@@ -3,26 +3,24 @@
 # Boots Anvil (8100), Vault (8000), and Forge (8200) as a single stack.
 #
 # Usage:
-#   docker-compose -f docker-compose.horus.yml up --build
-#   docker-compose -f docker-compose.horus.yml down -v
+#   docker-compose up --build
+#   docker-compose down -v
 #
 # Prerequisites:
 #   All six Horus repos cloned as siblings under the same parent directory:
 #     Repositories/
-#     ├── Anvil-Old/          ← run from here
 #     ├── Anvil/
 #     ├── Vault/
 #     ├── Forge/
 #     ├── Forge-Registry/
 #     ├── Notes/
-#     └── knowledge-base/
+#     ├── knowledge-base/
+#     └── Horus/          ← run from here
 #
 # Environment:
-#   Copy .env.horus to .env and edit, or export variables before running.
-#   See .env.horus for all available overrides.
+#   Copy .env.example to .env and edit, or export variables before running.
+#   See .env.example for all available overrides.
 # ─────────────────────────────────────────────────────────────────────────────
-
-version: '3.8'
 
 services:
 
@@ -49,6 +47,13 @@ services:
     networks:
       - horus-net
     restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
       interval: 30s
@@ -58,6 +63,7 @@ services:
 
   # ── Vault ──────────────────────────────────────────────────────────────────
   # Knowledge service. Semantic search over the knowledge-base repo.
+  # Gets more memory headroom — QMD indexing causes spikes during startup.
   vault:
     build:
       context: ../Vault/knowledge-service
@@ -82,6 +88,13 @@ services:
     networks:
       - horus-net
     restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -121,6 +134,13 @@ services:
     networks:
       - horus-net
     restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
       interval: 30s
@@ -135,7 +155,7 @@ networks:
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
-  # Vault write-path staging workspace (ephemeral for integration testing)
+  # Vault write-path staging workspace
   vault-workspace:
-  # Forge workspace directories (ephemeral for integration testing)
+  # Forge workspace directories
   forge-workspaces:
