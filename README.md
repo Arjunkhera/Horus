@@ -1,16 +1,20 @@
 # Horus
 
-Integration layer for the Horus stack — Anvil, Vault, and Forge running together.
+Integration layer for the Horus stack — Anvil, Vault, and Forge running together in Docker.
 
-## Repos
+## Services
 
 | Service | Port | Description |
 |---------|------|-------------|
-| [Anvil](../Anvil) | 8100 | Notes and knowledge MCP server (Node.js) |
-| [Vault](../Vault) | 8000 | Knowledge base REST API (FastAPI) |
+| [Anvil](../Anvil) | 8100 | Notes MCP server (Node.js) |
+| [Vault REST](../Vault/knowledge-service) | 8000 | Knowledge base REST API (FastAPI) — internal only |
+| [Vault MCP](../Vault/knowledge-mcp) | 8300 | Vault MCP adapter (Node.js) |
 | [Forge](../Forge) | 8200 | Workspace manager MCP server (Node.js) |
 
 Supporting data repos: [Notes](../Notes), [Forge-Registry](../Forge-Registry), [knowledge-base](../knowledge-base)
+
+Vault REST (8000) is internal to the Docker network — Claude Desktop never connects to it directly.
+Vault MCP (8300) is the public-facing MCP adapter that proxies calls to Vault REST.
 
 ## Prerequisites
 
@@ -20,18 +24,50 @@ Supporting data repos: [Notes](../Notes), [Forge-Registry](../Forge-Registry), [
 ## Running the stack
 
 ```bash
-# Start all three services
-docker-compose up --build
-
-# Or in detached mode
+# Start all four services
 docker-compose up --build -d
 
-# With custom env overrides (copy and edit first)
-cp .env.example .env
-docker-compose --env-file .env up --build
+# Watch startup logs
+docker-compose logs -f
+
+# Check health
+docker-compose ps
 ```
 
-Forge depends on Anvil and Vault being healthy before it starts. Expect ~60s for the full stack to be ready.
+Startup order: Anvil and Vault boot first → Vault MCP and Forge wait for their dependencies to be healthy. Expect ~60–90s for the full stack to be ready.
+
+## Claude Desktop configuration
+
+With the stack running, set `~/Library/Application Support/Claude/claude_desktop_config.json` to:
+
+```json
+{
+  "mcpServers": {
+    "anvil": {
+      "url": "http://localhost:8100"
+    },
+    "vault": {
+      "url": "http://localhost:8300"
+    },
+    "forge": {
+      "url": "http://localhost:8200"
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving. That's the complete setup — no local builds, no config files, just Docker.
+
+## Environment overrides
+
+Copy `.env.example` to `.env` for custom port bindings or settings:
+
+```bash
+cp .env.example .env
+docker-compose --env-file .env up --build -d
+```
+
+See `.env.example` for all available variables.
 
 ## Running tests
 
@@ -39,9 +75,9 @@ With the stack running:
 
 ```bash
 # Individual service smoke tests
-bash tests/smoke-anvil.sh   # 7 Anvil MCP tools
-bash tests/smoke-vault.sh   # 10 Vault REST endpoints
-bash tests/smoke-forge.sh   # 9 Forge MCP tools + workspace lifecycle
+bash tests/smoke-anvil.sh       # 7 Anvil MCP tools
+bash tests/smoke-vault.sh       # 10 Vault REST endpoints
+bash tests/smoke-forge.sh       # 9 Forge MCP tools + workspace lifecycle
 
 # All three in sequence
 bash tests/smoke-all.sh
@@ -72,8 +108,8 @@ bash tests/smoke-shutdown.sh
 ```
 
 The shutdown test checks:
-- `docker compose stop` completes within 30s (grace period)
-- All three containers exit with code 0 or 143 (clean SIGTERM), not 137 (SIGKILL)
+- `docker compose stop` completes within 30s
+- All containers exit with code 0 or 143 (clean SIGTERM), not 137 (SIGKILL)
 
 ## What the e2e test validates
 
