@@ -53,19 +53,18 @@ export GITHUB_TOKEN="your_token_if_needed"
 ```bash
 cd ~/Desktop/Repositories/Horus
 
-# First run: builds all four images (takes a few minutes)
-docker-compose up --build -d
+# First run: starts all services and installs horus-core to ~/.claude/
+bash setup.sh
 
-# Subsequent runs: skips rebuild if nothing changed
-docker-compose up -d
+# Subsequent runs (skip rebuild if images are current):
+bash setup.sh --skip-build
 ```
 
-Watch startup progress:
-
-```bash
-docker-compose ps        # check health status
-docker-compose logs -f   # tail all service logs
-```
+The setup script:
+1. Starts all four Docker services
+2. Waits for Forge to be healthy
+3. Copies horus-core skills to `~/.claude/skills/`
+4. Upserts the system-awareness rules into `~/.claude/CLAUDE.md`
 
 **Startup order and timing:**
 
@@ -77,6 +76,13 @@ docker-compose logs -f   # tail all service logs
 | Forge | 8200 | Anvil + Vault REST healthy | Workspace & registry MCP server |
 
 Expect **60–90 seconds** on first boot. Vault builds its semantic search index on startup, which takes the longest.
+
+> If you prefer to manage Docker manually:
+> ```bash
+> docker-compose up --build -d   # start stack
+> docker-compose up -d           # start without rebuild
+> ```
+> Then run `bash setup.sh --skip-build` separately to install horus-core.
 
 ---
 
@@ -123,7 +129,7 @@ bash tests/smoke-e2e.sh    # full end-to-end workspace lifecycle test
 **Start:**
 ```bash
 cd ~/Desktop/Repositories/Horus
-docker-compose up -d
+bash setup.sh --skip-build
 ```
 
 The stack must be running before Claude Desktop tries to connect. If you open Claude Desktop first, restart it after the stack is up.
@@ -202,8 +208,8 @@ Check service logs first. Known intentional skips: `check-duplicates` (heavy CPU
 ## Quick Reference
 
 ```
-Start stack:          docker-compose up -d
-Start + rebuild:      docker-compose up --build -d
+Start (first time):   bash setup.sh
+Start (skip rebuild): bash setup.sh --skip-build
 Stop:                 docker-compose stop
 Check health:         docker-compose ps
 Tail logs:            docker-compose logs -f <service>
