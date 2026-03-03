@@ -161,7 +161,14 @@ services:
       # These are the Docker-internal service URLs — Forge writes them into
       # ~/.forge/config.yaml and into every workspace's MCP config it creates
       - FORGE_ANVIL_URL=http://anvil:8100
-      - FORGE_VAULT_URL=http://vault:8000
+      - FORGE_VAULT_URL=http://vault-mcp:8300
+      # Host-facing URLs and paths — used when emitting .claude/settings.local.json
+      # into each workspace so Claude Code on the host can connect to MCP servers
+      # and resolve the wrapper script path without Docker network names.
+      - FORGE_HOST_WORKSPACES_PATH=${HORUS_DATA_PATH}/workspaces
+      - FORGE_HOST_ANVIL_URL=http://localhost:${ANVIL_PORT:-8100}
+      - FORGE_HOST_VAULT_URL=http://localhost:${VAULT_MCP_PORT:-8300}
+      - FORGE_HOST_FORGE_URL=http://localhost:${FORGE_PORT:-8200}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     depends_on:
       anvil:
