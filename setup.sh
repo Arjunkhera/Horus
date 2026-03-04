@@ -13,6 +13,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORGE_CONTAINER="horus-forge-1"
+ANVIL_CONTAINER="horus-anvil-1"
 CLAUDE_DIR="${HOME}/.claude"
 SKILLS_DIR="${CLAUDE_DIR}/skills"
 CLAUDE_MD="${CLAUDE_DIR}/CLAUDE.md"
@@ -37,7 +38,24 @@ cd "$SCRIPT_DIR"
 docker compose up $BUILD_FLAG -d
 success "Stack started"
 
-# ── Step 2: Wait for Forge to be healthy ─────────────────────────────────────
+# ── Step 2: Wait for Anvil to be healthy ─────────────────────────────────────
+# On first run this blocks while QMD downloads embedding models (~2GB).
+# Subsequent runs complete quickly as models are cached in the named volume.
+echo ""
+echo "Waiting for Anvil to be healthy (first run downloads QMD models ~2GB)..."
+TIMEOUT=600
+ELAPSED=0
+until docker inspect --format='{{.State.Health.Status}}' "$ANVIL_CONTAINER" 2>/dev/null | grep -q "healthy"; do
+  if [[ $ELAPSED -ge $TIMEOUT ]]; then
+    fail "Anvil did not become healthy within ${TIMEOUT}s. Check: docker compose logs anvil"
+  fi
+  sleep 5
+  ELAPSED=$((ELAPSED + 5))
+  log "Still waiting... (${ELAPSED}s)"
+done
+success "Anvil is healthy"
+
+# ── Step 3: Wait for Forge to be healthy ─────────────────────────────────────
 echo ""
 echo "Waiting for Forge to be healthy..."
 TIMEOUT=120
@@ -52,7 +70,7 @@ until docker inspect --format='{{.State.Health.Status}}' "$FORGE_CONTAINER" 2>/d
 done
 success "Forge is healthy"
 
-# ── Step 3: Install horus-core skills to ~/.claude/skills/ ───────────────────
+# ── Step 4: Install horus-core skills to ~/.claude/skills/ ───────────────────
 echo ""
 echo "Installing horus-core skills to ${SKILLS_DIR}..."
 mkdir -p "${SKILLS_DIR}/horus-anvil" "${SKILLS_DIR}/horus-vault" "${SKILLS_DIR}/horus-forge"
@@ -65,7 +83,7 @@ docker cp "${FORGE_CONTAINER}:/home/forge/.claude/skills/horus-forge/SKILL.md" \
   "${SKILLS_DIR}/horus-forge/SKILL.md"
 success "Skills installed"
 
-# ── Step 4: Upsert managed section into ~/.claude/CLAUDE.md ──────────────────
+# ── Step 5: Upsert managed section into ~/.claude/CLAUDE.md ──────────────────
 echo ""
 echo "Updating ${CLAUDE_MD}..."
 
