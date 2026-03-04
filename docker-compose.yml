@@ -31,7 +31,7 @@ services:
     volumes:
       # Notes repo — read/write so Anvil can git-sync or clone on first boot
       - ${HORUS_DATA_PATH}/notes:/data/notes:rw
-      # QMD model + data cache — GGUF models (~1GB) downloaded on first use.
+      # QMD model + data cache — GGUF models (~2.1GB) downloaded on first use.
       # Persisting this avoids re-downloading models on every container rebuild.
       - anvil-qmd-models:/home/anvil/.cache/qmd
     environment:
@@ -58,7 +58,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
       interval: 30s
       timeout: 5s
-      start_period: 60s
+      start_period: 600s
       retries: 3
 
   # ── Vault ──────────────────────────────────────────────────────────────────
