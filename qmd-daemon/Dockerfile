@@ -23,6 +23,14 @@ RUN npm install -g @tobilu/qmd && \
     chmod -R a+rwX /usr/local/lib/node_modules/@tobilu/qmd/node_modules/node-llama-cpp/ || \
     echo "QMD llama-cpp permission fix failed (non-fatal)"
 
+# QMD's HTTP server hardcodes "localhost" as the bind address, making it
+# unreachable from other containers on the same Docker network.
+# Patch mcp.js to respect QMD_BIND_HOST (default: 0.0.0.0) so that Docker
+# service-to-service calls work while localhost-only is still possible via env var.
+RUN sed -i \
+    's/httpServer\.listen(port, "localhost",/httpServer.listen(port, process.env.QMD_BIND_HOST || "0.0.0.0",/' \
+    /usr/local/lib/node_modules/@tobilu/qmd/dist/mcp.js
+
 RUN mkdir -p /home/qmd/.cache/qmd && chown -R qmd:qmd /home/qmd/.cache
 
 COPY entrypoint.sh /entrypoint.sh
