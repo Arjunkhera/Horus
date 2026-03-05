@@ -20,6 +20,41 @@
 
 services:
 
+  # ── QMD Daemon ─────────────────────────────────────────────────────────────
+  # Shared QMD MCP HTTP server. Keeps GGUF models warm in memory so Anvil and
+  # Vault pay the model-load cost only once.
+  #
+  # The qmd-daemon-data volume is also mounted into the Anvil and Vault
+  # containers at their respective ~/.cache/qmd paths. This lets both services
+  # run `qmd collection add` / `qmd update` subprocess calls that write to the
+  # same SQLite database the daemon reads from — keeping the index current.
+  #
+  # start_period covers first-boot GGUF model download (~1-2 GB) + initial embed.
+  qmd-daemon:
+    build:
+      context: ./qmd-daemon
+      dockerfile: Dockerfile
+    environment:
+      - QMD_DAEMON_PORT=8181
+    volumes:
+      - qmd-daemon-data:/home/qmd/.cache/qmd
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+        reservations:
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8181/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 600s
+      retries: 3
+
   # ── Anvil ──────────────────────────────────────────────────────────────────
   # Notes system and MCP server. Indexes markdown files from the Notes repo.
   anvil:
@@ -31,9 +66,10 @@ services:
     volumes:
       # Notes repo — read/write so Anvil can git-sync or clone on first boot
       - ${HORUS_DATA_PATH}/notes:/data/notes:rw
-      # QMD model + data cache — GGUF models (~2.1GB) downloaded on first use.
-      # Persisting this avoids re-downloading models on every container rebuild.
-      - anvil-qmd-models:/home/anvil/.cache/qmd
+      # Shared QMD database + model cache (same volume as qmd-daemon).
+      # Anvil mounts it at its own ~/.cache/qmd so subprocess `qmd` calls
+      # (collection registration, reindex) write to the daemon's shared database.
+      - qmd-daemon-data:/home/anvil/.cache/qmd
     environment:
       - ANVIL_TRANSPORT=http
       - ANVIL_PORT=8100
@@ -44,6 +80,11 @@ services:
       - ANVIL_SYNC_INTERVAL=${ANVIL_SYNC_INTERVAL:-300}
       - ANVIL_DEBOUNCE_SECONDS=${ANVIL_DEBOUNCE_SECONDS:-5}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Route search calls to the shared daemon; fall back to subprocess if unset.
+      - QMD_DAEMON_URL=http://qmd-daemon:8181
+    depends_on:
+      qmd-daemon:
+        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -51,7 +92,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 512m
         reservations:
           memory: 256m
     healthcheck:
@@ -75,6 +116,10 @@ services:
       - ${HORUS_DATA_PATH}/knowledge-base:/data/knowledge-repo:rw
       # Write-path workspace: staging area for draft pages before PR
       - vault-workspace:/data/workspace
+      # Shared QMD database + model cache (same volume as qmd-daemon).
+      # Vault mounts it at its own ~/.cache/qmd so subprocess `qmd` calls
+      # (collection registration, reindex) write to the daemon's shared database.
+      - qmd-daemon-data:/home/appuser/.cache/qmd
     environment:
       - KNOWLEDGE_REPO_PATH=/data/knowledge-repo
       - WORKSPACE_PATH=/data/workspace
@@ -86,6 +131,11 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Route search calls to the shared daemon; fall back to subprocess if unset.
+      - QMD_DAEMON_URL=http://qmd-daemon:8181
+    depends_on:
+      qmd-daemon:
+        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -93,7 +143,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: 512m
         reservations:
           memory: 256m
     healthcheck:
@@ -207,7 +257,9 @@ networks:
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
-  # Anvil QMD model cache — persists GGUF model downloads across rebuilds
-  anvil-qmd-models:
+  # Shared QMD daemon database + GGUF model cache.
+  # Mounted into qmd-daemon, Anvil, and Vault so all three share one SQLite index.
+  # Persists model downloads (~1-2 GB) and index across container rebuilds.
+  qmd-daemon-data:
   # Vault write-path staging workspace
   vault-workspace:
