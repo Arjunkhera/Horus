@@ -31,7 +31,6 @@ export const configCommand = new Command('config')
     console.log(chalk.bold('Horus Configuration'));
     console.log(chalk.dim('──────────────────────────────────────'));
     console.log(`  ${chalk.bold('version:')}          ${config.version}`);
-    console.log(`  ${chalk.bold('api-key:')}          ${maskApiKey(config.api_key)}`);
     console.log(`  ${chalk.bold('data-dir:')}         ${config.data_dir}`);
     console.log(`  ${chalk.bold('runtime:')}          ${config.runtime}`);
     console.log(`  ${chalk.bold('host-repos-path:')}  ${config.host_repos_path || chalk.dim('(not set)')}`);
@@ -75,7 +74,7 @@ configCommand
     const value = getConfigValue(config, key as ConfigKey);
 
     // Mask sensitive values
-    if (key === 'api-key' || key === 'github-token') {
+    if (key === 'github-token') {
       console.log(maskApiKey(value));
     } else {
       console.log(value || '');
@@ -117,7 +116,6 @@ configCommand
 
     // Prompt to restart if services might be affected
     const needsRestart = [
-      'api-key',
       'data-dir',
       'host-repos-path',
       'runtime',
