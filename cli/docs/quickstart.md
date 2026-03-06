@@ -8,22 +8,21 @@ Get Horus running and connected to Claude in under five minutes.
 
 - **Docker >= 24** (or Podman >= 4 with Docker Compose compatibility)
 - **Node.js >= 18**
-- **An Anthropic API key** (for Claude to call the MCP servers)
-- **Claude Desktop**, **Claude Code**, or **Cursor** installed
+- **Claude Desktop**, **Claude Code**, or **Cursor** installed (with your Anthropic API key already configured)
 
 ---
 
 ## Install
 
 ```bash
-npm i -g @horus/cli
+npm i -g @arkhera30/cli
 ```
 
 Verify the installation:
 
 ```
 $ horus --version
-@horus/cli 0.1.0
+@arkhera30/cli 0.1.0
 ```
 
 ---
@@ -42,32 +41,28 @@ $ horus setup
 Horus Setup
 --------------------------------------
 
-[1/6] Detecting container runtime...
+[1/5] Detecting container runtime...
       Found Docker 27.1.1 at /usr/local/bin/docker
       Compose plugin: v2.29.1
 
-[2/6] Anthropic API key:
-      Enter your API key (sk-ant-...): sk-ant-••••••••
-      Saved to ~/.horus/config.json
-
-[3/6] Data directory:
+[2/5] Data directory:
       Where should Horus store data? (~/.horus/data)
       Created /Users/you/.horus/data
 
-[4/6] Port configuration:
+[3/5] Port configuration:
       Anvil MCP:     8100 (default)
       Vault MCP:     8300 (default)
       Forge MCP:     8200 (default)
       All ports available.
 
-[5/6] Pulling images...
+[4/5] Pulling images...
       Pulling qmd-daemon...     done
       Pulling anvil...          done
       Pulling vault...          done
       Pulling vault-mcp...      done
       Pulling forge...          done
 
-[6/6] Starting Horus stack...
+[5/5] Starting Horus stack...
       Waiting for QMD daemon...   healthy (12s)
       Waiting for Anvil...        healthy (8s)
       Waiting for Vault REST...   healthy (5s)
@@ -84,11 +79,10 @@ Setup complete.
 **What happened at each step:**
 
 1. **Runtime detection** -- Horus found Docker (or Podman) and verified the Compose plugin is available.
-2. **API key prompt** -- Your Anthropic key is stored locally in `~/.horus/config.json` (never sent anywhere except to Anthropic).
-3. **Data directory** -- Created `~/.horus/data/` with subdirectories for notes, knowledge-base, registry, and workspaces.
-4. **Port configuration** -- Checked that the default ports (8100, 8200, 8300) are available on your machine.
-5. **Image pull** -- Downloaded the five Docker images that make up the Horus stack.
-6. **Stack start + health check** -- Started all containers and waited for each service to report healthy.
+2. **Data directory** -- Created `~/.horus/data/` with subdirectories for notes, knowledge-base, registry, and workspaces.
+3. **Port configuration** -- Checked that the default ports (8100, 8200, 8300) are available on your machine.
+4. **Image pull** -- Downloaded the five Docker images that make up the Horus stack.
+5. **Stack start + health check** -- Started all containers and waited for each service to report healthy.
 
 > **First run note:** The QMD daemon downloads a GGUF embedding model (~1-2 GB) on first boot. This can take several minutes depending on your connection. Subsequent starts reuse the cached model and are much faster.
 
@@ -204,7 +198,7 @@ Forge returns all active development workspaces (empty on first run -- that is e
 
 | Command | Description |
 |---------|-------------|
-| `horus config` | View or change settings (API key, ports, data directory) |
+| `horus config` | View or change settings (ports, data directory, runtime) |
 | `horus update` | Pull the latest service images and restart |
 | `horus doctor` | Diagnose common issues (port conflicts, missing config, unhealthy services) |
 | `horus down` | Stop the stack gracefully (all data is preserved) |

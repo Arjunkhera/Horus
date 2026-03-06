@@ -1,5 +1,5 @@
 {
-  "name": "@horus/cli",
+  "name": "@arkhera30/cli",
   "version": "0.1.0",
   "description": "CLI for managing the Horus AI development stack",
   "type": "module",

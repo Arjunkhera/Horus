@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Horus — Production Docker Compose
-# Managed by @horus/cli. Do not edit manually.
+# Managed by @arkhera30/cli. Do not edit manually.
 #
 # This file uses pre-built images from ghcr.io. Once CI pipelines are set up,
 # images will be published on every release. Until then, these are placeholder
