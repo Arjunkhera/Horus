@@ -90,6 +90,13 @@ function createRuntime(name: 'docker' | 'podman'): Runtime {
 // ── Detection ───────────────────────────────────────────────────────────────
 
 /**
+ * Check whether a specific runtime is installed and has the compose plugin.
+ */
+export async function checkRuntime(name: 'docker' | 'podman'): Promise<boolean> {
+  return tryCommand(name, ['compose', 'version']);
+}
+
+/**
  * Auto-detect available container runtime.
  * Checks Docker first, then Podman.
  * Throws if neither is available.

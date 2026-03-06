@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { input, confirm, number } from '@inquirer/prompts';
+import { input, confirm, number, select } from '@inquirer/prompts';
 import {
   loadConfig,
   saveConfig,
@@ -10,7 +10,7 @@ import {
   defaultConfig,
   type Config,
 } from '../lib/config.js';
-import { detectRuntime, composeStreaming } from '../lib/runtime.js';
+import { checkRuntime, detectRuntime, composeStreaming } from '../lib/runtime.js';
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { installComposeFile } from '../lib/compose.js';
 import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
@@ -20,6 +20,7 @@ import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
 export const setupCommand = new Command('setup')
   .description('Interactive first-run setup for Horus')
   .option('-y, --yes', 'Non-interactive mode (use defaults + env vars)')
+  .option('--runtime <runtime>', 'Container runtime to use: docker or podman (non-interactive only)')
   .option('--data-dir <path>', 'Data directory path')
   .option('--repos-path <path>', 'Host repos path for Forge scanning')
   .action(async (opts) => {
@@ -44,18 +45,53 @@ export const setupCommand = new Command('setup')
       }
     }
 
-    // Step 2: Detect container runtime
-    const runtimeSpinner = ora('Detecting container runtime...').start();
-    let runtime;
-    try {
-      runtime = await detectRuntime();
-      runtimeSpinner.succeed(`Detected ${chalk.cyan(runtime.name)}`);
-    } catch (error) {
-      runtimeSpinner.fail('No container runtime found');
+    // Step 2: Choose container runtime
+    const checkSpinner = ora('Checking for container runtimes...').start();
+    const [hasDocker, hasPodman] = await Promise.all([
+      checkRuntime('docker'),
+      checkRuntime('podman'),
+    ]);
+    checkSpinner.stop();
+
+    const available = [
+      ...(hasDocker ? ['docker' as const] : []),
+      ...(hasPodman ? ['podman' as const] : []),
+    ];
+
+    if (available.length === 0) {
+      console.log(chalk.red('No container runtime found.'));
       console.log('');
-      console.log((error as Error).message);
+      console.log('Horus requires Docker or Podman with the Compose plugin.');
+      console.log('');
+      console.log('Install one of:');
+      console.log('  Docker Desktop: https://www.docker.com/products/docker-desktop/');
+      console.log('  Podman Desktop: https://podman-desktop.io/');
       process.exit(1);
     }
+
+    let selectedRuntime: 'docker' | 'podman';
+
+    if (opts.yes) {
+      // Non-interactive: use --runtime flag or first available
+      const requested = opts.runtime as 'docker' | 'podman' | undefined;
+      if (requested && !available.includes(requested)) {
+        console.log(chalk.red(`Requested runtime "${requested}" is not installed.`));
+        console.log(chalk.dim(`Available: ${available.join(', ')}`));
+        process.exit(1);
+      }
+      selectedRuntime = requested ?? available[0];
+      console.log(`Using ${chalk.cyan(selectedRuntime)}`);
+    } else {
+      selectedRuntime = await select({
+        message: 'Which container runtime would you like to use?',
+        choices: available.map((r) => ({
+          value: r,
+          name: r === 'docker' ? 'Docker' : 'Podman',
+        })),
+      });
+    }
+
+    const runtime = await detectRuntime(selectedRuntime);
 
     // Step 3: Gather configuration
     let config: Config;
