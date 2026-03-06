@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import inquirer from 'inquirer';
+import { password, input, confirm, number } from '@inquirer/prompts';
 import {
   loadConfig,
   saveConfig,
@@ -34,14 +34,10 @@ export const setupCommand = new Command('setup')
       if (opts.yes) {
         console.log(chalk.yellow('Existing configuration found. Overwriting in non-interactive mode.'));
       } else {
-        const { proceed } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'proceed',
-            message: 'Horus is already configured. Reconfigure?',
-            default: false,
-          },
-        ]);
+        const proceed = await confirm({
+          message: 'Horus is already configured. Reconfigure?',
+          default: false,
+        });
         if (!proceed) {
           console.log(chalk.dim('Setup cancelled.'));
           return;
@@ -83,75 +79,63 @@ export const setupCommand = new Command('setup')
       };
     } else {
       // Interactive mode
-      const answers = await inquirer.prompt([
-        {
-          type: 'password',
-          name: 'api_key',
-          message: 'Anthropic API key:',
-          mask: '*',
-          validate: (input: string) => {
-            if (!input) return 'API key is required';
-            if (!input.startsWith('sk-ant-')) return 'API key must start with "sk-ant-"';
-            return true;
-          },
+      const api_key = await password({
+        message: 'Anthropic API key:',
+        mask: '*',
+        validate: (val: string) => {
+          if (!val) return 'API key is required';
+          if (!val.startsWith('sk-ant-')) return 'API key must start with "sk-ant-"';
+          return true;
         },
-        {
-          type: 'input',
-          name: 'data_dir',
-          message: 'Data directory:',
-          default: DEFAULT_DATA_DIR,
-        },
-        {
-          type: 'input',
-          name: 'host_repos_path',
-          message: 'Host repos path (for Forge repo scanning, leave empty to skip):',
-          default: '',
-        },
-        {
-          type: 'confirm',
-          name: 'customize_ports',
-          message: 'Customize port assignments?',
-          default: false,
-        },
-      ]);
+      });
 
-      let ports = { ...DEFAULT_PORTS };
+      const data_dir = await input({
+        message: 'Data directory:',
+        default: DEFAULT_DATA_DIR,
+      });
 
-      if (answers.customize_ports) {
-        const portAnswers = await inquirer.prompt([
-          {
-            type: 'number',
-            name: 'anvil',
-            message: 'Anvil port:',
-            default: DEFAULT_PORTS.anvil,
-          },
-          {
-            type: 'number',
-            name: 'vault_rest',
-            message: 'Vault REST port:',
-            default: DEFAULT_PORTS.vault_rest,
-          },
-          {
-            type: 'number',
-            name: 'vault_mcp',
-            message: 'Vault MCP port:',
-            default: DEFAULT_PORTS.vault_mcp,
-          },
-          {
-            type: 'number',
-            name: 'forge',
-            message: 'Forge port:',
-            default: DEFAULT_PORTS.forge,
-          },
-        ]);
-        ports = portAnswers;
+      const host_repos_path = await input({
+        message: 'Host repos path (for Forge repo scanning, leave empty to skip):',
+        default: '',
+      });
+
+      const customize_ports = await confirm({
+        message: 'Customize port assignments?',
+        default: false,
+      });
+
+      let ports: { anvil: number; vault_rest: number; vault_mcp: number; forge: number } = { ...DEFAULT_PORTS };
+
+      if (customize_ports) {
+        const anvil = await number({
+          message: 'Anvil port:',
+          default: DEFAULT_PORTS.anvil,
+        });
+        const vault_rest = await number({
+          message: 'Vault REST port:',
+          default: DEFAULT_PORTS.vault_rest,
+        });
+        const vault_mcp = await number({
+          message: 'Vault MCP port:',
+          default: DEFAULT_PORTS.vault_mcp,
+        });
+        const forge = await number({
+          message: 'Forge port:',
+          default: DEFAULT_PORTS.forge,
+        });
+        ports = {
+          anvil: anvil ?? DEFAULT_PORTS.anvil,
+          vault_rest: vault_rest ?? DEFAULT_PORTS.vault_rest,
+          vault_mcp: vault_mcp ?? DEFAULT_PORTS.vault_mcp,
+          forge: forge ?? DEFAULT_PORTS.forge,
+        };
       }
 
       config = {
         ...defaultConfig(),
-        api_key: answers.api_key,
-        data_dir: answers.data_dir,
-        host_repos_path: answers.host_repos_path,
+        api_key,
+        data_dir,
+        host_repos_path,
         runtime: runtime.name,
         ports,
       };

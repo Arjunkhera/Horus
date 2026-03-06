@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import inquirer from 'inquirer';
+import { checkbox } from '@inquirer/prompts';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -195,17 +195,13 @@ export const connectCommand = new Command('connect')
         targets = detected;
         console.log(`Detected clients: ${detected.map((t) => chalk.cyan(t)).join(', ')}`);
       } else {
-        const { chosen } = await inquirer.prompt([
-          {
-            type: 'checkbox',
-            name: 'chosen',
-            message: 'Select clients to configure:',
-            choices: detected.map((t) => ({ name: t, value: t, checked: true })),
-            validate: (input: ClientTarget[]) =>
-              input.length > 0 ? true : 'Select at least one client.',
-          },
-        ]);
-        targets = chosen as ClientTarget[];
+        const chosen = await checkbox<ClientTarget>({
+          message: 'Select clients to configure:',
+          choices: detected.map((t) => ({ name: t, value: t, checked: true })),
+          validate: (input) =>
+            input.length > 0 ? true : 'Select at least one client.',
+        });
+        targets = chosen;
       }
     }
 

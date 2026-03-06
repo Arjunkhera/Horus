@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import inquirer from 'inquirer';
+import { confirm } from '@inquirer/prompts';
 import {
   loadConfig,
   saveConfig,
@@ -132,14 +132,10 @@ configCommand
 
       // Only prompt interactively if we have a TTY
       if (process.stdin.isTTY) {
-        const { restart } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'restart',
-            message: 'Restart Horus now?',
-            default: false,
-          },
-        ]);
+        const restart = await confirm({
+          message: 'Restart Horus now?',
+          default: false,
+        });
 
         if (restart) {
           console.log(chalk.dim('Run `horus down && horus up` to restart.'));
