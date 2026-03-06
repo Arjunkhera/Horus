@@ -1,0 +1,216 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Horus — Production Docker Compose (Image-based Distribution)
+# Boots Anvil (8100), Vault (8000), and Forge (8200) as a single stack
+# using pre-built images from GHCR. No source repos needed.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml down
+#
+# Prerequisites:
+#   - Docker Desktop (or Docker Engine + Compose plugin) / Podman >= 4
+#   - HORUS_DATA_PATH must be set (absolute path, no ~ expansion in Docker)
+#
+# Environment:
+#   Copy .env.example to .env and edit, or export variables before running.
+#   HORUS_DATA_PATH and HOST_REPOS_PATH are required.
+#
+# Images are pulled from ghcr.io/arkhera/horus/. No source repos are cloned
+# or built — this file is for operators and external users.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── QMD Daemon ─────────────────────────────────────────────────────────────
+  # Shared QMD MCP HTTP server. Keeps GGUF models warm in memory so Anvil and
+  # Vault pay the model-load cost only once.
+  # start_period covers first-boot GGUF model download (~1-2 GB) + initial embed.
+  qmd-daemon:
+    image: ghcr.io/arkhera/horus/qmd-daemon:latest
+    environment:
+      - QMD_DAEMON_PORT=8181
+    volumes:
+      - qmd-daemon-data:/home/qmd/.cache/qmd
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+        reservations:
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8181/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 600s
+      retries: 3
+
+  # ── Anvil ──────────────────────────────────────────────────────────────────
+  anvil:
+    image: ghcr.io/arkhera/horus/anvil:latest
+    ports:
+      - "${ANVIL_PORT:-8100}:8100"
+    volumes:
+      - ${HORUS_DATA_PATH}/notes:/data/notes:rw
+      - qmd-daemon-data:/home/anvil/.cache/qmd
+    environment:
+      - ANVIL_TRANSPORT=http
+      - ANVIL_PORT=8100
+      - ANVIL_HOST=0.0.0.0
+      - ANVIL_NOTES_PATH=/data/notes
+      - ANVIL_REPO_URL=${ANVIL_REPO_URL:-}
+      - ANVIL_QMD_COLLECTION=${ANVIL_QMD_COLLECTION:-anvil}
+      - ANVIL_SYNC_INTERVAL=${ANVIL_SYNC_INTERVAL:-300}
+      - ANVIL_DEBOUNCE_SECONDS=${ANVIL_DEBOUNCE_SECONDS:-5}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - QMD_DAEMON_URL=http://qmd-daemon:8181
+    depends_on:
+      qmd-daemon:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 600s
+      retries: 3
+
+  # ── Vault ──────────────────────────────────────────────────────────────────
+  vault:
+    image: ghcr.io/arkhera/horus/vault:latest
+    ports:
+      - "${VAULT_PORT:-8000}:8000"
+    volumes:
+      - ${HORUS_DATA_PATH}/knowledge-base:/data/knowledge-repo:rw
+      - vault-workspace:/data/workspace
+      - qmd-daemon-data:/home/appuser/.cache/qmd
+    environment:
+      - KNOWLEDGE_REPO_PATH=/data/knowledge-repo
+      - WORKSPACE_PATH=/data/workspace
+      - VAULT_KNOWLEDGE_REPO_URL=${VAULT_KNOWLEDGE_REPO_URL:-}
+      - QMD_INDEX_NAME=${QMD_INDEX_NAME:-knowledge}
+      - SYNC_INTERVAL=${VAULT_SYNC_INTERVAL:-300}
+      - VAULT_SYNC_INTERVAL=${VAULT_SYNC_INTERVAL:-300}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - HOST=0.0.0.0
+      - PORT=8000
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - QMD_DAEMON_URL=http://qmd-daemon:8181
+    depends_on:
+      qmd-daemon:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ── Vault MCP ──────────────────────────────────────────────────────────────
+  vault-mcp:
+    image: ghcr.io/arkhera/horus/vault-mcp:latest
+    ports:
+      - "${VAULT_MCP_PORT:-8300}:8300"
+    environment:
+      - VAULT_MCP_HTTP=true
+      - VAULT_MCP_PORT=8300
+      - VAULT_MCP_HOST=0.0.0.0
+      - KNOWLEDGE_SERVICE_URL=http://vault:8000
+    depends_on:
+      vault:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 64m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8300/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # ── Forge ──────────────────────────────────────────────────────────────────
+  forge:
+    image: ghcr.io/arkhera/horus/forge:latest
+    ports:
+      - "${FORGE_PORT:-8200}:8200"
+    volumes:
+      - ${HORUS_DATA_PATH}/registry:/data/registry:rw
+      - ${HORUS_DATA_PATH}/workspaces:/data/workspaces:rw
+      - ${HOST_REPOS_PATH}:/data/repos:ro
+    environment:
+      - FORGE_PORT=8200
+      - FORGE_HOST=0.0.0.0
+      - FORGE_REGISTRY_PATH=/data/registry
+      - FORGE_WORKSPACES_PATH=/data/workspaces
+      - FORGE_REGISTRY_REPO_URL=${FORGE_REGISTRY_REPO_URL:-}
+      - FORGE_SYNC_INTERVAL=${FORGE_SYNC_INTERVAL:-300}
+      - FORGE_ANVIL_URL=http://anvil:8100
+      - FORGE_VAULT_URL=http://vault-mcp:8300
+      - FORGE_HOST_WORKSPACES_PATH=${HORUS_DATA_PATH}/workspaces
+      - FORGE_HOST_REPOS_PATH=${HOST_REPOS_PATH}
+      - FORGE_HOST_ANVIL_URL=http://localhost:${ANVIL_PORT:-8100}
+      - FORGE_HOST_VAULT_URL=http://localhost:${VAULT_MCP_PORT:-8300}
+      - FORGE_HOST_FORGE_URL=http://localhost:${FORGE_PORT:-8200}
+      - FORGE_SCAN_PATHS=/data/repos
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    depends_on:
+      anvil:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  horus-net:
+    driver: bridge
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  qmd-daemon-data:
+  vault-workspace:
