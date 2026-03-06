@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { password, input, confirm, number } from '@inquirer/prompts';
+import { input, confirm, number } from '@inquirer/prompts';
 import {
   loadConfig,
   saveConfig,
@@ -20,7 +20,6 @@ import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
 export const setupCommand = new Command('setup')
   .description('Interactive first-run setup for Horus')
   .option('-y, --yes', 'Non-interactive mode (use defaults + env vars)')
-  .option('--api-key <key>', 'Anthropic API key')
   .option('--data-dir <path>', 'Data directory path')
   .option('--repos-path <path>', 'Host repos path for Forge scanning')
   .action(async (opts) => {
@@ -63,32 +62,14 @@ export const setupCommand = new Command('setup')
 
     if (opts.yes) {
       // Non-interactive mode
-      const apiKey = opts.apiKey || process.env.HORUS_API_KEY || '';
-      if (!apiKey) {
-        console.log(chalk.red('Error: API key is required.'));
-        console.log(chalk.dim('Set HORUS_API_KEY env var or use --api-key flag.'));
-        process.exit(1);
-      }
-
       config = {
         ...defaultConfig(),
-        api_key: apiKey,
         runtime: runtime.name,
         data_dir: opts.dataDir || DEFAULT_DATA_DIR,
         host_repos_path: opts.reposPath || '',
       };
     } else {
       // Interactive mode
-      const api_key = await password({
-        message: 'Anthropic API key:',
-        mask: '*',
-        validate: (val: string) => {
-          if (!val) return 'API key is required';
-          if (!val.startsWith('sk-ant-')) return 'API key must start with "sk-ant-"';
-          return true;
-        },
-      });
-
       const data_dir = await input({
         message: 'Data directory:',
         default: DEFAULT_DATA_DIR,
@@ -133,7 +114,6 @@ export const setupCommand = new Command('setup')
 
       config = {
         ...defaultConfig(),
-        api_key,
         data_dir,
         host_repos_path,
         runtime: runtime.name,

@@ -254,17 +254,6 @@ async function checkServices(runtime: Awaited<ReturnType<typeof detectRuntime>>)
   return results;
 }
 
-function checkApiKey(config: ReturnType<typeof loadConfig>): CheckResult {
-  if (config.api_key && config.api_key.length > 0) {
-    return { status: 'pass', label: 'API key', message: 'API key is configured' };
-  }
-  return {
-    status: 'warn',
-    label: 'API key',
-    message: 'API key is not set',
-    hint: 'Run: horus config set api-key <your-key>',
-  };
-}
 
 // ── Doctor command ────────────────────────────────────────────────────────────
 
@@ -306,12 +295,7 @@ export const doctorCommand = new Command('doctor')
     // 7. Disk space
     allResults.push(checkDiskSpace(dataDir));
 
-    // 8. API key
-    if (config) {
-      allResults.push(checkApiKey(config));
-    }
-
-    // 9. Services (only if runtime + compose are ok)
+    // 8. Services (only if runtime + compose are ok)
     const runtimeOk = allResults[0].status !== 'fail';
     const composeOk = allResults[1].status !== 'fail';
     if (runtimeOk && composeOk) {

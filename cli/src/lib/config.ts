@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import {
@@ -16,7 +16,6 @@ import {
 
 export interface Config {
   version: string;
-  api_key: string;
   data_dir: string;
   runtime: 'docker' | 'podman';
   ports: {
@@ -39,7 +38,6 @@ export interface Config {
 export function defaultConfig(): Config {
   return {
     version: CONFIG_VERSION,
-    api_key: '',
     data_dir: DEFAULT_DATA_DIR,
     runtime: 'docker',
     ports: { ...DEFAULT_PORTS },
@@ -76,7 +74,6 @@ export function loadConfig(): Config {
 
   return {
     version: parsed.version ?? defaults.version,
-    api_key: parsed.api_key ?? defaults.api_key,
     data_dir: parsed.data_dir ?? defaults.data_dir,
     runtime: parsed.runtime ?? defaults.runtime,
     ports: {
@@ -166,7 +163,6 @@ export function writeEnvFile(config: Config): void {
  * Supported config keys for `horus config get/set`.
  */
 export const CONFIG_KEYS = [
-  'api-key',
   'data-dir',
   'host-repos-path',
   'runtime',
@@ -184,8 +180,6 @@ export type ConfigKey = (typeof CONFIG_KEYS)[number];
  */
 export function getConfigValue(config: Config, key: ConfigKey): string {
   switch (key) {
-    case 'api-key':
-      return config.api_key;
     case 'data-dir':
       return config.data_dir;
     case 'host-repos-path':
@@ -212,9 +206,6 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
   const updated = { ...config };
 
   switch (key) {
-    case 'api-key':
-      updated.api_key = value;
-      break;
     case 'data-dir':
       updated.data_dir = value;
       break;
