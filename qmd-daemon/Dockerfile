@@ -18,9 +18,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # — mount qmd-daemon-data volume at /home/qmd/.cache/qmd for persistence.
 RUN useradd -ms /bin/bash qmd
 
-# Install QMD globally; fix permissions so qmd user can write node-llama-cpp
-# build/cache directories at runtime.
-RUN npm install -g @tobilu/qmd && \
+# Install QMD from upstream git (v1.1.0+ with REST /query endpoint).
+# Clone → build → pack tarball → install globally (avoids symlink issues).
+RUN git clone --depth 1 https://github.com/tobi/qmd.git /tmp/qmd && \
+    cd /tmp/qmd && npm install && npm run build && \
+    npm pack && npm install -g tobilu-qmd-*.tgz && \
+    rm -rf /tmp/qmd && \
     chmod -R a+rwX /usr/local/lib/node_modules/@tobilu/qmd/node_modules/node-llama-cpp/ || \
     echo "QMD llama-cpp permission fix failed (non-fatal)"
 
