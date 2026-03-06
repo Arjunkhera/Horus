@@ -1,7 +1,7 @@
 {
   "name": "@horus/cli",
   "version": "0.1.0",
-  "description": "CLI for managing the Horus Docker Compose stack",
+  "description": "CLI for managing the Horus AI development stack",
   "type": "module",
   "bin": {
     "horus": "./dist/index.js"
@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@inquirer/prompts": "^7.0.0",
     "commander": "^12.0.0",
-    "inquirer": "^9.0.0",
     "execa": "^8.0.0",
     "chalk": "^5.0.0",
     "yaml": "^2.0.0",
@@ -31,11 +31,25 @@
     "dist",
     "compose"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arjunkhera/Horus.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/Arjunkhera/Horus#readme",
+  "bugs": {
+    "url": "https://github.com/Arjunkhera/Horus/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "horus",
     "cli",
     "docker",
-    "mcp"
+    "mcp",
+    "claude",
+    "ai"
   ],
   "license": "MIT"
 }

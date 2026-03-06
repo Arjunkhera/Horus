@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import inquirer from 'inquirer';
+import { select, confirm } from '@inquirer/prompts';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -145,27 +145,19 @@ export const updateCommand = new Command('update')
           name: `${snapshot.timestamp}  (images: ${Object.keys(snapshot.images).length})`,
           value: i,
         }));
-        const { idx } = await inquirer.prompt([
-          {
-            type: 'list',
-            name: 'idx',
-            message: 'Select snapshot to restore:',
-            choices,
-          },
-        ]);
-        snapshotToRestore = snapshots[idx as number].snapshot;
+        const idx = await select<number>({
+          message: 'Select snapshot to restore:',
+          choices,
+        });
+        snapshotToRestore = snapshots[idx].snapshot;
       }
 
       if (!opts.yes) {
-        const { confirm } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'confirm',
-            message: `Roll back to snapshot from ${snapshotToRestore.timestamp}? This will restart services.`,
-            default: false,
-          },
-        ]);
-        if (!confirm) {
+        const confirmed = await confirm({
+          message: `Roll back to snapshot from ${snapshotToRestore.timestamp}? This will restart services.`,
+          default: false,
+        });
+        if (!confirmed) {
           console.log(chalk.dim('Rollback cancelled.'));
           return;
         }
@@ -247,15 +239,11 @@ export const updateCommand = new Command('update')
     console.log('');
 
     if (!opts.yes) {
-      const { confirm } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'confirm',
-          message: 'Pull latest images and restart services?',
-          default: true,
-        },
-      ]);
-      if (!confirm) {
+      const confirmed = await confirm({
+        message: 'Pull latest images and restart services?',
+        default: true,
+      });
+      if (!confirmed) {
         console.log(chalk.dim('Update cancelled.'));
         return;
       }

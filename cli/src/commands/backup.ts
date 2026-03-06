@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import inquirer from 'inquirer';
+import { confirm } from '@inquirer/prompts';
 import { mkdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { execSync } from 'node:child_process';
@@ -51,15 +51,11 @@ async function createBackup(yes: boolean): Promise<void> {
   }
 
   if (!yes) {
-    const { confirm } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'confirm',
-        message: 'This will briefly stop services to create a consistent backup. Continue?',
-        default: true,
-      },
-    ]);
-    if (!confirm) {
+    const confirmed = await confirm({
+      message: 'This will briefly stop services to create a consistent backup. Continue?',
+      default: true,
+    });
+    if (!confirmed) {
       console.log(chalk.dim('Backup cancelled.'));
       return;
     }
@@ -166,15 +162,11 @@ async function restoreBackup(file: string, yes: boolean): Promise<void> {
   if (!yes) {
     console.log(chalk.yellow(`  Warning: This will overwrite current data in ${config.data_dir}`));
     console.log('');
-    const { confirm } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'confirm',
-        message: `Restore from ${basename(file)}? Current data will be overwritten.`,
-        default: false,
-      },
-    ]);
-    if (!confirm) {
+    const confirmed = await confirm({
+      message: `Restore from ${basename(file)}? Current data will be overwritten.`,
+      default: false,
+    });
+    if (!confirmed) {
       console.log(chalk.dim('Restore cancelled.'));
       return;
     }
