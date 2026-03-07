@@ -14,16 +14,16 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
+    "chalk": "^5.0.0",
     "commander": "^12.0.0",
     "execa": "^8.0.0",
-    "chalk": "^5.0.0",
-    "yaml": "^2.0.0",
-    "ora": "^8.0.0"
+    "ora": "^8.0.0",
+    "yaml": "^2.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "tsup": "^8.0.0",
     "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
     "vitest": "^4.0.18"
   },
   "engines": {
