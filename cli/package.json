@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsup src/index.ts --format esm --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
@@ -22,7 +23,8 @@
   "devDependencies": {
     "typescript": "^5.4.0",
     "tsup": "^8.0.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=18"

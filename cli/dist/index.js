@@ -1,0 +1,1827 @@
+#!/usr/bin/env node
+
+// src/index.ts
+import { Command as Command10 } from "commander";
+import chalk10 from "chalk";
+
+// src/commands/setup.ts
+import { Command } from "commander";
+import chalk from "chalk";
+import ora from "ora";
+import { password, input, confirm, number, select } from "@inquirer/prompts";
+
+// src/lib/config.ts
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { resolve } from "path";
+import { homedir as homedir2 } from "os";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+
+// src/lib/constants.ts
+import { homedir } from "os";
+import { join } from "path";
+var HORUS_DIR = join(homedir(), ".horus");
+var CONFIG_PATH = join(HORUS_DIR, "config.yaml");
+var ENV_PATH = join(HORUS_DIR, ".env");
+var COMPOSE_PATH = join(HORUS_DIR, "docker-compose.yml");
+var DEFAULT_PORTS = {
+  anvil: 8100,
+  vault_rest: 8e3,
+  vault_mcp: 8300,
+  forge: 8200
+};
+var DEFAULT_REPOS = {
+  anvil_notes: "",
+  vault_knowledge: "https://github.com/arkhera/knowledge-base",
+  forge_registry: "https://github.com/arkhera/Forge-Registry"
+};
+var DEFAULT_DATA_DIR = join(homedir(), ".horus", "data");
+var SERVICES = [
+  "qmd-daemon",
+  "anvil",
+  "vault",
+  "vault-mcp",
+  "forge"
+];
+var CONFIG_VERSION = "1.0";
+
+// src/lib/config.ts
+function defaultConfig() {
+  return {
+    version: CONFIG_VERSION,
+    api_key: "",
+    data_dir: DEFAULT_DATA_DIR,
+    runtime: "docker",
+    ports: { ...DEFAULT_PORTS },
+    repos: { ...DEFAULT_REPOS },
+    host_repos_path: "",
+    github_token: ""
+  };
+}
+function ensureHorusDir() {
+  mkdirSync(HORUS_DIR, { recursive: true });
+}
+function configExists() {
+  return existsSync(CONFIG_PATH);
+}
+function loadConfig() {
+  if (!existsSync(CONFIG_PATH)) {
+    return defaultConfig();
+  }
+  const raw = readFileSync(CONFIG_PATH, "utf-8");
+  const parsed = parseYaml(raw);
+  const defaults = defaultConfig();
+  return {
+    version: parsed.version ?? defaults.version,
+    api_key: parsed.api_key ?? defaults.api_key,
+    data_dir: parsed.data_dir ?? defaults.data_dir,
+    runtime: parsed.runtime ?? defaults.runtime,
+    ports: {
+      anvil: parsed.ports?.anvil ?? defaults.ports.anvil,
+      vault_rest: parsed.ports?.vault_rest ?? defaults.ports.vault_rest,
+      vault_mcp: parsed.ports?.vault_mcp ?? defaults.ports.vault_mcp,
+      forge: parsed.ports?.forge ?? defaults.ports.forge
+    },
+    repos: {
+      anvil_notes: parsed.repos?.anvil_notes ?? defaults.repos.anvil_notes,
+      vault_knowledge: parsed.repos?.vault_knowledge ?? defaults.repos.vault_knowledge,
+      forge_registry: parsed.repos?.forge_registry ?? defaults.repos.forge_registry
+    },
+    host_repos_path: parsed.host_repos_path ?? defaults.host_repos_path,
+    github_token: parsed.github_token ?? defaults.github_token
+  };
+}
+function saveConfig(config) {
+  ensureHorusDir();
+  const yaml = stringifyYaml(config, { lineWidth: 0 });
+  writeFileSync(CONFIG_PATH, yaml, "utf-8");
+}
+function resolvePath(p) {
+  if (p.startsWith("~")) {
+    return resolve(homedir2(), p.slice(2));
+  }
+  return resolve(p);
+}
+function generateEnv(config) {
+  const dataDir = resolvePath(config.data_dir);
+  const hostReposPath = config.host_repos_path ? resolvePath(config.host_repos_path) : "";
+  const lines = [
+    "# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "# Horus \u2014 Generated .env file",
+    "# Do not edit manually. Use `horus config set <key> <value>` instead.",
+    "# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "",
+    `HORUS_DATA_PATH=${dataDir}`,
+    `HOST_REPOS_PATH=${hostReposPath}`,
+    "",
+    "# Ports",
+    `ANVIL_PORT=${config.ports.anvil}`,
+    `VAULT_PORT=${config.ports.vault_rest}`,
+    `VAULT_MCP_PORT=${config.ports.vault_mcp}`,
+    `FORGE_PORT=${config.ports.forge}`,
+    "",
+    "# Auth",
+    `GITHUB_TOKEN=${config.github_token}`,
+    "",
+    "# Repository URLs",
+    `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
+    `VAULT_KNOWLEDGE_REPO_URL=${config.repos.vault_knowledge}`,
+    `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
+    ""
+  ];
+  return lines.join("\n");
+}
+function writeEnvFile(config) {
+  ensureHorusDir();
+  const content = generateEnv(config);
+  writeFileSync(ENV_PATH, content, "utf-8");
+}
+var CONFIG_KEYS = [
+  "api-key",
+  "data-dir",
+  "host-repos-path",
+  "runtime",
+  "port.anvil",
+  "port.vault-rest",
+  "port.vault-mcp",
+  "port.forge",
+  "github-token"
+];
+function getConfigValue(config, key) {
+  switch (key) {
+    case "api-key":
+      return config.api_key;
+    case "data-dir":
+      return config.data_dir;
+    case "host-repos-path":
+      return config.host_repos_path;
+    case "runtime":
+      return config.runtime;
+    case "port.anvil":
+      return String(config.ports.anvil);
+    case "port.vault-rest":
+      return String(config.ports.vault_rest);
+    case "port.vault-mcp":
+      return String(config.ports.vault_mcp);
+    case "port.forge":
+      return String(config.ports.forge);
+    case "github-token":
+      return config.github_token;
+  }
+}
+function setConfigValue(config, key, value) {
+  const updated = { ...config };
+  switch (key) {
+    case "api-key":
+      updated.api_key = value;
+      break;
+    case "data-dir":
+      updated.data_dir = value;
+      break;
+    case "host-repos-path":
+      updated.host_repos_path = value;
+      break;
+    case "runtime":
+      if (value !== "docker" && value !== "podman") {
+        throw new Error(`Invalid runtime: ${value}. Must be "docker" or "podman".`);
+      }
+      updated.runtime = value;
+      break;
+    case "port.anvil":
+      updated.ports = { ...updated.ports, anvil: parseInt(value, 10) };
+      break;
+    case "port.vault-rest":
+      updated.ports = { ...updated.ports, vault_rest: parseInt(value, 10) };
+      break;
+    case "port.vault-mcp":
+      updated.ports = { ...updated.ports, vault_mcp: parseInt(value, 10) };
+      break;
+    case "port.forge":
+      updated.ports = { ...updated.ports, forge: parseInt(value, 10) };
+      break;
+    case "github-token":
+      updated.github_token = value;
+      break;
+  }
+  return updated;
+}
+function maskApiKey(key) {
+  if (!key || key.length < 12) return key ? "****" : "(not set)";
+  return `${key.slice(0, 7)}...${key.slice(-4)}`;
+}
+
+// src/lib/runtime.ts
+import { execa } from "execa";
+function toResult(result) {
+  return {
+    stdout: result.stdout?.toString() ?? "",
+    stderr: result.stderr?.toString() ?? "",
+    exitCode: result.exitCode ?? 0
+  };
+}
+async function tryCommand(command, args) {
+  try {
+    const result = await execa(command, args, { reject: false });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+async function commandExists(command) {
+  try {
+    await execa(command, ["--version"], { reject: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function createRuntime(name) {
+  const bin = name;
+  return {
+    name,
+    async compose(...args) {
+      const result = await execa(bin, ["compose", ...args], {
+        cwd: HORUS_DIR,
+        reject: false
+      });
+      if (result.exitCode !== 0) {
+        const error = new Error(
+          `${bin} compose ${args.join(" ")} failed (exit ${result.exitCode}): ${result.stderr}`
+        );
+        error.result = toResult(result);
+        throw error;
+      }
+      return toResult(result);
+    },
+    async exec(container, ...cmd) {
+      const result = await execa(bin, ["exec", container, ...cmd], {
+        reject: false
+      });
+      return toResult(result);
+    },
+    async inspect(container, format) {
+      const result = await execa(bin, ["inspect", "--format", format, container], {
+        reject: false
+      });
+      return result.stdout?.toString().trim() ?? "";
+    },
+    async isRunning() {
+      try {
+        const result = await execa(bin, ["compose", "ps", "--format", "json"], {
+          cwd: HORUS_DIR,
+          reject: false
+        });
+        return result.exitCode === 0 && result.stdout.toString().trim().length > 0;
+      } catch {
+        return false;
+      }
+    }
+  };
+}
+async function detectRuntime(preferred) {
+  if (preferred) {
+    const hasPreferred = await tryCommand(preferred, ["compose", "version"]);
+    if (hasPreferred) {
+      return createRuntime(preferred);
+    }
+  }
+  const hasDocker = await tryCommand("docker", ["compose", "version"]);
+  if (hasDocker) {
+    return createRuntime("docker");
+  }
+  const hasPodman = await tryCommand("podman", ["compose", "version"]);
+  if (hasPodman) {
+    return createRuntime("podman");
+  }
+  const podmanInstalled = await commandExists("podman");
+  if (podmanInstalled) {
+    throw new Error(
+      "Podman is installed but `podman compose` is not working.\n\nFix options:\n  1. Ensure your Podman machine is running:  podman machine start\n  2. Install podman-compose:                 pip3 install podman-compose\n  3. Upgrade Podman to v5+:                  brew upgrade podman\n"
+    );
+  }
+  throw new Error(
+    "No container runtime found.\n\nHorus requires Docker or Podman with the Compose plugin.\n\nInstall one of:\n  - Docker Desktop: https://www.docker.com/products/docker-desktop/\n  - Podman Desktop:  https://podman-desktop.io/\n"
+  );
+}
+async function composeStreaming(runtime, args) {
+  const bin = runtime.name;
+  const result = await execa(bin, ["compose", ...args], {
+    cwd: HORUS_DIR,
+    stdio: "inherit",
+    reject: false
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`${bin} compose ${args.join(" ")} failed with exit code ${result.exitCode}`);
+  }
+}
+
+// src/lib/health.ts
+async function checkContainerHealth(runtime, service) {
+  const containerName = `horus-${service}-1`;
+  try {
+    const status = await runtime.inspect(containerName, "{{.State.Health.Status}}");
+    const mappedStatus = mapStatus(status);
+    return { name: service, status: mappedStatus };
+  } catch {
+    return { name: service, status: "stopped" };
+  }
+}
+function mapStatus(raw) {
+  switch (raw.trim().toLowerCase()) {
+    case "healthy":
+      return "healthy";
+    case "starting":
+      return "starting";
+    case "unhealthy":
+      return "unhealthy";
+    default:
+      return "unknown";
+  }
+}
+async function checkAllHealth(runtime) {
+  const results = await Promise.all(
+    SERVICES.map((service) => checkContainerHealth(runtime, service))
+  );
+  return results;
+}
+async function pollUntilHealthy(runtime, onUpdate, timeoutMs = 6e5, intervalMs = 5e3) {
+  const startTime = Date.now();
+  while (true) {
+    const states = await checkAllHealth(runtime);
+    if (onUpdate) {
+      onUpdate(states);
+    }
+    const allHealthy = states.every((s) => s.status === "healthy");
+    if (allHealthy) {
+      return states;
+    }
+    const hasUnhealthy = states.some((s) => s.status === "unhealthy");
+    if (hasUnhealthy) {
+      const unhealthyServices = states.filter((s) => s.status === "unhealthy").map((s) => s.name).join(", ");
+      throw new Error(
+        `Services failed health check: ${unhealthyServices}
+Run 'docker compose logs <service>' from ~/.horus/ to investigate.`
+      );
+    }
+    const elapsed = Date.now() - startTime;
+    if (elapsed >= timeoutMs) {
+      const notReady = states.filter((s) => s.status !== "healthy").map((s) => `${s.name} (${s.status})`).join(", ");
+      throw new Error(
+        `Timed out after ${Math.round(timeoutMs / 1e3)}s waiting for services: ${notReady}
+Run 'docker compose logs' from ~/.horus/ to investigate.`
+      );
+    }
+    await new Promise((resolve2) => setTimeout(resolve2, intervalMs));
+  }
+}
+
+// src/lib/compose.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
+import { join as join2, dirname as dirname2 } from "path";
+import { fileURLToPath } from "url";
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = dirname2(__filename);
+function getBundledComposePath() {
+  const candidates = [
+    join2(__dirname, "..", "..", "compose", "docker-compose.yml"),
+    join2(__dirname, "..", "compose", "docker-compose.yml")
+  ];
+  for (const candidate of candidates) {
+    if (existsSync2(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(
+    `Bundled docker-compose.yml not found. The CLI package may be corrupted.
+Searched: ${candidates.join(", ")}`
+  );
+}
+function composeFileExists() {
+  return existsSync2(COMPOSE_PATH);
+}
+function installComposeFile() {
+  ensureHorusDir();
+  const bundledPath = getBundledComposePath();
+  const content = readFileSync2(bundledPath, "utf-8");
+  writeFileSync2(COMPOSE_PATH, content, "utf-8");
+}
+
+// src/commands/setup.ts
+var setupCommand = new Command("setup").description("Interactive first-run setup for Horus").option("-y, --yes", "Non-interactive mode (use defaults + env vars)").option("--api-key <key>", "Anthropic API key").option("--data-dir <path>", "Data directory path").option("--repos-path <path>", "Host repos path for Forge scanning").option("--runtime <runtime>", "Container runtime to use (docker|podman)").action(async (opts) => {
+  console.log("");
+  console.log(chalk.bold("Horus Setup"));
+  console.log(chalk.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log("");
+  if (configExists()) {
+    if (opts.yes) {
+      console.log(chalk.yellow("Existing configuration found. Overwriting in non-interactive mode."));
+    } else {
+      const proceed = await confirm({
+        message: "Horus is already configured. Reconfigure?",
+        default: false
+      });
+      if (!proceed) {
+        console.log(chalk.dim("Setup cancelled."));
+        return;
+      }
+    }
+  }
+  let preferredRuntime;
+  if (opts.runtime) {
+    if (opts.runtime !== "docker" && opts.runtime !== "podman") {
+      console.log(chalk.red(`Invalid runtime "${opts.runtime}". Must be "docker" or "podman".`));
+      process.exit(1);
+    }
+    preferredRuntime = opts.runtime;
+  } else if (!opts.yes) {
+    preferredRuntime = await select({
+      message: "Which container runtime would you like to use?",
+      choices: [
+        { name: "Docker", value: "docker" },
+        { name: "Podman", value: "podman" }
+      ],
+      default: "docker"
+    });
+  }
+  const runtimeSpinner = ora("Detecting container runtime...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(preferredRuntime);
+    runtimeSpinner.succeed(`Using ${chalk.cyan(runtime.name)}`);
+  } catch (error) {
+    runtimeSpinner.fail("Container runtime not available");
+    console.log("");
+    console.log(error.message);
+    process.exit(1);
+  }
+  let config;
+  if (opts.yes) {
+    const apiKey = opts.apiKey || process.env.HORUS_API_KEY || "";
+    if (!apiKey) {
+      console.log(chalk.red("Error: API key is required."));
+      console.log(chalk.dim("Set HORUS_API_KEY env var or use --api-key flag."));
+      process.exit(1);
+    }
+    config = {
+      ...defaultConfig(),
+      api_key: apiKey,
+      runtime: runtime.name,
+      data_dir: opts.dataDir || DEFAULT_DATA_DIR,
+      host_repos_path: opts.reposPath || ""
+    };
+  } else {
+    const api_key = await password({
+      message: "Anthropic API key:",
+      mask: "*",
+      validate: (val) => {
+        if (!val) return "API key is required";
+        if (!val.startsWith("sk-ant-")) return 'API key must start with "sk-ant-"';
+        return true;
+      }
+    });
+    const data_dir = await input({
+      message: "Data directory:",
+      default: DEFAULT_DATA_DIR
+    });
+    const host_repos_path = await input({
+      message: "Host repos path (for Forge repo scanning, leave empty to skip):",
+      default: ""
+    });
+    const customize_ports = await confirm({
+      message: "Customize port assignments?",
+      default: false
+    });
+    let ports = { ...DEFAULT_PORTS };
+    if (customize_ports) {
+      const anvil = await number({
+        message: "Anvil port:",
+        default: DEFAULT_PORTS.anvil
+      });
+      const vault_rest = await number({
+        message: "Vault REST port:",
+        default: DEFAULT_PORTS.vault_rest
+      });
+      const vault_mcp = await number({
+        message: "Vault MCP port:",
+        default: DEFAULT_PORTS.vault_mcp
+      });
+      const forge = await number({
+        message: "Forge port:",
+        default: DEFAULT_PORTS.forge
+      });
+      ports = {
+        anvil: anvil ?? DEFAULT_PORTS.anvil,
+        vault_rest: vault_rest ?? DEFAULT_PORTS.vault_rest,
+        vault_mcp: vault_mcp ?? DEFAULT_PORTS.vault_mcp,
+        forge: forge ?? DEFAULT_PORTS.forge
+      };
+    }
+    config = {
+      ...defaultConfig(),
+      api_key,
+      data_dir,
+      host_repos_path,
+      runtime: runtime.name,
+      ports
+    };
+  }
+  const configSpinner = ora("Saving configuration...").start();
+  try {
+    saveConfig(config);
+    configSpinner.succeed("Configuration saved to ~/.horus/config.yaml");
+  } catch (error) {
+    configSpinner.fail("Failed to save configuration");
+    console.error(error.message);
+    process.exit(1);
+  }
+  const envSpinner = ora("Generating .env file...").start();
+  try {
+    writeEnvFile(config);
+    envSpinner.succeed("Environment file written to ~/.horus/.env");
+  } catch (error) {
+    envSpinner.fail("Failed to generate .env");
+    console.error(error.message);
+    process.exit(1);
+  }
+  const composeSpinner = ora("Installing docker-compose.yml...").start();
+  try {
+    installComposeFile();
+    composeSpinner.succeed("Compose file installed to ~/.horus/docker-compose.yml");
+  } catch (error) {
+    composeSpinner.fail("Failed to install compose file");
+    console.error(error.message);
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk.bold("Pulling container images..."));
+  try {
+    await composeStreaming(runtime, ["pull"]);
+  } catch (error) {
+    console.log(chalk.red("Failed to pull images."));
+    console.log(chalk.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk.bold("Starting Horus services..."));
+  try {
+    await composeStreaming(runtime, ["up", "-d"]);
+  } catch (error) {
+    console.log(chalk.red("Failed to start services."));
+    console.log(chalk.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  const healthSpinner = ora("Waiting for services to become healthy...").start();
+  let lastStates = [];
+  try {
+    const states = await pollUntilHealthy(
+      runtime,
+      (current) => {
+        lastStates = current;
+        const summary = current.map((s) => {
+          const icon = s.status === "healthy" ? chalk.green("*") : s.status === "starting" ? chalk.yellow("~") : chalk.red("x");
+          return `${icon} ${s.name}`;
+        }).join("  ");
+        healthSpinner.text = `Waiting for services...  ${summary}`;
+      },
+      6e5,
+      5e3
+    );
+    healthSpinner.succeed("All services are healthy");
+    lastStates = states;
+  } catch (error) {
+    healthSpinner.fail("Some services did not become healthy");
+    console.log(chalk.dim(error.message));
+    console.log("");
+    console.log(chalk.dim("Tip: Check logs with `docker compose logs` from ~/.horus/"));
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk.bold.green("Setup complete!"));
+  console.log(chalk.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log("");
+  console.log(`  ${chalk.bold("Runtime:")}    ${runtime.name}`);
+  console.log(`  ${chalk.bold("Config:")}     ~/.horus/config.yaml`);
+  console.log(`  ${chalk.bold("Data:")}       ${config.data_dir}`);
+  console.log("");
+  console.log(chalk.bold("  Service URLs:"));
+  console.log(`    Anvil:      http://localhost:${config.ports.anvil}`);
+  console.log(`    Vault REST: http://localhost:${config.ports.vault_rest}`);
+  console.log(`    Vault MCP:  http://localhost:${config.ports.vault_mcp}`);
+  console.log(`    Forge:      http://localhost:${config.ports.forge}`);
+  console.log("");
+});
+
+// src/commands/up.ts
+import { Command as Command2 } from "commander";
+import chalk2 from "chalk";
+import ora2 from "ora";
+var upCommand = new Command2("up").description("Start the Horus stack").action(async () => {
+  if (!configExists() || !composeFileExists()) {
+    console.log(chalk2.red("Horus is not set up yet."));
+    console.log(chalk2.dim("Run `horus setup` first."));
+    process.exit(1);
+  }
+  const config = loadConfig();
+  const spinner = ora2("Detecting runtime...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(config.runtime);
+    spinner.succeed(`Using ${chalk2.cyan(runtime.name)}`);
+  } catch (error) {
+    spinner.fail("No container runtime found");
+    console.log(error.message);
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk2.bold("Starting Horus services..."));
+  try {
+    await composeStreaming(runtime, ["up", "-d"]);
+  } catch (error) {
+    console.log(chalk2.red("Failed to start services."));
+    console.log(chalk2.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  const statusSpinner = ora2("Checking service status...").start();
+  try {
+    const states = await checkAllHealth(runtime);
+    statusSpinner.stop();
+    console.log(chalk2.bold("Service Status:"));
+    for (const s of states) {
+      const color = s.status === "healthy" ? chalk2.green : s.status === "starting" ? chalk2.yellow : chalk2.red;
+      console.log(`  ${color(s.status.padEnd(10))} ${s.name}`);
+    }
+    const allHealthy = states.every((s) => s.status === "healthy");
+    if (!allHealthy) {
+      console.log("");
+      console.log(
+        chalk2.yellow("Some services are still starting. Run `horus status` to check progress.")
+      );
+    }
+  } catch {
+    statusSpinner.warn("Could not check service status");
+  }
+  console.log("");
+});
+
+// src/commands/down.ts
+import { Command as Command3 } from "commander";
+import chalk3 from "chalk";
+import ora3 from "ora";
+var downCommand = new Command3("down").description("Stop the Horus stack").action(async () => {
+  if (!configExists() || !composeFileExists()) {
+    console.log(chalk3.red("Horus is not set up yet."));
+    console.log(chalk3.dim("Run `horus setup` first."));
+    process.exit(1);
+  }
+  const config = loadConfig();
+  const spinner = ora3("Detecting runtime...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(config.runtime);
+    spinner.succeed(`Using ${chalk3.cyan(runtime.name)}`);
+  } catch (error) {
+    spinner.fail("No container runtime found");
+    console.log(error.message);
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk3.bold("Stopping Horus services..."));
+  try {
+    await composeStreaming(runtime, ["down"]);
+  } catch (error) {
+    console.log(chalk3.red("Failed to stop services."));
+    console.log(chalk3.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk3.green("All services stopped."));
+  console.log(chalk3.dim("Data volumes have been preserved. Run `horus up` to restart."));
+  console.log("");
+});
+
+// src/commands/status.ts
+import { Command as Command4 } from "commander";
+import chalk4 from "chalk";
+import ora4 from "ora";
+var statusCommand = new Command4("status").description("Show status of Horus services").action(async () => {
+  if (!configExists() || !composeFileExists()) {
+    console.log(chalk4.red("Horus is not set up yet."));
+    console.log(chalk4.dim("Run `horus setup` first."));
+    process.exit(1);
+  }
+  const config = loadConfig();
+  const spinner = ora4("Checking services...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(config.runtime);
+  } catch (error) {
+    spinner.fail("No container runtime found");
+    console.log(error.message);
+    process.exit(1);
+    return;
+  }
+  let containers = [];
+  try {
+    const result = await runtime.compose("ps", "--format", "json");
+    const output = result.stdout.trim();
+    if (output) {
+      containers = output.split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
+    }
+  } catch {
+  }
+  spinner.stop();
+  console.log("");
+  console.log(chalk4.bold("Horus Status"));
+  console.log(chalk4.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log(`  ${chalk4.bold("Version:")}  ${config.version}`);
+  console.log(`  ${chalk4.bold("Runtime:")}  ${runtime.name}`);
+  console.log(`  ${chalk4.bold("Config:")}   ~/.horus/config.yaml`);
+  console.log("");
+  if (containers.length === 0) {
+    console.log(chalk4.yellow("  No services are running."));
+    console.log(chalk4.dim("  Run `horus up` to start the stack."));
+    console.log("");
+    return;
+  }
+  const header = `  ${pad("SERVICE", 14)} ${pad("STATUS", 12)} ${pad("PORTS", 20)} ${pad("UPTIME", 20)}`;
+  console.log(chalk4.bold(header));
+  console.log(chalk4.dim("  " + "\u2500".repeat(66)));
+  for (const service of SERVICES) {
+    const container = containers.find(
+      (c) => c.Service === service || c.Name?.includes(service)
+    );
+    if (!container) {
+      console.log(
+        `  ${pad(service, 14)} ${chalk4.red(pad("stopped", 12))} ${pad("-", 20)} ${pad("-", 20)}`
+      );
+      continue;
+    }
+    const healthStatus = container.Health || container.State || "unknown";
+    const statusColor = getStatusColor(healthStatus);
+    const displayStatus = statusColor(pad(healthStatus, 12));
+    const ports = formatPorts(container.Publishers);
+    const uptime = extractUptime(container.Status);
+    console.log(`  ${pad(service, 14)} ${displayStatus} ${pad(ports, 20)} ${pad(uptime, 20)}`);
+  }
+  console.log("");
+});
+function pad(str, width) {
+  return str.padEnd(width);
+}
+function getStatusColor(status) {
+  const lower = status.toLowerCase();
+  if (lower === "healthy" || lower === "running") return chalk4.green;
+  if (lower === "starting") return chalk4.yellow;
+  return chalk4.red;
+}
+function formatPorts(publishers) {
+  if (!publishers || publishers.length === 0) return "-";
+  const mapped = publishers.filter((p) => p.PublishedPort > 0).map((p) => `${p.PublishedPort}:${p.TargetPort}`).filter((v, i, a) => a.indexOf(v) === i);
+  return mapped.length > 0 ? mapped.join(", ") : "-";
+}
+function extractUptime(status) {
+  if (!status) return "-";
+  const match = status.match(/^Up\s+(.+?)(?:\s*\(.*\))?$/i);
+  if (match) return match[1].trim();
+  return status;
+}
+
+// src/commands/config.ts
+import { Command as Command5 } from "commander";
+import chalk5 from "chalk";
+import { confirm as confirm2 } from "@inquirer/prompts";
+var configCommand = new Command5("config").description("View or modify Horus configuration").action(async () => {
+  if (!configExists()) {
+    console.log(chalk5.red("Horus is not configured yet."));
+    console.log(chalk5.dim("Run `horus setup` first."));
+    process.exit(1);
+  }
+  const config = loadConfig();
+  console.log("");
+  console.log(chalk5.bold("Horus Configuration"));
+  console.log(chalk5.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log(`  ${chalk5.bold("version:")}          ${config.version}`);
+  console.log(`  ${chalk5.bold("api-key:")}          ${maskApiKey(config.api_key)}`);
+  console.log(`  ${chalk5.bold("data-dir:")}         ${config.data_dir}`);
+  console.log(`  ${chalk5.bold("runtime:")}          ${config.runtime}`);
+  console.log(`  ${chalk5.bold("host-repos-path:")}  ${config.host_repos_path || chalk5.dim("(not set)")}`);
+  console.log(`  ${chalk5.bold("github-token:")}     ${config.github_token ? maskApiKey(config.github_token) : chalk5.dim("(not set)")}`);
+  console.log("");
+  console.log(chalk5.bold("  Ports:"));
+  console.log(`    ${chalk5.bold("anvil:")}       ${config.ports.anvil}`);
+  console.log(`    ${chalk5.bold("vault-rest:")}  ${config.ports.vault_rest}`);
+  console.log(`    ${chalk5.bold("vault-mcp:")}   ${config.ports.vault_mcp}`);
+  console.log(`    ${chalk5.bold("forge:")}       ${config.ports.forge}`);
+  console.log("");
+  console.log(chalk5.bold("  Repos:"));
+  console.log(`    ${chalk5.bold("anvil-notes:")}      ${config.repos.anvil_notes || chalk5.dim("(not set)")}`);
+  console.log(`    ${chalk5.bold("vault-knowledge:")}  ${config.repos.vault_knowledge || chalk5.dim("(not set)")}`);
+  console.log(`    ${chalk5.bold("forge-registry:")}   ${config.repos.forge_registry || chalk5.dim("(not set)")}`);
+  console.log("");
+  console.log(chalk5.dim(`  Config file: ~/.horus/config.yaml`));
+  console.log(chalk5.dim(`  Use 'horus config get <key>' or 'horus config set <key> <value>'`));
+  console.log("");
+});
+configCommand.command("get <key>").description("Get a configuration value").action(async (key) => {
+  if (!configExists()) {
+    console.log(chalk5.red("Horus is not configured yet."));
+    console.log(chalk5.dim("Run `horus setup` first."));
+    process.exit(1);
+  }
+  if (!isValidKey(key)) {
+    console.log(chalk5.red(`Unknown config key: ${key}`));
+    console.log(chalk5.dim(`Valid keys: ${CONFIG_KEYS.join(", ")}`));
+    process.exit(1);
+  }
+  const config = loadConfig();
+  const value = getConfigValue(config, key);
+  if (key === "api-key" || key === "github-token") {
+    console.log(maskApiKey(value));
+  } else {
+    console.log(value || "");
+  }
+});
+configCommand.command("set <key> <value>").description("Set a configuration value").action(async (key, value) => {
+  if (!configExists()) {
+    console.log(chalk5.red("Horus is not configured yet."));
+    console.log(chalk5.dim("Run `horus setup` first."));
+    process.exit(1);
+  }
+  if (!isValidKey(key)) {
+    console.log(chalk5.red(`Unknown config key: ${key}`));
+    console.log(chalk5.dim(`Valid keys: ${CONFIG_KEYS.join(", ")}`));
+    process.exit(1);
+  }
+  let config = loadConfig();
+  try {
+    config = setConfigValue(config, key, value);
+  } catch (error) {
+    console.log(chalk5.red(error.message));
+    process.exit(1);
+  }
+  saveConfig(config);
+  writeEnvFile(config);
+  console.log(chalk5.green(`Set ${key} and regenerated .env file.`));
+  const needsRestart = [
+    "api-key",
+    "data-dir",
+    "host-repos-path",
+    "runtime",
+    "port.anvil",
+    "port.vault-rest",
+    "port.vault-mcp",
+    "port.forge"
+  ];
+  if (needsRestart.includes(key)) {
+    console.log(chalk5.yellow("Restart required for changes to take effect."));
+    if (process.stdin.isTTY) {
+      const restart = await confirm2({
+        message: "Restart Horus now?",
+        default: false
+      });
+      if (restart) {
+        console.log(chalk5.dim("Run `horus down && horus up` to restart."));
+      }
+    } else {
+      console.log(chalk5.dim("Run `horus down && horus up` to restart."));
+    }
+  }
+});
+function isValidKey(key) {
+  return CONFIG_KEYS.includes(key);
+}
+
+// src/commands/connect.ts
+import { Command as Command6 } from "commander";
+import chalk6 from "chalk";
+import ora5 from "ora";
+import { checkbox } from "@inquirer/prompts";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+function detectInstalledClients() {
+  const detected = [];
+  const home = homedir3();
+  const claudeDesktopDir = join3(home, "Library", "Application Support", "Claude");
+  if (existsSync3(claudeDesktopDir)) {
+    detected.push("claude-desktop");
+  }
+  const claudeCodeDir = join3(home, ".claude");
+  if (existsSync3(claudeCodeDir)) {
+    detected.push("claude-code");
+  }
+  const cursorDir = join3(home, ".cursor");
+  const cursorAppDir = join3(home, "Library", "Application Support", "Cursor");
+  if (existsSync3(cursorDir) || existsSync3(cursorAppDir)) {
+    detected.push("cursor");
+  }
+  return detected;
+}
+function getConfigPath(target) {
+  const home = homedir3();
+  switch (target) {
+    case "claude-desktop":
+      return join3(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    case "claude-code":
+      return join3(home, ".claude", "settings.json");
+    case "cursor":
+      return join3(home, ".cursor", "mcp.json");
+  }
+}
+function mergeAndWriteConfig(configPath, mcpServers) {
+  let existing = {};
+  if (existsSync3(configPath)) {
+    try {
+      const raw = readFileSync3(configPath, "utf-8");
+      existing = JSON.parse(raw);
+    } catch {
+      existing = {};
+    }
+  }
+  const existingServers = existing.mcpServers ?? {};
+  existing.mcpServers = { ...existingServers, ...mcpServers };
+  const dir = configPath.substring(0, configPath.lastIndexOf("/"));
+  mkdirSync2(dir, { recursive: true });
+  writeFileSync3(configPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+}
+async function syncSkills(runtime) {
+  const home = homedir3();
+  const skillsBase = join3(home, ".claude", "skills");
+  const skills = ["horus-anvil", "horus-vault", "horus-forge"];
+  const forgeContainer = "horus-forge-1";
+  for (const skill of skills) {
+    const destDir = join3(skillsBase, skill);
+    mkdirSync2(destDir, { recursive: true });
+    const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
+    const dest = join3(destDir, "SKILL.md");
+    const result = await runtime.exec(forgeContainer, "cat", src);
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      writeFileSync3(dest, result.stdout, "utf-8");
+    }
+  }
+}
+function printNextSteps(targets) {
+  console.log("");
+  console.log(chalk6.bold("Next steps:"));
+  for (const target of targets) {
+    switch (target) {
+      case "claude-desktop":
+        console.log(`  ${chalk6.cyan("Claude Desktop")}  Restart Claude Desktop to pick up the new MCP configuration`);
+        break;
+      case "claude-code":
+        console.log(`  ${chalk6.cyan("Claude Code")}     Start a new Claude Code session`);
+        break;
+      case "cursor":
+        console.log(`  ${chalk6.cyan("Cursor")}          Restart Cursor`);
+        break;
+    }
+  }
+  console.log("");
+}
+var connectCommand = new Command6("connect").description("Configure Claude/Cursor MCP integration").option("--target <client>", "Client to configure: claude-desktop, claude-code, cursor, all (default: auto-detect)").option("--host <host>", "MCP host (default: localhost)", "localhost").option("-y, --yes", "Skip confirmation prompts").action(async (opts) => {
+  console.log("");
+  console.log(chalk6.bold("Horus Connect"));
+  console.log(chalk6.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log("");
+  const config = loadConfig();
+  const runtimeSpinner = ora5("Detecting runtime...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(config.runtime);
+    runtimeSpinner.succeed(`Using ${chalk6.cyan(runtime.name)}`);
+  } catch (error) {
+    runtimeSpinner.fail("No container runtime found");
+    console.log(error.message);
+    process.exit(1);
+  }
+  const runningSpinner = ora5("Checking Horus status...").start();
+  const running = await runtime.isRunning();
+  if (!running) {
+    runningSpinner.fail("Horus is not running");
+    console.log(chalk6.dim("Run `horus up` first, then re-run `horus connect`."));
+    process.exit(1);
+  }
+  runningSpinner.succeed("Horus is running");
+  let targets = [];
+  if (opts.target === "all") {
+    targets = ["claude-desktop", "claude-code", "cursor"];
+  } else if (opts.target) {
+    const valid = ["claude-desktop", "claude-code", "cursor"];
+    if (!valid.includes(opts.target)) {
+      console.log(chalk6.red(`Invalid target: ${opts.target}`));
+      console.log(chalk6.dim("Valid targets: claude-desktop, claude-code, cursor, all"));
+      process.exit(1);
+    }
+    targets = [opts.target];
+  } else {
+    const detected = detectInstalledClients();
+    if (detected.length === 0) {
+      console.log(chalk6.yellow("No supported clients detected (Claude Desktop, Claude Code, or Cursor)."));
+      console.log(chalk6.dim("Use --target to specify a client manually."));
+      process.exit(1);
+    }
+    if (opts.yes) {
+      targets = detected;
+      console.log(`Detected clients: ${detected.map((t) => chalk6.cyan(t)).join(", ")}`);
+    } else {
+      const chosen = await checkbox({
+        message: "Select clients to configure:",
+        choices: detected.map((t) => ({ name: t, value: t, checked: true })),
+        validate: (input2) => input2.length > 0 ? true : "Select at least one client."
+      });
+      targets = chosen;
+    }
+  }
+  if (targets.length === 0) {
+    console.log(chalk6.yellow("No clients selected. Exiting."));
+    return;
+  }
+  const host = opts.host;
+  const mcpServers = {
+    anvil: { url: `http://${host}:${config.ports.anvil}/sse` },
+    vault: { url: `http://${host}:${config.ports.vault_mcp}/sse` },
+    forge: { url: `http://${host}:${config.ports.forge}/sse` }
+  };
+  for (const target of targets) {
+    const configPath = getConfigPath(target);
+    const writeSpinner = ora5(`Configuring ${chalk6.cyan(target)}...`).start();
+    try {
+      mergeAndWriteConfig(configPath, mcpServers);
+      writeSpinner.succeed(`Configured ${chalk6.cyan(target)} \u2014 ${chalk6.dim(configPath)}`);
+    } catch (error) {
+      writeSpinner.fail(`Failed to configure ${target}`);
+      console.log(chalk6.dim(error.message));
+    }
+  }
+  if (targets.includes("claude-code")) {
+    const skillsSpinner = ora5("Syncing horus-core skills...").start();
+    try {
+      await syncSkills(runtime);
+      skillsSpinner.succeed("horus-core skills synced to ~/.claude/skills/");
+    } catch (error) {
+      skillsSpinner.warn("Could not sync skills (Forge container may not be running)");
+      console.log(chalk6.dim(error.message));
+    }
+  }
+  printNextSteps(targets);
+});
+
+// src/commands/update.ts
+import { Command as Command7 } from "commander";
+import chalk7 from "chalk";
+import ora6 from "ora";
+import { select as select2, confirm as confirm3 } from "@inquirer/prompts";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, mkdirSync as mkdirSync3, readdirSync, existsSync as existsSync4 } from "fs";
+import { join as join4 } from "path";
+import { createHash } from "crypto";
+import { stringify as stringifyYaml2, parse as parseYaml2 } from "yaml";
+var SNAPSHOTS_DIR = join4(HORUS_DIR, "snapshots");
+function ensureSnapshotsDir() {
+  mkdirSync3(SNAPSHOTS_DIR, { recursive: true });
+}
+function composeFileHash() {
+  if (!existsSync4(COMPOSE_PATH)) return "";
+  const content = readFileSync4(COMPOSE_PATH, "utf-8");
+  return createHash("sha256").update(content).digest("hex").slice(0, 12);
+}
+async function captureCurrentImages(runtime) {
+  const images = {};
+  try {
+    const result = await runtime.compose("images", "--format", "json");
+    const lines = result.stdout.trim().split("\n").filter(Boolean);
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        const service = obj.Service ?? "";
+        const tag = obj.Tag ?? obj.Image ?? "unknown";
+        if (service) images[service] = tag;
+      } catch {
+      }
+    }
+  } catch {
+  }
+  return images;
+}
+function saveSnapshot(images) {
+  ensureSnapshotsDir();
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+  const snapshot = {
+    timestamp,
+    images,
+    compose_hash: composeFileHash()
+  };
+  const filePath = join4(SNAPSHOTS_DIR, `${timestamp}.yaml`);
+  writeFileSync4(filePath, stringifyYaml2(snapshot, { lineWidth: 0 }), "utf-8");
+  return filePath;
+}
+function listSnapshots() {
+  if (!existsSync4(SNAPSHOTS_DIR)) return [];
+  return readdirSync(SNAPSHOTS_DIR).filter((f) => f.endsWith(".yaml")).sort().reverse().map((f) => {
+    const file = join4(SNAPSHOTS_DIR, f);
+    const snapshot = parseYaml2(readFileSync4(file, "utf-8"));
+    return { file, snapshot };
+  });
+}
+async function fetchLatestVersion() {
+  try {
+    const res = await fetch("https://api.github.com/repos/Arjunkhera/Horus/releases/latest", {
+      headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.tag_name ?? null;
+  } catch {
+    return null;
+  }
+}
+var updateCommand = new Command7("update").description("Update Horus to the latest version").option("--rollback", "Roll back to the previous version").option("-y, --yes", "Skip confirmation prompts").action(async (opts) => {
+  console.log("");
+  console.log(chalk7.bold(opts.rollback ? "Horus Rollback" : "Horus Update"));
+  console.log(chalk7.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log("");
+  const config = loadConfig();
+  const runtimeSpinner = ora6("Detecting runtime...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(config.runtime);
+    runtimeSpinner.succeed(`Using ${chalk7.cyan(runtime.name)}`);
+  } catch (error) {
+    runtimeSpinner.fail("No container runtime found");
+    console.log(error.message);
+    process.exit(1);
+  }
+  if (opts.rollback) {
+    const snapshots = listSnapshots();
+    if (snapshots.length === 0) {
+      console.log(chalk7.red("No snapshots found. Cannot roll back."));
+      console.log(chalk7.dim(`Snapshots are stored in ${SNAPSHOTS_DIR}`));
+      process.exit(1);
+    }
+    let snapshotToRestore;
+    if (opts.yes) {
+      snapshotToRestore = snapshots[0].snapshot;
+      console.log(`Using most recent snapshot: ${chalk7.cyan(snapshotToRestore.timestamp)}`);
+    } else {
+      const choices = snapshots.map(({ snapshot }, i) => ({
+        name: `${snapshot.timestamp}  (images: ${Object.keys(snapshot.images).length})`,
+        value: i
+      }));
+      const idx = await select2({
+        message: "Select snapshot to restore:",
+        choices
+      });
+      snapshotToRestore = snapshots[idx].snapshot;
+    }
+    if (!opts.yes) {
+      const confirmed = await confirm3({
+        message: `Roll back to snapshot from ${snapshotToRestore.timestamp}? This will restart services.`,
+        default: false
+      });
+      if (!confirmed) {
+        console.log(chalk7.dim("Rollback cancelled."));
+        return;
+      }
+    }
+    const stopSpinner = ora6("Stopping services...").start();
+    try {
+      await composeStreaming(runtime, ["down"]);
+      stopSpinner.succeed("Services stopped");
+    } catch (error) {
+      stopSpinner.fail("Failed to stop services");
+      console.log(chalk7.dim(error.message));
+      process.exit(1);
+    }
+    console.log("");
+    console.log(chalk7.bold("Restarting from snapshot (using cached images)..."));
+    try {
+      await composeStreaming(runtime, ["up", "-d"]);
+    } catch (error) {
+      console.log(chalk7.red("Failed to restart services."));
+      console.log(chalk7.dim(error.message));
+      process.exit(1);
+    }
+    console.log("");
+    const healthSpinner2 = ora6("Waiting for services to become healthy...").start();
+    try {
+      await pollUntilHealthy(
+        runtime,
+        (current) => {
+          const summary = current.map((s) => {
+            const icon = s.status === "healthy" ? chalk7.green("*") : s.status === "starting" ? chalk7.yellow("~") : chalk7.red("x");
+            return `${icon} ${s.name}`;
+          }).join("  ");
+          healthSpinner2.text = `Waiting...  ${summary}`;
+        },
+        3e5,
+        5e3
+      );
+      healthSpinner2.succeed("All services healthy after rollback");
+    } catch (error) {
+      healthSpinner2.fail("Some services did not become healthy");
+      console.log(chalk7.dim(error.message));
+      process.exit(1);
+    }
+    console.log("");
+    console.log(chalk7.bold.green("Rollback complete!"));
+    console.log("");
+    return;
+  }
+  const versionSpinner = ora6("Checking for updates...").start();
+  const [currentImages, latestVersion] = await Promise.all([
+    captureCurrentImages(runtime),
+    fetchLatestVersion()
+  ]);
+  versionSpinner.stop();
+  if (latestVersion) {
+    console.log(`  Latest release: ${chalk7.cyan(latestVersion)}`);
+  } else {
+    console.log(chalk7.dim("  Could not reach GitHub to check latest version."));
+  }
+  console.log("");
+  if (!opts.yes) {
+    const confirmed = await confirm3({
+      message: "Pull latest images and restart services?",
+      default: true
+    });
+    if (!confirmed) {
+      console.log(chalk7.dim("Update cancelled."));
+      return;
+    }
+  }
+  const snapshotSpinner = ora6("Saving pre-update snapshot...").start();
+  let snapshotPath = "";
+  try {
+    snapshotPath = saveSnapshot(currentImages);
+    snapshotSpinner.succeed(`Snapshot saved: ${chalk7.dim(snapshotPath)}`);
+  } catch (error) {
+    snapshotSpinner.warn("Could not save snapshot (update will proceed)");
+    console.log(chalk7.dim(error.message));
+  }
+  console.log("");
+  console.log(chalk7.bold("Pulling latest images..."));
+  try {
+    await composeStreaming(runtime, ["pull"]);
+  } catch (error) {
+    console.log(chalk7.red("Failed to pull images."));
+    console.log(chalk7.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk7.bold("Restarting services..."));
+  try {
+    await composeStreaming(runtime, ["up", "-d"]);
+  } catch (error) {
+    console.log(chalk7.red("Failed to restart services."));
+    console.log(chalk7.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  const healthSpinner = ora6("Waiting for services to become healthy...").start();
+  let finalStates = [];
+  try {
+    finalStates = await pollUntilHealthy(
+      runtime,
+      (current) => {
+        const summary = current.map((s) => {
+          const icon = s.status === "healthy" ? chalk7.green("*") : s.status === "starting" ? chalk7.yellow("~") : chalk7.red("x");
+          return `${icon} ${s.name}`;
+        }).join("  ");
+        healthSpinner.text = `Waiting for services...  ${summary}`;
+      },
+      3e5,
+      5e3
+    );
+    healthSpinner.succeed("All services healthy");
+  } catch (error) {
+    healthSpinner.fail("Some services did not become healthy");
+    console.log(chalk7.dim(error.message));
+    console.log("");
+    console.log(chalk7.dim(`Tip: Roll back with \`horus update --rollback\``));
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk7.bold.green("Update complete!"));
+  console.log(chalk7.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  if (latestVersion) {
+    console.log(`  ${chalk7.bold("Version:")}  ${latestVersion}`);
+  }
+  console.log("");
+  console.log(chalk7.bold("  Service Status:"));
+  for (const s of finalStates) {
+    const color = s.status === "healthy" ? chalk7.green : s.status === "starting" ? chalk7.yellow : chalk7.red;
+    console.log(`    ${color(s.status.padEnd(10))} ${s.name}`);
+  }
+  if (snapshotPath) {
+    console.log("");
+    console.log(chalk7.dim(`  Snapshot saved for rollback: ${snapshotPath}`));
+    console.log(chalk7.dim("  Run `horus update --rollback` to revert if needed."));
+  }
+  console.log("");
+});
+
+// src/commands/doctor.ts
+import { Command as Command8 } from "commander";
+import chalk8 from "chalk";
+import { execSync } from "child_process";
+import { existsSync as existsSync5, accessSync, statfsSync, constants } from "fs";
+import { join as join5 } from "path";
+function symbol(status) {
+  switch (status) {
+    case "pass":
+      return chalk8.green("  \u2713 ");
+    case "warn":
+      return chalk8.yellow("  \u26A0 ");
+    case "fail":
+      return chalk8.red("  \u2717 ");
+  }
+}
+function colorMessage(status, msg) {
+  switch (status) {
+    case "pass":
+      return chalk8.white(msg);
+    case "warn":
+      return chalk8.yellow(msg);
+    case "fail":
+      return chalk8.red(msg);
+  }
+}
+async function checkRuntime() {
+  try {
+    execSync("docker info", { stdio: "ignore" });
+    return { status: "pass", label: "Runtime", message: "Docker is running" };
+  } catch {
+    try {
+      execSync("podman info", { stdio: "ignore" });
+      return { status: "pass", label: "Runtime", message: "Podman is running" };
+    } catch {
+      return {
+        status: "fail",
+        label: "Runtime",
+        message: "Docker/Podman is not running",
+        hint: "Start Docker Desktop or Podman Desktop"
+      };
+    }
+  }
+}
+async function checkCompose() {
+  try {
+    execSync("docker compose version", { stdio: "ignore" });
+    return { status: "pass", label: "Compose", message: "Compose plugin available" };
+  } catch {
+    try {
+      execSync("podman compose version", { stdio: "ignore" });
+      return { status: "pass", label: "Compose", message: "Compose plugin available (podman)" };
+    } catch {
+      return {
+        status: "fail",
+        label: "Compose",
+        message: "Compose plugin not found",
+        hint: "Install Docker Compose plugin: https://docs.docker.com/compose/install/"
+      };
+    }
+  }
+}
+function checkConfig() {
+  if (configExists()) {
+    return { status: "pass", label: "Config", message: "Configuration file exists (~/.horus/config.yaml)" };
+  }
+  return {
+    status: "fail",
+    label: "Config",
+    message: "Configuration file missing (~/.horus/config.yaml)",
+    hint: "Run `horus setup` to create the configuration"
+  };
+}
+function checkComposeFile() {
+  if (existsSync5(COMPOSE_PATH)) {
+    return { status: "pass", label: "Compose file", message: "Compose file installed (~/.horus/docker-compose.yml)" };
+  }
+  return {
+    status: "fail",
+    label: "Compose file",
+    message: "Compose file missing (~/.horus/docker-compose.yml)",
+    hint: "Run `horus setup` to install the compose file"
+  };
+}
+function checkPort(port, serviceName) {
+  try {
+    const output = execSync(`lsof -i :${port} -sTCP:LISTEN -t 2>/dev/null || true`, {
+      encoding: "utf-8"
+    }).trim();
+    if (!output) {
+      return { status: "pass", label: `Port ${port}`, message: `Port ${port} is free (${serviceName})` };
+    }
+    const pids = output.split("\n").filter(Boolean);
+    for (const pid of pids) {
+      try {
+        const cmdline = execSync(`ps -p ${pid} -o comm= 2>/dev/null || true`, {
+          encoding: "utf-8"
+        }).trim();
+        if (cmdline.toLowerCase().includes("docker") || cmdline.toLowerCase().includes("podman")) {
+          return { status: "pass", label: `Port ${port}`, message: `Port ${port} in use by Horus (${serviceName})` };
+        }
+      } catch {
+      }
+    }
+    return {
+      status: "warn",
+      label: `Port ${port}`,
+      message: `Port ${port} in use by another process (${serviceName} needs port ${port})`,
+      hint: `Change the port with \`horus config set port.${serviceName.toLowerCase()} <port>\``
+    };
+  } catch {
+    return { status: "pass", label: `Port ${port}`, message: `Port ${port} status unknown` };
+  }
+}
+function checkDataDir(dataDir) {
+  if (!existsSync5(dataDir)) {
+    return {
+      status: "warn",
+      label: "Data directory",
+      message: `Data directory does not exist: ${dataDir}`,
+      hint: "It will be created automatically when Horus starts"
+    };
+  }
+  try {
+    accessSync(dataDir, constants.W_OK);
+    return { status: "pass", label: "Data directory", message: `Data directory exists and is writable (${dataDir})` };
+  } catch {
+    return {
+      status: "fail",
+      label: "Data directory",
+      message: `Data directory is not writable: ${dataDir}`,
+      hint: `Run: chmod u+w "${dataDir}"`
+    };
+  }
+}
+function checkDiskSpace(dataDir) {
+  const checkDir = existsSync5(dataDir) ? dataDir : join5(dataDir, "..");
+  try {
+    const stats = statfsSync(checkDir);
+    const freeBytes = stats.bfree * stats.bsize;
+    const freeGB = freeBytes / 1024 ** 3;
+    const freeGBStr = freeGB.toFixed(1);
+    const MIN_GB = 5;
+    if (freeGB >= MIN_GB) {
+      return { status: "pass", label: "Disk space", message: `Disk space: ${freeGBStr}GB available` };
+    }
+    return {
+      status: "warn",
+      label: "Disk space",
+      message: `Disk space low: only ${freeGBStr}GB available (5GB recommended; QMD models take ~2GB)`,
+      hint: "Free up disk space before running Horus"
+    };
+  } catch {
+    return { status: "warn", label: "Disk space", message: "Could not check available disk space" };
+  }
+}
+async function checkServices(runtime) {
+  const results = [];
+  try {
+    const psResult = await runtime.compose("ps", "--format", "json");
+    const lines = psResult.stdout.trim().split("\n").filter(Boolean);
+    if (lines.length === 0) {
+      return [
+        {
+          status: "warn",
+          label: "Services",
+          message: "No services are running",
+          hint: "Run `horus up` to start the stack"
+        }
+      ];
+    }
+    const containers = lines.map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null);
+    for (const c of containers) {
+      const name = c.Service ?? "unknown";
+      const health = (c.Health || c.State || "unknown").toLowerCase();
+      if (health === "healthy" || health === "running") {
+        results.push({ status: "pass", label: `Service: ${name}`, message: `${name} is ${health}` });
+      } else if (health === "starting") {
+        results.push({
+          status: "warn",
+          label: `Service: ${name}`,
+          message: `${name} is still starting`,
+          hint: "Wait a moment and re-run `horus doctor`"
+        });
+      } else {
+        results.push({
+          status: "fail",
+          label: `Service: ${name}`,
+          message: `${name} service is ${health}`,
+          hint: `Run: horus logs ${name}`
+        });
+      }
+    }
+  } catch {
+    results.push({
+      status: "warn",
+      label: "Services",
+      message: "Could not check service status (stack may not be running)",
+      hint: "Run `horus up` to start the stack"
+    });
+  }
+  return results;
+}
+function checkApiKey(config) {
+  if (config.api_key && config.api_key.length > 0) {
+    return { status: "pass", label: "API key", message: "API key is configured" };
+  }
+  return {
+    status: "warn",
+    label: "API key",
+    message: "API key is not set",
+    hint: "Run: horus config set api-key <your-key>"
+  };
+}
+var doctorCommand = new Command8("doctor").description("Diagnose common Horus issues").action(async () => {
+  console.log("");
+  console.log(chalk8.bold("Horus Doctor"));
+  console.log(chalk8.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  const allResults = [];
+  allResults.push(await checkRuntime());
+  allResults.push(await checkCompose());
+  allResults.push(checkConfig());
+  allResults.push(checkComposeFile());
+  const config = configExists() ? loadConfig() : null;
+  const ports = config?.ports ?? DEFAULT_PORTS;
+  const dataDir = config?.data_dir ?? join5(process.env.HOME ?? "~", ".horus", "data");
+  allResults.push(checkPort(ports.anvil, "Anvil"));
+  allResults.push(checkPort(ports.vault_rest, "Vault"));
+  allResults.push(checkPort(ports.vault_mcp, "Vault MCP"));
+  allResults.push(checkPort(ports.forge, "Forge"));
+  allResults.push(checkDataDir(dataDir));
+  allResults.push(checkDiskSpace(dataDir));
+  if (config) {
+    allResults.push(checkApiKey(config));
+  }
+  const runtimeOk = allResults[0].status !== "fail";
+  const composeOk = allResults[1].status !== "fail";
+  if (runtimeOk && composeOk) {
+    try {
+      const runtime = await detectRuntime(config?.runtime);
+      const serviceResults = await checkServices(runtime);
+      allResults.push(...serviceResults);
+    } catch {
+      allResults.push({
+        status: "warn",
+        label: "Services",
+        message: "Could not detect runtime to check services"
+      });
+    }
+  }
+  for (const result of allResults) {
+    console.log(`${symbol(result.status)}${colorMessage(result.status, result.message)}`);
+  }
+  const errors = allResults.filter((r) => r.status === "fail");
+  const warnings = allResults.filter((r) => r.status === "warn");
+  console.log(chalk8.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  if (errors.length === 0 && warnings.length === 0) {
+    console.log(chalk8.green("  All checks passed."));
+  } else {
+    const parts = [];
+    if (errors.length > 0) parts.push(chalk8.red(`${errors.length} error${errors.length > 1 ? "s" : ""}`));
+    if (warnings.length > 0) parts.push(chalk8.yellow(`${warnings.length} warning${warnings.length > 1 ? "s" : ""}`));
+    console.log(`  ${parts.join(", ")}`);
+    const withHints = [...errors, ...warnings].filter((r) => r.hint);
+    if (withHints.length > 0) {
+      console.log("");
+      for (const r of withHints) {
+        const icon = r.status === "fail" ? chalk8.red("\u2717") : chalk8.yellow("\u26A0");
+        console.log(`  ${icon} ${chalk8.dim(r.hint)}`);
+      }
+    }
+  }
+  console.log("");
+  if (errors.length > 0) {
+    process.exit(1);
+  }
+});
+
+// src/commands/backup.ts
+import { Command as Command9 } from "commander";
+import chalk9 from "chalk";
+import ora7 from "ora";
+import { confirm as confirm4 } from "@inquirer/prompts";
+import { mkdirSync as mkdirSync4, statSync, existsSync as existsSync6, writeFileSync as writeFileSync5 } from "fs";
+import { join as join6, basename } from "path";
+import { execSync as execSync2 } from "child_process";
+import { stringify as stringifyYaml3 } from "yaml";
+var BACKUPS_DIR = join6(HORUS_DIR, "backups");
+function ensureBackupsDir() {
+  mkdirSync4(BACKUPS_DIR, { recursive: true });
+}
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)}MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)}GB`;
+}
+async function createBackup(yes) {
+  console.log("");
+  console.log(chalk9.bold("Horus Backup"));
+  console.log(chalk9.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log("");
+  const config = loadConfig();
+  const runtimeSpinner = ora7("Detecting runtime...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(config.runtime);
+    runtimeSpinner.succeed(`Using ${chalk9.cyan(runtime.name)}`);
+  } catch (error) {
+    runtimeSpinner.fail("No container runtime found");
+    console.log(error.message);
+    process.exit(1);
+  }
+  if (!yes) {
+    const confirmed = await confirm4({
+      message: "This will briefly stop services to create a consistent backup. Continue?",
+      default: true
+    });
+    if (!confirmed) {
+      console.log(chalk9.dim("Backup cancelled."));
+      return;
+    }
+  }
+  const stopSpinner = ora7("Stopping services...").start();
+  try {
+    await composeStreaming(runtime, ["stop"]);
+    stopSpinner.succeed("Services stopped");
+  } catch (error) {
+    stopSpinner.fail("Failed to stop services");
+    console.log(chalk9.dim(error.message));
+    process.exit(1);
+  }
+  ensureBackupsDir();
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+  const tarFile = join6(BACKUPS_DIR, `${timestamp}.tar.gz`);
+  const metaFile = join6(BACKUPS_DIR, `${timestamp}.meta.yaml`);
+  const backupSpinner = ora7("Creating backup archive...").start();
+  try {
+    execSync2(`tar -czf "${tarFile}" -C "${HORUS_DIR}" data/`, {
+      stdio: "pipe"
+    });
+    backupSpinner.succeed(`Archive created: ${chalk9.dim(tarFile)}`);
+  } catch (error) {
+    backupSpinner.fail("Failed to create backup archive");
+    console.log(chalk9.dim(error.message));
+    await composeStreaming(runtime, ["start"]).catch(() => {
+    });
+    process.exit(1);
+  }
+  let sizeBytes = 0;
+  try {
+    sizeBytes = statSync(tarFile).size;
+  } catch {
+  }
+  const meta = {
+    timestamp,
+    data_dir: config.data_dir,
+    version: config.version,
+    size_bytes: sizeBytes
+  };
+  writeFileSync5(metaFile, stringifyYaml3(meta, { lineWidth: 0 }), "utf-8");
+  const startSpinner = ora7("Restarting services...").start();
+  try {
+    await composeStreaming(runtime, ["start"]);
+    startSpinner.succeed("Services restarted");
+  } catch (error) {
+    startSpinner.fail("Failed to restart services");
+    console.log(chalk9.dim(error.message));
+    console.log(chalk9.yellow("Run `horus up` to restart services manually."));
+  }
+  console.log("");
+  console.log(chalk9.bold.green("Backup complete!"));
+  console.log(chalk9.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log(`  ${chalk9.bold("File:")}  ${tarFile}`);
+  console.log(`  ${chalk9.bold("Size:")}  ${formatBytes(sizeBytes)}`);
+  console.log("");
+  console.log(chalk9.dim("  Restore with: horus backup restore <file>"));
+  console.log("");
+}
+async function restoreBackup(file, yes) {
+  console.log("");
+  console.log(chalk9.bold("Horus Restore"));
+  console.log(chalk9.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
+  console.log("");
+  if (!existsSync6(file)) {
+    console.log(chalk9.red(`Backup file not found: ${file}`));
+    process.exit(1);
+  }
+  const config = loadConfig();
+  const runtimeSpinner = ora7("Detecting runtime...").start();
+  let runtime;
+  try {
+    runtime = await detectRuntime(config.runtime);
+    runtimeSpinner.succeed(`Using ${chalk9.cyan(runtime.name)}`);
+  } catch (error) {
+    runtimeSpinner.fail("No container runtime found");
+    console.log(error.message);
+    process.exit(1);
+  }
+  if (!yes) {
+    console.log(chalk9.yellow(`  Warning: This will overwrite current data in ${config.data_dir}`));
+    console.log("");
+    const confirmed = await confirm4({
+      message: `Restore from ${basename(file)}? Current data will be overwritten.`,
+      default: false
+    });
+    if (!confirmed) {
+      console.log(chalk9.dim("Restore cancelled."));
+      return;
+    }
+  }
+  const stopSpinner = ora7("Stopping services...").start();
+  try {
+    await composeStreaming(runtime, ["stop"]);
+    stopSpinner.succeed("Services stopped");
+  } catch (error) {
+    stopSpinner.fail("Failed to stop services");
+    console.log(chalk9.dim(error.message));
+    process.exit(1);
+  }
+  const extractSpinner = ora7("Extracting backup...").start();
+  try {
+    execSync2(`tar -xzf "${file}" -C "${HORUS_DIR}/"`, { stdio: "pipe" });
+    extractSpinner.succeed("Backup extracted");
+  } catch (error) {
+    extractSpinner.fail("Failed to extract backup");
+    console.log(chalk9.dim(error.message));
+    await composeStreaming(runtime, ["start"]).catch(() => {
+    });
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk9.bold("Starting services..."));
+  try {
+    await composeStreaming(runtime, ["start"]);
+  } catch (error) {
+    console.log(chalk9.red("Failed to start services."));
+    console.log(chalk9.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  const healthSpinner = ora7("Waiting for services to become healthy...").start();
+  try {
+    await pollUntilHealthy(
+      runtime,
+      (current) => {
+        const summary = current.map((s) => {
+          const icon = s.status === "healthy" ? chalk9.green("*") : s.status === "starting" ? chalk9.yellow("~") : chalk9.red("x");
+          return `${icon} ${s.name}`;
+        }).join("  ");
+        healthSpinner.text = `Waiting for services...  ${summary}`;
+      },
+      3e5,
+      5e3
+    );
+    healthSpinner.succeed("All services healthy");
+  } catch (error) {
+    healthSpinner.fail("Some services did not become healthy");
+    console.log(chalk9.dim(error.message));
+    process.exit(1);
+  }
+  console.log("");
+  console.log(chalk9.bold.green("Restore complete!"));
+  console.log("");
+}
+var backupCommand = new Command9("backup").description("Backup or restore Horus data").option("-y, --yes", "Skip confirmation prompts").action(async (opts) => {
+  await createBackup(opts.yes);
+});
+backupCommand.command("restore <file>").description("Restore Horus data from a backup file").option("-y, --yes", "Skip confirmation prompts").action(async (file, opts) => {
+  await restoreBackup(file, opts.yes);
+});
+
+// src/index.ts
+var program = new Command10();
+program.name("horus").description("CLI for managing the Horus Docker Compose stack").version("0.1.0");
+program.addCommand(setupCommand);
+program.addCommand(upCommand);
+program.addCommand(downCommand);
+program.addCommand(statusCommand);
+program.addCommand(configCommand);
+program.addCommand(connectCommand);
+program.addCommand(updateCommand);
+program.addCommand(doctorCommand);
+program.addCommand(backupCommand);
+program.exitOverride();
+try {
+  await program.parseAsync(process.argv);
+} catch (error) {
+  if (error.code === "commander.helpDisplayed" || error.code === "commander.version") {
+    process.exit(0);
+  }
+  if (error instanceof Error) {
+    console.error(chalk10.red(`Error: ${error.message}`));
+  } else {
+    console.error(chalk10.red("An unexpected error occurred."));
+  }
+  process.exit(1);
+}

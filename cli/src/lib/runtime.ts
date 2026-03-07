@@ -29,7 +29,16 @@ function toResult(result: ExecaReturnValue): ExecResult {
 
 async function tryCommand(command: string, args: string[]): Promise<boolean> {
   try {
-    await execa(command, args, { reject: false });
+    const result = await execa(command, args, { reject: false });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function commandExists(command: string): Promise<boolean> {
+  try {
+    await execa(command, ['--version'], { reject: false });
     return true;
   } catch {
     return false;
@@ -120,6 +129,18 @@ export async function detectRuntime(preferred?: 'docker' | 'podman'): Promise<Ru
   const hasPodman = await tryCommand('podman', ['compose', 'version']);
   if (hasPodman) {
     return createRuntime('podman');
+  }
+
+  // Check if Podman is installed but its compose subcommand is broken — give a targeted error.
+  const podmanInstalled = await commandExists('podman');
+  if (podmanInstalled) {
+    throw new Error(
+      'Podman is installed but `podman compose` is not working.\n\n' +
+        'Fix options:\n' +
+        '  1. Ensure your Podman machine is running:  podman machine start\n' +
+        '  2. Install podman-compose:                 pip3 install podman-compose\n' +
+        '  3. Upgrade Podman to v5+:                  brew upgrade podman\n'
+    );
   }
 
   throw new Error(
