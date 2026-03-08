@@ -3,12 +3,13 @@
 // src/index.ts
 import { Command as Command10 } from "commander";
 import chalk10 from "chalk";
+import { createRequire } from "module";
 
 // src/commands/setup.ts
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import { password, input, confirm, number, select } from "@inquirer/prompts";
+import { input, confirm, number, select } from "@inquirer/prompts";
 
 // src/lib/config.ts
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
@@ -48,7 +49,6 @@ var CONFIG_VERSION = "1.0";
 function defaultConfig() {
   return {
     version: CONFIG_VERSION,
-    api_key: "",
     data_dir: DEFAULT_DATA_DIR,
     runtime: "docker",
     ports: { ...DEFAULT_PORTS },
@@ -72,7 +72,6 @@ function loadConfig() {
   const defaults = defaultConfig();
   return {
     version: parsed.version ?? defaults.version,
-    api_key: parsed.api_key ?? defaults.api_key,
     data_dir: parsed.data_dir ?? defaults.data_dir,
     runtime: parsed.runtime ?? defaults.runtime,
     ports: {
@@ -136,7 +135,6 @@ function writeEnvFile(config) {
   writeFileSync(ENV_PATH, content, "utf-8");
 }
 var CONFIG_KEYS = [
-  "api-key",
   "data-dir",
   "host-repos-path",
   "runtime",
@@ -148,8 +146,6 @@ var CONFIG_KEYS = [
 ];
 function getConfigValue(config, key) {
   switch (key) {
-    case "api-key":
-      return config.api_key;
     case "data-dir":
       return config.data_dir;
     case "host-repos-path":
@@ -171,9 +167,6 @@ function getConfigValue(config, key) {
 function setConfigValue(config, key, value) {
   const updated = { ...config };
   switch (key) {
-    case "api-key":
-      updated.api_key = value;
-      break;
     case "data-dir":
       updated.data_dir = value;
       break;
@@ -277,6 +270,9 @@ function createRuntime(name) {
     }
   };
 }
+async function checkRuntime(name) {
+  return tryCommand(name, ["compose", "version"]);
+}
 async function detectRuntime(preferred) {
   if (preferred) {
     const hasPreferred = await tryCommand(preferred, ["compose", "version"]);
@@ -376,10 +372,10 @@ Run 'docker compose logs' from ~/.horus/ to investigate.`
 
 // src/lib/compose.ts
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
-import { join as join2, dirname as dirname2 } from "path";
+import { join as join2, dirname } from "path";
 import { fileURLToPath } from "url";
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = dirname2(__filename);
+var __dirname = dirname(__filename);
 function getBundledComposePath() {
   const candidates = [
     join2(__dirname, "..", "..", "compose", "docker-compose.yml"),
@@ -406,7 +402,7 @@ function installComposeFile() {
 }
 
 // src/commands/setup.ts
-var setupCommand = new Command("setup").description("Interactive first-run setup for Horus").option("-y, --yes", "Non-interactive mode (use defaults + env vars)").option("--api-key <key>", "Anthropic API key").option("--data-dir <path>", "Data directory path").option("--repos-path <path>", "Host repos path for Forge scanning").option("--runtime <runtime>", "Container runtime to use (docker|podman)").action(async (opts) => {
+var setupCommand = new Command("setup").description("Interactive first-run setup for Horus").option("-y, --yes", "Non-interactive mode (use defaults + env vars)").option("--runtime <runtime>", "Container runtime to use: docker or podman (non-interactive only)").option("--data-dir <path>", "Data directory path").option("--repos-path <path>", "Host repos path for Forge scanning").action(async (opts) => {
   console.log("");
   console.log(chalk.bold("Horus Setup"));
   console.log(chalk.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
@@ -425,59 +421,55 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
       }
     }
   }
-  let preferredRuntime;
-  if (opts.runtime) {
-    if (opts.runtime !== "docker" && opts.runtime !== "podman") {
-      console.log(chalk.red(`Invalid runtime "${opts.runtime}". Must be "docker" or "podman".`));
-      process.exit(1);
-    }
-    preferredRuntime = opts.runtime;
-  } else if (!opts.yes) {
-    preferredRuntime = await select({
-      message: "Which container runtime would you like to use?",
-      choices: [
-        { name: "Docker", value: "docker" },
-        { name: "Podman", value: "podman" }
-      ],
-      default: "docker"
-    });
-  }
-  const runtimeSpinner = ora("Detecting container runtime...").start();
-  let runtime;
-  try {
-    runtime = await detectRuntime(preferredRuntime);
-    runtimeSpinner.succeed(`Using ${chalk.cyan(runtime.name)}`);
-  } catch (error) {
-    runtimeSpinner.fail("Container runtime not available");
+  const checkSpinner = ora("Checking for container runtimes...").start();
+  const [hasDocker, hasPodman] = await Promise.all([
+    checkRuntime("docker"),
+    checkRuntime("podman")
+  ]);
+  checkSpinner.stop();
+  const available = [
+    ...hasDocker ? ["docker"] : [],
+    ...hasPodman ? ["podman"] : []
+  ];
+  if (available.length === 0) {
+    console.log(chalk.red("No container runtime found."));
     console.log("");
-    console.log(error.message);
+    console.log("Horus requires Docker or Podman with the Compose plugin.");
+    console.log("");
+    console.log("Install one of:");
+    console.log("  Docker Desktop: https://www.docker.com/products/docker-desktop/");
+    console.log("  Podman Desktop: https://podman-desktop.io/");
     process.exit(1);
   }
-  let config;
+  let selectedRuntime;
   if (opts.yes) {
-    const apiKey = opts.apiKey || process.env.HORUS_API_KEY || "";
-    if (!apiKey) {
-      console.log(chalk.red("Error: API key is required."));
-      console.log(chalk.dim("Set HORUS_API_KEY env var or use --api-key flag."));
+    const requested = opts.runtime;
+    if (requested && !available.includes(requested)) {
+      console.log(chalk.red(`Requested runtime "${requested}" is not installed.`));
+      console.log(chalk.dim(`Available: ${available.join(", ")}`));
       process.exit(1);
     }
+    selectedRuntime = requested ?? available[0];
+    console.log(`Using ${chalk.cyan(selectedRuntime)}`);
+  } else {
+    selectedRuntime = await select({
+      message: "Which container runtime would you like to use?",
+      choices: available.map((r) => ({
+        value: r,
+        name: r === "docker" ? "Docker" : "Podman"
+      }))
+    });
+  }
+  const runtime = await detectRuntime(selectedRuntime);
+  let config;
+  if (opts.yes) {
     config = {
       ...defaultConfig(),
-      api_key: apiKey,
       runtime: runtime.name,
       data_dir: opts.dataDir || DEFAULT_DATA_DIR,
       host_repos_path: opts.reposPath || ""
     };
   } else {
-    const api_key = await password({
-      message: "Anthropic API key:",
-      mask: "*",
-      validate: (val) => {
-        if (!val) return "API key is required";
-        if (!val.startsWith("sk-ant-")) return 'API key must start with "sk-ant-"';
-        return true;
-      }
-    });
     const data_dir = await input({
       message: "Data directory:",
       default: DEFAULT_DATA_DIR
@@ -517,7 +509,6 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
     }
     config = {
       ...defaultConfig(),
-      api_key,
       data_dir,
       host_repos_path,
       runtime: runtime.name,
@@ -802,7 +793,6 @@ var configCommand = new Command5("config").description("View or modify Horus con
   console.log(chalk5.bold("Horus Configuration"));
   console.log(chalk5.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
   console.log(`  ${chalk5.bold("version:")}          ${config.version}`);
-  console.log(`  ${chalk5.bold("api-key:")}          ${maskApiKey(config.api_key)}`);
   console.log(`  ${chalk5.bold("data-dir:")}         ${config.data_dir}`);
   console.log(`  ${chalk5.bold("runtime:")}          ${config.runtime}`);
   console.log(`  ${chalk5.bold("host-repos-path:")}  ${config.host_repos_path || chalk5.dim("(not set)")}`);
@@ -836,7 +826,7 @@ configCommand.command("get <key>").description("Get a configuration value").acti
   }
   const config = loadConfig();
   const value = getConfigValue(config, key);
-  if (key === "api-key" || key === "github-token") {
+  if (key === "github-token") {
     console.log(maskApiKey(value));
   } else {
     console.log(value || "");
@@ -864,7 +854,6 @@ configCommand.command("set <key> <value>").description("Set a configuration valu
   writeEnvFile(config);
   console.log(chalk5.green(`Set ${key} and regenerated .env file.`));
   const needsRestart = [
-    "api-key",
     "data-dir",
     "host-repos-path",
     "runtime",
@@ -1347,7 +1336,7 @@ function colorMessage(status, msg) {
       return chalk8.red(msg);
   }
 }
-async function checkRuntime() {
+async function checkRuntime2() {
   try {
     execSync("docker info", { stdio: "ignore" });
     return { status: "pass", label: "Runtime", message: "Docker is running" };
@@ -1530,23 +1519,12 @@ async function checkServices(runtime) {
   }
   return results;
 }
-function checkApiKey(config) {
-  if (config.api_key && config.api_key.length > 0) {
-    return { status: "pass", label: "API key", message: "API key is configured" };
-  }
-  return {
-    status: "warn",
-    label: "API key",
-    message: "API key is not set",
-    hint: "Run: horus config set api-key <your-key>"
-  };
-}
 var doctorCommand = new Command8("doctor").description("Diagnose common Horus issues").action(async () => {
   console.log("");
   console.log(chalk8.bold("Horus Doctor"));
   console.log(chalk8.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
   const allResults = [];
-  allResults.push(await checkRuntime());
+  allResults.push(await checkRuntime2());
   allResults.push(await checkCompose());
   allResults.push(checkConfig());
   allResults.push(checkComposeFile());
@@ -1559,9 +1537,6 @@ var doctorCommand = new Command8("doctor").description("Diagnose common Horus is
   allResults.push(checkPort(ports.forge, "Forge"));
   allResults.push(checkDataDir(dataDir));
   allResults.push(checkDiskSpace(dataDir));
-  if (config) {
-    allResults.push(checkApiKey(config));
-  }
   const runtimeOk = allResults[0].status !== "fail";
   const composeOk = allResults[1].status !== "fail";
   if (runtimeOk && composeOk) {
@@ -1800,8 +1775,10 @@ backupCommand.command("restore <file>").description("Restore Horus data from a b
 });
 
 // src/index.ts
+var require2 = createRequire(import.meta.url);
+var { version } = require2("../package.json");
 var program = new Command10();
-program.name("horus").description("CLI for managing the Horus Docker Compose stack").version("0.1.0");
+program.name("horus").description("CLI for managing the Horus Docker Compose stack").version(version);
 program.addCommand(setupCommand);
 program.addCommand(upCommand);
 program.addCommand(downCommand);

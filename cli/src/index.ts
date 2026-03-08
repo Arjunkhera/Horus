@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { createRequire } from 'module';
 import { setupCommand } from './commands/setup.js';
 import { upCommand } from './commands/up.js';
 import { downCommand } from './commands/down.js';
@@ -12,12 +13,15 @@ import { updateCommand } from './commands/update.js';
 import { doctorCommand } from './commands/doctor.js';
 import { backupCommand } from './commands/backup.js';
 
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
+
 const program = new Command();
 
 program
   .name('horus')
   .description('CLI for managing the Horus Docker Compose stack')
-  .version('0.1.0');
+  .version(version);
 
 // Register commands
 program.addCommand(setupCommand);
