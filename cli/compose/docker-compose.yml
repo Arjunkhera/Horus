@@ -26,7 +26,7 @@ services:
   #
   # start_period covers first-boot GGUF model download (~1-2 GB) + initial embed.
   qmd-daemon:
-    image: ghcr.io/arkhera/horus/qmd-daemon:latest
+    image: ghcr.io/arjunkhera/horus/qmd-daemon:latest
     environment:
       - QMD_DAEMON_PORT=8181
     volumes:
@@ -51,7 +51,7 @@ services:
   # ── Anvil ──────────────────────────────────────────────────────────────────
   # Notes system and MCP server. Indexes markdown files from the Notes repo.
   anvil:
-    image: ghcr.io/arkhera/horus/anvil:latest
+    image: ghcr.io/arjunkhera/horus/anvil:latest
     ports:
       - "${ANVIL_PORT:-8100}:8100"
     volumes:
@@ -94,7 +94,7 @@ services:
   # ── Vault ──────────────────────────────────────────────────────────────────
   # Knowledge service. Semantic search over the knowledge-base repo.
   vault:
-    image: ghcr.io/arkhera/horus/vault:latest
+    image: ghcr.io/arjunkhera/horus/vault:latest
     ports:
       - "${VAULT_PORT:-8000}:8000"
     volumes:
@@ -140,7 +140,7 @@ services:
   # ── Vault MCP ──────────────────────────────────────────────────────────────
   # Thin MCP adapter that translates MCP tool calls to Vault REST API calls.
   vault-mcp:
-    image: ghcr.io/arkhera/horus/vault-mcp:latest
+    image: ghcr.io/arjunkhera/horus/vault-mcp:latest
     ports:
       - "${VAULT_MCP_PORT:-8300}:8300"
     environment:
@@ -172,7 +172,7 @@ services:
   # ── Forge ──────────────────────────────────────────────────────────────────
   # Workspace manager and package registry MCP server.
   forge:
-    image: ghcr.io/arkhera/horus/forge:latest
+    image: ghcr.io/arjunkhera/horus/forge:latest
     ports:
       - "${FORGE_PORT:-8200}:8200"
     volumes:

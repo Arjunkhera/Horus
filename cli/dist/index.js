@@ -298,6 +298,13 @@ async function detectRuntime(preferred) {
     "No container runtime found.\n\nHorus requires Docker or Podman with the Compose plugin.\n\nInstall one of:\n  - Docker Desktop: https://www.docker.com/products/docker-desktop/\n  - Podman Desktop:  https://podman-desktop.io/\n"
   );
 }
+async function registryLogin(runtime, registry, token, username = "horus") {
+  const result = await execa(runtime.name, ["login", registry, "-u", username, "--password-stdin"], {
+    input: token,
+    reject: false
+  });
+  return result.exitCode === 0;
+}
 async function composeStreaming(runtime, args) {
   const bin = runtime.name;
   const result = await execa(bin, ["compose", ...args], {
@@ -542,14 +549,23 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
     console.error(error.message);
     process.exit(1);
   }
+  const ghcrToken = config.github_token || process.env.GITHUB_TOKEN || "";
+  if (ghcrToken) {
+    const loginSpinner = ora("Authenticating with ghcr.io...").start();
+    const ok = await registryLogin(runtime, "ghcr.io", ghcrToken);
+    if (ok) {
+      loginSpinner.succeed("Authenticated with ghcr.io");
+    } else {
+      loginSpinner.warn("GHCR login failed \u2014 private images may not pull");
+    }
+  }
   console.log("");
   console.log(chalk.bold("Pulling container images..."));
   try {
-    await composeStreaming(runtime, ["pull"]);
-  } catch (error) {
-    console.log(chalk.red("Failed to pull images."));
-    console.log(chalk.dim(error.message));
-    process.exit(1);
+    await composeStreaming(runtime, ["pull", "--ignore-pull-failures"]);
+  } catch {
+    console.log(chalk.yellow("Some images could not be pulled."));
+    console.log(chalk.dim("Continuing \u2014 services will be built from source if build contexts are available."));
   }
   console.log("");
   console.log(chalk.bold("Starting Horus services..."));
@@ -1248,14 +1264,23 @@ var updateCommand = new Command7("update").description("Update Horus to the late
     snapshotSpinner.warn("Could not save snapshot (update will proceed)");
     console.log(chalk7.dim(error.message));
   }
+  const ghcrToken = config.github_token || process.env.GITHUB_TOKEN || "";
+  if (ghcrToken) {
+    const loginSpinner = ora6("Authenticating with ghcr.io...").start();
+    const ok = await registryLogin(runtime, "ghcr.io", ghcrToken);
+    if (ok) {
+      loginSpinner.succeed("Authenticated with ghcr.io");
+    } else {
+      loginSpinner.warn("GHCR login failed \u2014 private images may not pull");
+    }
+  }
   console.log("");
   console.log(chalk7.bold("Pulling latest images..."));
   try {
-    await composeStreaming(runtime, ["pull"]);
-  } catch (error) {
-    console.log(chalk7.red("Failed to pull images."));
-    console.log(chalk7.dim(error.message));
-    process.exit(1);
+    await composeStreaming(runtime, ["pull", "--ignore-pull-failures"]);
+  } catch {
+    console.log(chalk7.yellow("Some images could not be pulled."));
+    console.log(chalk7.dim("Continuing \u2014 services will be built from source if build contexts are available."));
   }
   console.log("");
   console.log(chalk7.bold("Restarting services..."));

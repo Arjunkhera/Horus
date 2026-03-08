@@ -153,6 +153,23 @@ export async function detectRuntime(preferred?: 'docker' | 'podman'): Promise<Ru
 }
 
 /**
+ * Log the runtime into a container registry using a token.
+ * Returns true on success, false on failure.
+ */
+export async function registryLogin(
+  runtime: Runtime,
+  registry: string,
+  token: string,
+  username = 'horus',
+): Promise<boolean> {
+  const result = await execa(runtime.name, ['login', registry, '-u', username, '--password-stdin'], {
+    input: token,
+    reject: false,
+  });
+  return result.exitCode === 0;
+}
+
+/**
  * Run a compose command with output streamed to the terminal (inherits stdio).
  * Used for operations where the user should see real-time progress (e.g., pull, up).
  */
