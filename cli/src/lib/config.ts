@@ -24,6 +24,7 @@ export interface Config {
     vault_mcp: number;
     forge: number;
   };
+  git_host: string;
   repos: {
     anvil_notes: string;
     vault_knowledge: string;
@@ -41,6 +42,7 @@ export function defaultConfig(): Config {
     data_dir: DEFAULT_DATA_DIR,
     runtime: 'docker',
     ports: { ...DEFAULT_PORTS },
+    git_host: 'github.com',
     repos: { ...DEFAULT_REPOS },
     host_repos_path: '',
     github_token: '',
@@ -82,6 +84,7 @@ export function loadConfig(): Config {
       vault_mcp: parsed.ports?.vault_mcp ?? defaults.ports.vault_mcp,
       forge: parsed.ports?.forge ?? defaults.ports.forge,
     },
+    git_host: parsed.git_host ?? defaults.git_host,
     repos: {
       anvil_notes: parsed.repos?.anvil_notes ?? defaults.repos.anvil_notes,
       vault_knowledge: parsed.repos?.vault_knowledge ?? defaults.repos.vault_knowledge,
@@ -135,9 +138,6 @@ export function generateEnv(config: Config): string {
     `VAULT_MCP_PORT=${config.ports.vault_mcp}`,
     `FORGE_PORT=${config.ports.forge}`,
     '',
-    '# Auth',
-    `GITHUB_TOKEN=${config.github_token}`,
-    '',
     '# Repository URLs',
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
     `VAULT_KNOWLEDGE_REPO_URL=${config.repos.vault_knowledge}`,
@@ -171,6 +171,10 @@ export const CONFIG_KEYS = [
   'port.vault-mcp',
   'port.forge',
   'github-token',
+  'git-host',
+  'repo.anvil-notes',
+  'repo.vault-knowledge',
+  'repo.forge-registry',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -196,6 +200,14 @@ export function getConfigValue(config: Config, key: ConfigKey): string {
       return String(config.ports.forge);
     case 'github-token':
       return config.github_token;
+    case 'git-host':
+      return config.git_host;
+    case 'repo.anvil-notes':
+      return config.repos.anvil_notes;
+    case 'repo.vault-knowledge':
+      return config.repos.vault_knowledge;
+    case 'repo.forge-registry':
+      return config.repos.forge_registry;
   }
 }
 
@@ -232,6 +244,18 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
       break;
     case 'github-token':
       updated.github_token = value;
+      break;
+    case 'git-host':
+      updated.git_host = value;
+      break;
+    case 'repo.anvil-notes':
+      updated.repos = { ...updated.repos, anvil_notes: value };
+      break;
+    case 'repo.vault-knowledge':
+      updated.repos = { ...updated.repos, vault_knowledge: value };
+      break;
+    case 'repo.forge-registry':
+      updated.repos = { ...updated.repos, forge_registry: value };
       break;
   }
 

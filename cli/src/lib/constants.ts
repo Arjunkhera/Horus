@@ -16,10 +16,11 @@ export const DEFAULT_PORTS = {
 } as const;
 
 // ── Default repository URLs ─────────────────────────────────────────────────
+// All repo URLs default to empty — setup prompts the user for their own repos.
 export const DEFAULT_REPOS = {
   anvil_notes: '',
-  vault_knowledge: 'https://github.com/arkhera/knowledge-base',
-  forge_registry: 'https://github.com/arkhera/Forge-Registry',
+  vault_knowledge: '',
+  forge_registry: '',
 } as const;
 
 // ── Default data directory ──────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { stringify as stringifyYaml, parse as parseYaml } from 'yaml';
 import { loadConfig } from '../lib/config.js';
-import { detectRuntime, composeStreaming, registryLogin } from '../lib/runtime.js';
+import { detectRuntime, composeStreaming } from '../lib/runtime.js';
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { HORUS_DIR, COMPOSE_PATH } from '../lib/constants.js';
 
@@ -258,18 +258,6 @@ export const updateCommand = new Command('update')
     } catch (error) {
       snapshotSpinner.warn('Could not save snapshot (update will proceed)');
       console.log(chalk.dim((error as Error).message));
-    }
-
-    // Authenticate with GHCR if a token is available
-    const ghcrToken = config.github_token || process.env.GITHUB_TOKEN || '';
-    if (ghcrToken) {
-      const loginSpinner = ora('Authenticating with ghcr.io...').start();
-      const ok = await registryLogin(runtime, 'ghcr.io', ghcrToken);
-      if (ok) {
-        loginSpinner.succeed('Authenticated with ghcr.io');
-      } else {
-        loginSpinner.warn('GHCR login failed — private images may not pull');
-      }
     }
 
     // Pull latest images (non-fatal — images may not be published yet)

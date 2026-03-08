@@ -34,6 +34,7 @@ export const configCommand = new Command('config')
     console.log(`  ${chalk.bold('data-dir:')}         ${config.data_dir}`);
     console.log(`  ${chalk.bold('runtime:')}          ${config.runtime}`);
     console.log(`  ${chalk.bold('host-repos-path:')}  ${config.host_repos_path || chalk.dim('(not set)')}`);
+    console.log(`  ${chalk.bold('git-host:')}         ${config.git_host || chalk.dim('(not set)')}`);
     console.log(`  ${chalk.bold('github-token:')}     ${config.github_token ? maskApiKey(config.github_token) : chalk.dim('(not set)')}`);
     console.log('');
     console.log(chalk.bold('  Ports:'));
