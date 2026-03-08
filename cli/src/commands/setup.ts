@@ -174,23 +174,23 @@ export const setupCommand = new Command('setup')
         default: 'github.com',
       });
 
-      const examplePrefix = `git@${git_host}:<owner>`;
-      console.log('');
-      console.log(chalk.dim(`  Example: ${examplePrefix}/my-repo.git`));
+      const host = git_host.trim();
+      const example = (repo: string) => chalk.dim(`  e.g., git@${host}:<owner>/${repo}.git`);
+
       console.log('');
 
       const anvil_notes = await input({
-        message: 'Anvil notes repo URL (required):',
+        message: `Anvil notes repo URL:\n${example('horus-notes')}\n`,
         validate: (v) => v.trim().length > 0 || 'Anvil needs a notes repo to store your data.',
       });
 
       const vault_knowledge = await input({
-        message: 'Vault knowledge-base repo URL (required):',
+        message: `Vault knowledge-base repo URL:\n${example('knowledge-base')}\n`,
         validate: (v) => v.trim().length > 0 || 'Vault needs a knowledge-base repo.',
       });
 
       const forge_registry = await input({
-        message: 'Forge registry repo URL (required):',
+        message: `Forge registry repo URL:\n${example('forge-registry')}\n`,
         validate: (v) => v.trim().length > 0 || 'Forge needs a registry repo.',
       });
 

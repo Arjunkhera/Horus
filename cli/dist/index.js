@@ -549,20 +549,25 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
       message: "Git server hostname:",
       default: "github.com"
     });
-    const examplePrefix = `git@${git_host}:<owner>`;
-    console.log("");
-    console.log(chalk.dim(`  Example: ${examplePrefix}/my-repo.git`));
+    const host = git_host.trim();
+    const example = (repo) => chalk.dim(`  e.g., git@${host}:<owner>/${repo}.git`);
     console.log("");
     const anvil_notes = await input({
-      message: "Anvil notes repo URL (required):",
+      message: `Anvil notes repo URL:
+${example("horus-notes")}
+`,
       validate: (v) => v.trim().length > 0 || "Anvil needs a notes repo to store your data."
     });
     const vault_knowledge = await input({
-      message: "Vault knowledge-base repo URL (required):",
+      message: `Vault knowledge-base repo URL:
+${example("knowledge-base")}
+`,
       validate: (v) => v.trim().length > 0 || "Vault needs a knowledge-base repo."
     });
     const forge_registry = await input({
-      message: "Forge registry repo URL (required):",
+      message: `Forge registry repo URL:
+${example("forge-registry")}
+`,
       validate: (v) => v.trim().length > 0 || "Forge needs a registry repo."
     });
     config = {
