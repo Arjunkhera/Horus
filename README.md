@@ -126,3 +126,9 @@ The e2e test relies on fixtures in sibling repos:
 - `../Notes/_test/` — 4 test notes tagged `test-fixture` (loaded by Anvil)
 - `../Forge-Registry/workspace-configs/test-workspace/` — workspace config used by Forge
 - `../Forge-Registry/skills/test-integration-skill/` — skill installed into test workspaces
+
+## License & Contributing
+
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+By submitting a pull request or other contribution, you agree to the [Contributor License Agreement](CLA.md).
