@@ -1,6 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { input, confirm, number, select } from '@inquirer/prompts';
 import {
   loadConfig,
@@ -10,7 +13,7 @@ import {
   defaultConfig,
   type Config,
 } from '../lib/config.js';
-import { checkRuntime, detectRuntime, composeStreaming, registryLogin } from '../lib/runtime.js';
+import { checkRuntime, detectRuntime, composeStreaming } from '../lib/runtime.js';
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { installComposeFile } from '../lib/compose.js';
 import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
@@ -23,6 +26,10 @@ export const setupCommand = new Command('setup')
   .option('--runtime <runtime>', 'Container runtime to use: docker or podman (non-interactive only)')
   .option('--data-dir <path>', 'Data directory path')
   .option('--repos-path <path>', 'Host repos path for Forge scanning')
+  .option('--git-host <host>', 'Git server hostname (e.g., github.com, gitlab.corp.com)')
+  .option('--anvil-repo <url>', 'Anvil notes repository URL')
+  .option('--vault-repo <url>', 'Vault knowledge-base repository URL')
+  .option('--forge-repo <url>', 'Forge registry repository URL')
   .action(async (opts) => {
     console.log('');
     console.log(chalk.bold('Horus Setup'));
@@ -97,12 +104,19 @@ export const setupCommand = new Command('setup')
     let config: Config;
 
     if (opts.yes) {
-      // Non-interactive mode
+      // Non-interactive mode — use flags, env vars, then defaults
+      const defaults = defaultConfig();
       config = {
-        ...defaultConfig(),
+        ...defaults,
         runtime: runtime.name,
         data_dir: opts.dataDir || DEFAULT_DATA_DIR,
         host_repos_path: opts.reposPath || '',
+        git_host: opts.gitHost || defaults.git_host,
+        repos: {
+          anvil_notes: opts.anvilRepo || process.env.ANVIL_REPO_URL || defaults.repos.anvil_notes,
+          vault_knowledge: opts.vaultRepo || process.env.VAULT_KNOWLEDGE_REPO_URL || defaults.repos.vault_knowledge,
+          forge_registry: opts.forgeRepo || process.env.FORGE_REGISTRY_REPO_URL || defaults.repos.forge_registry,
+        },
       };
     } else {
       // Interactive mode
@@ -148,12 +162,50 @@ export const setupCommand = new Command('setup')
         };
       }
 
+      // Git host + Repository URLs
+      console.log('');
+      console.log(chalk.bold('Repository Configuration'));
+      console.log(chalk.dim('Horus stores notes and knowledge in Git repos you own.'));
+      console.log(chalk.dim('Create empty repos on your Git server, then paste the URLs below.'));
+      console.log('');
+
+      const git_host = await input({
+        message: 'Git server hostname:',
+        default: 'github.com',
+      });
+
+      const examplePrefix = `git@${git_host}:<owner>`;
+      console.log('');
+      console.log(chalk.dim(`  Example: ${examplePrefix}/my-repo.git`));
+      console.log('');
+
+      const anvil_notes = await input({
+        message: 'Anvil notes repo URL (required):',
+        validate: (v) => v.trim().length > 0 || 'Anvil needs a notes repo to store your data.',
+      });
+
+      const vault_knowledge = await input({
+        message: 'Vault knowledge-base repo URL (required):',
+        validate: (v) => v.trim().length > 0 || 'Vault needs a knowledge-base repo.',
+      });
+
+      const forge_registry = await input({
+        message: 'Forge registry repo URL (required):',
+        validate: (v) => v.trim().length > 0 || 'Forge needs a registry repo.',
+      });
+
       config = {
         ...defaultConfig(),
         data_dir,
         host_repos_path,
         runtime: runtime.name,
         ports,
+        git_host: git_host.trim(),
+        repos: {
+          anvil_notes: anvil_notes.trim(),
+          vault_knowledge: vault_knowledge.trim(),
+          forge_registry: forge_registry.trim(),
+        },
       };
     }
 
@@ -190,15 +242,49 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 7: Authenticate with GHCR if a token is available
-    const ghcrToken = config.github_token || process.env.GITHUB_TOKEN || '';
-    if (ghcrToken) {
-      const loginSpinner = ora('Authenticating with ghcr.io...').start();
-      const ok = await registryLogin(runtime, 'ghcr.io', ghcrToken);
-      if (ok) {
-        loginSpinner.succeed('Authenticated with ghcr.io');
-      } else {
-        loginSpinner.warn('GHCR login failed — private images may not pull');
+    // Step 7: Clone repos to data directory using host git credentials
+    const dataDir = config.data_dir.startsWith('~')
+      ? join(process.env.HOME || '', config.data_dir.slice(1))
+      : config.data_dir;
+
+    const reposToClone: Array<{ url: string; dest: string; label: string }> = [
+      { url: config.repos.anvil_notes, dest: join(dataDir, 'notes'), label: 'Anvil notes' },
+      { url: config.repos.vault_knowledge, dest: join(dataDir, 'knowledge-base'), label: 'Vault knowledge-base' },
+      { url: config.repos.forge_registry, dest: join(dataDir, 'registry'), label: 'Forge registry' },
+    ].filter((r) => r.url);
+
+    if (reposToClone.length > 0) {
+      console.log('');
+      console.log(chalk.bold('Cloning repositories...'));
+      mkdirSync(dataDir, { recursive: true });
+
+      for (const repo of reposToClone) {
+        const spinner = ora(`Cloning ${repo.label}...`).start();
+
+        if (existsSync(join(repo.dest, '.git'))) {
+          spinner.succeed(`${repo.label} already cloned`);
+          continue;
+        }
+
+        try {
+          mkdirSync(repo.dest, { recursive: true });
+          execSync(`git clone "${repo.url}" "${repo.dest}"`, {
+            stdio: 'pipe',
+            timeout: 60_000,
+          });
+          spinner.succeed(`${repo.label} cloned`);
+        } catch (error) {
+          spinner.fail(`Failed to clone ${repo.label}`);
+          const msg = (error as Error).message || '';
+          if (msg.includes('already exists and is not an empty directory')) {
+            console.log(chalk.dim('  Directory exists but has no .git — check the path.'));
+          } else {
+            console.log(chalk.dim(`  ${msg.split('\n')[0]}`));
+          }
+          console.log(chalk.dim(`  URL: ${repo.url}`));
+          console.log(chalk.dim('  Ensure you have git access (SSH key or credential helper).'));
+          process.exit(1);
+        }
       }
     }
 
@@ -212,7 +298,7 @@ export const setupCommand = new Command('setup')
       console.log(chalk.dim('Continuing — services will be built from source if build contexts are available.'));
     }
 
-    // Step 8: Start services
+    // Step 9: Start services
     console.log('');
     console.log(chalk.bold('Starting Horus services...'));
     try {

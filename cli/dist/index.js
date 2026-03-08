@@ -9,6 +9,9 @@ import { createRequire } from "module";
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
+import { execSync } from "child_process";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "fs";
+import { join as join3 } from "path";
 import { input, confirm, number, select } from "@inquirer/prompts";
 
 // src/lib/config.ts
@@ -32,8 +35,8 @@ var DEFAULT_PORTS = {
 };
 var DEFAULT_REPOS = {
   anvil_notes: "",
-  vault_knowledge: "https://github.com/arkhera/knowledge-base",
-  forge_registry: "https://github.com/arkhera/Forge-Registry"
+  vault_knowledge: "",
+  forge_registry: ""
 };
 var DEFAULT_DATA_DIR = join(homedir(), ".horus", "data");
 var SERVICES = [
@@ -52,6 +55,7 @@ function defaultConfig() {
     data_dir: DEFAULT_DATA_DIR,
     runtime: "docker",
     ports: { ...DEFAULT_PORTS },
+    git_host: "github.com",
     repos: { ...DEFAULT_REPOS },
     host_repos_path: "",
     github_token: ""
@@ -80,6 +84,7 @@ function loadConfig() {
       vault_mcp: parsed.ports?.vault_mcp ?? defaults.ports.vault_mcp,
       forge: parsed.ports?.forge ?? defaults.ports.forge
     },
+    git_host: parsed.git_host ?? defaults.git_host,
     repos: {
       anvil_notes: parsed.repos?.anvil_notes ?? defaults.repos.anvil_notes,
       vault_knowledge: parsed.repos?.vault_knowledge ?? defaults.repos.vault_knowledge,
@@ -118,9 +123,6 @@ function generateEnv(config) {
     `VAULT_MCP_PORT=${config.ports.vault_mcp}`,
     `FORGE_PORT=${config.ports.forge}`,
     "",
-    "# Auth",
-    `GITHUB_TOKEN=${config.github_token}`,
-    "",
     "# Repository URLs",
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
     `VAULT_KNOWLEDGE_REPO_URL=${config.repos.vault_knowledge}`,
@@ -142,7 +144,11 @@ var CONFIG_KEYS = [
   "port.vault-rest",
   "port.vault-mcp",
   "port.forge",
-  "github-token"
+  "github-token",
+  "git-host",
+  "repo.anvil-notes",
+  "repo.vault-knowledge",
+  "repo.forge-registry"
 ];
 function getConfigValue(config, key) {
   switch (key) {
@@ -162,6 +168,14 @@ function getConfigValue(config, key) {
       return String(config.ports.forge);
     case "github-token":
       return config.github_token;
+    case "git-host":
+      return config.git_host;
+    case "repo.anvil-notes":
+      return config.repos.anvil_notes;
+    case "repo.vault-knowledge":
+      return config.repos.vault_knowledge;
+    case "repo.forge-registry":
+      return config.repos.forge_registry;
   }
 }
 function setConfigValue(config, key, value) {
@@ -193,6 +207,18 @@ function setConfigValue(config, key, value) {
       break;
     case "github-token":
       updated.github_token = value;
+      break;
+    case "git-host":
+      updated.git_host = value;
+      break;
+    case "repo.anvil-notes":
+      updated.repos = { ...updated.repos, anvil_notes: value };
+      break;
+    case "repo.vault-knowledge":
+      updated.repos = { ...updated.repos, vault_knowledge: value };
+      break;
+    case "repo.forge-registry":
+      updated.repos = { ...updated.repos, forge_registry: value };
       break;
   }
   return updated;
@@ -298,13 +324,6 @@ async function detectRuntime(preferred) {
     "No container runtime found.\n\nHorus requires Docker or Podman with the Compose plugin.\n\nInstall one of:\n  - Docker Desktop: https://www.docker.com/products/docker-desktop/\n  - Podman Desktop:  https://podman-desktop.io/\n"
   );
 }
-async function registryLogin(runtime, registry, token, username = "horus") {
-  const result = await execa(runtime.name, ["login", registry, "-u", username, "--password-stdin"], {
-    input: token,
-    reject: false
-  });
-  return result.exitCode === 0;
-}
 async function composeStreaming(runtime, args) {
   const bin = runtime.name;
   const result = await execa(bin, ["compose", ...args], {
@@ -409,7 +428,7 @@ function installComposeFile() {
 }
 
 // src/commands/setup.ts
-var setupCommand = new Command("setup").description("Interactive first-run setup for Horus").option("-y, --yes", "Non-interactive mode (use defaults + env vars)").option("--runtime <runtime>", "Container runtime to use: docker or podman (non-interactive only)").option("--data-dir <path>", "Data directory path").option("--repos-path <path>", "Host repos path for Forge scanning").action(async (opts) => {
+var setupCommand = new Command("setup").description("Interactive first-run setup for Horus").option("-y, --yes", "Non-interactive mode (use defaults + env vars)").option("--runtime <runtime>", "Container runtime to use: docker or podman (non-interactive only)").option("--data-dir <path>", "Data directory path").option("--repos-path <path>", "Host repos path for Forge scanning").option("--git-host <host>", "Git server hostname (e.g., github.com, gitlab.corp.com)").option("--anvil-repo <url>", "Anvil notes repository URL").option("--vault-repo <url>", "Vault knowledge-base repository URL").option("--forge-repo <url>", "Forge registry repository URL").action(async (opts) => {
   console.log("");
   console.log(chalk.bold("Horus Setup"));
   console.log(chalk.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
@@ -470,11 +489,18 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
   const runtime = await detectRuntime(selectedRuntime);
   let config;
   if (opts.yes) {
+    const defaults = defaultConfig();
     config = {
-      ...defaultConfig(),
+      ...defaults,
       runtime: runtime.name,
       data_dir: opts.dataDir || DEFAULT_DATA_DIR,
-      host_repos_path: opts.reposPath || ""
+      host_repos_path: opts.reposPath || "",
+      git_host: opts.gitHost || defaults.git_host,
+      repos: {
+        anvil_notes: opts.anvilRepo || process.env.ANVIL_REPO_URL || defaults.repos.anvil_notes,
+        vault_knowledge: opts.vaultRepo || process.env.VAULT_KNOWLEDGE_REPO_URL || defaults.repos.vault_knowledge,
+        forge_registry: opts.forgeRepo || process.env.FORGE_REGISTRY_REPO_URL || defaults.repos.forge_registry
+      }
     };
   } else {
     const data_dir = await input({
@@ -514,12 +540,43 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
         forge: forge ?? DEFAULT_PORTS.forge
       };
     }
+    console.log("");
+    console.log(chalk.bold("Repository Configuration"));
+    console.log(chalk.dim("Horus stores notes and knowledge in Git repos you own."));
+    console.log(chalk.dim("Create empty repos on your Git server, then paste the URLs below."));
+    console.log("");
+    const git_host = await input({
+      message: "Git server hostname:",
+      default: "github.com"
+    });
+    const examplePrefix = `git@${git_host}:<owner>`;
+    console.log("");
+    console.log(chalk.dim(`  Example: ${examplePrefix}/my-repo.git`));
+    console.log("");
+    const anvil_notes = await input({
+      message: "Anvil notes repo URL (required):",
+      validate: (v) => v.trim().length > 0 || "Anvil needs a notes repo to store your data."
+    });
+    const vault_knowledge = await input({
+      message: "Vault knowledge-base repo URL (required):",
+      validate: (v) => v.trim().length > 0 || "Vault needs a knowledge-base repo."
+    });
+    const forge_registry = await input({
+      message: "Forge registry repo URL (required):",
+      validate: (v) => v.trim().length > 0 || "Forge needs a registry repo."
+    });
     config = {
       ...defaultConfig(),
       data_dir,
       host_repos_path,
       runtime: runtime.name,
-      ports
+      ports,
+      git_host: git_host.trim(),
+      repos: {
+        anvil_notes: anvil_notes.trim(),
+        vault_knowledge: vault_knowledge.trim(),
+        forge_registry: forge_registry.trim()
+      }
     };
   }
   const configSpinner = ora("Saving configuration...").start();
@@ -549,14 +606,41 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
     console.error(error.message);
     process.exit(1);
   }
-  const ghcrToken = config.github_token || process.env.GITHUB_TOKEN || "";
-  if (ghcrToken) {
-    const loginSpinner = ora("Authenticating with ghcr.io...").start();
-    const ok = await registryLogin(runtime, "ghcr.io", ghcrToken);
-    if (ok) {
-      loginSpinner.succeed("Authenticated with ghcr.io");
-    } else {
-      loginSpinner.warn("GHCR login failed \u2014 private images may not pull");
+  const dataDir = config.data_dir.startsWith("~") ? join3(process.env.HOME || "", config.data_dir.slice(1)) : config.data_dir;
+  const reposToClone = [
+    { url: config.repos.anvil_notes, dest: join3(dataDir, "notes"), label: "Anvil notes" },
+    { url: config.repos.vault_knowledge, dest: join3(dataDir, "knowledge-base"), label: "Vault knowledge-base" },
+    { url: config.repos.forge_registry, dest: join3(dataDir, "registry"), label: "Forge registry" }
+  ].filter((r) => r.url);
+  if (reposToClone.length > 0) {
+    console.log("");
+    console.log(chalk.bold("Cloning repositories..."));
+    mkdirSync2(dataDir, { recursive: true });
+    for (const repo of reposToClone) {
+      const spinner = ora(`Cloning ${repo.label}...`).start();
+      if (existsSync3(join3(repo.dest, ".git"))) {
+        spinner.succeed(`${repo.label} already cloned`);
+        continue;
+      }
+      try {
+        mkdirSync2(repo.dest, { recursive: true });
+        execSync(`git clone "${repo.url}" "${repo.dest}"`, {
+          stdio: "pipe",
+          timeout: 6e4
+        });
+        spinner.succeed(`${repo.label} cloned`);
+      } catch (error) {
+        spinner.fail(`Failed to clone ${repo.label}`);
+        const msg = error.message || "";
+        if (msg.includes("already exists and is not an empty directory")) {
+          console.log(chalk.dim("  Directory exists but has no .git \u2014 check the path."));
+        } else {
+          console.log(chalk.dim(`  ${msg.split("\n")[0]}`));
+        }
+        console.log(chalk.dim(`  URL: ${repo.url}`));
+        console.log(chalk.dim("  Ensure you have git access (SSH key or credential helper)."));
+        process.exit(1);
+      }
     }
   }
   console.log("");
@@ -812,6 +896,7 @@ var configCommand = new Command5("config").description("View or modify Horus con
   console.log(`  ${chalk5.bold("data-dir:")}         ${config.data_dir}`);
   console.log(`  ${chalk5.bold("runtime:")}          ${config.runtime}`);
   console.log(`  ${chalk5.bold("host-repos-path:")}  ${config.host_repos_path || chalk5.dim("(not set)")}`);
+  console.log(`  ${chalk5.bold("git-host:")}         ${config.git_host || chalk5.dim("(not set)")}`);
   console.log(`  ${chalk5.bold("github-token:")}     ${config.github_token ? maskApiKey(config.github_token) : chalk5.dim("(not set)")}`);
   console.log("");
   console.log(chalk5.bold("  Ports:"));
@@ -902,23 +987,23 @@ import { Command as Command6 } from "commander";
 import chalk6 from "chalk";
 import ora5 from "ora";
 import { checkbox } from "@inquirer/prompts";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "fs";
-import { join as join3 } from "path";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync4 } from "fs";
+import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
 function detectInstalledClients() {
   const detected = [];
   const home = homedir3();
-  const claudeDesktopDir = join3(home, "Library", "Application Support", "Claude");
-  if (existsSync3(claudeDesktopDir)) {
+  const claudeDesktopDir = join4(home, "Library", "Application Support", "Claude");
+  if (existsSync4(claudeDesktopDir)) {
     detected.push("claude-desktop");
   }
-  const claudeCodeDir = join3(home, ".claude");
-  if (existsSync3(claudeCodeDir)) {
+  const claudeCodeDir = join4(home, ".claude");
+  if (existsSync4(claudeCodeDir)) {
     detected.push("claude-code");
   }
-  const cursorDir = join3(home, ".cursor");
-  const cursorAppDir = join3(home, "Library", "Application Support", "Cursor");
-  if (existsSync3(cursorDir) || existsSync3(cursorAppDir)) {
+  const cursorDir = join4(home, ".cursor");
+  const cursorAppDir = join4(home, "Library", "Application Support", "Cursor");
+  if (existsSync4(cursorDir) || existsSync4(cursorAppDir)) {
     detected.push("cursor");
   }
   return detected;
@@ -927,16 +1012,16 @@ function getConfigPath(target) {
   const home = homedir3();
   switch (target) {
     case "claude-desktop":
-      return join3(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+      return join4(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
     case "claude-code":
-      return join3(home, ".claude", "settings.json");
+      return join4(home, ".claude", "settings.json");
     case "cursor":
-      return join3(home, ".cursor", "mcp.json");
+      return join4(home, ".cursor", "mcp.json");
   }
 }
 function mergeAndWriteConfig(configPath, mcpServers) {
   let existing = {};
-  if (existsSync3(configPath)) {
+  if (existsSync4(configPath)) {
     try {
       const raw = readFileSync3(configPath, "utf-8");
       existing = JSON.parse(raw);
@@ -947,19 +1032,19 @@ function mergeAndWriteConfig(configPath, mcpServers) {
   const existingServers = existing.mcpServers ?? {};
   existing.mcpServers = { ...existingServers, ...mcpServers };
   const dir = configPath.substring(0, configPath.lastIndexOf("/"));
-  mkdirSync2(dir, { recursive: true });
+  mkdirSync3(dir, { recursive: true });
   writeFileSync3(configPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
 }
 async function syncSkills(runtime) {
   const home = homedir3();
-  const skillsBase = join3(home, ".claude", "skills");
+  const skillsBase = join4(home, ".claude", "skills");
   const skills = ["horus-anvil", "horus-vault", "horus-forge"];
   const forgeContainer = "horus-forge-1";
   for (const skill of skills) {
-    const destDir = join3(skillsBase, skill);
-    mkdirSync2(destDir, { recursive: true });
+    const destDir = join4(skillsBase, skill);
+    mkdirSync3(destDir, { recursive: true });
     const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
-    const dest = join3(destDir, "SKILL.md");
+    const dest = join4(destDir, "SKILL.md");
     const result = await runtime.exec(forgeContainer, "cat", src);
     if (result.exitCode === 0 && result.stdout.trim()) {
       writeFileSync3(dest, result.stdout, "utf-8");
@@ -1077,16 +1162,16 @@ import { Command as Command7 } from "commander";
 import chalk7 from "chalk";
 import ora6 from "ora";
 import { select as select2, confirm as confirm3 } from "@inquirer/prompts";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, mkdirSync as mkdirSync3, readdirSync, existsSync as existsSync4 } from "fs";
-import { join as join4 } from "path";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, readdirSync, existsSync as existsSync5 } from "fs";
+import { join as join5 } from "path";
 import { createHash } from "crypto";
 import { stringify as stringifyYaml2, parse as parseYaml2 } from "yaml";
-var SNAPSHOTS_DIR = join4(HORUS_DIR, "snapshots");
+var SNAPSHOTS_DIR = join5(HORUS_DIR, "snapshots");
 function ensureSnapshotsDir() {
-  mkdirSync3(SNAPSHOTS_DIR, { recursive: true });
+  mkdirSync4(SNAPSHOTS_DIR, { recursive: true });
 }
 function composeFileHash() {
-  if (!existsSync4(COMPOSE_PATH)) return "";
+  if (!existsSync5(COMPOSE_PATH)) return "";
   const content = readFileSync4(COMPOSE_PATH, "utf-8");
   return createHash("sha256").update(content).digest("hex").slice(0, 12);
 }
@@ -1116,14 +1201,14 @@ function saveSnapshot(images) {
     images,
     compose_hash: composeFileHash()
   };
-  const filePath = join4(SNAPSHOTS_DIR, `${timestamp}.yaml`);
+  const filePath = join5(SNAPSHOTS_DIR, `${timestamp}.yaml`);
   writeFileSync4(filePath, stringifyYaml2(snapshot, { lineWidth: 0 }), "utf-8");
   return filePath;
 }
 function listSnapshots() {
-  if (!existsSync4(SNAPSHOTS_DIR)) return [];
+  if (!existsSync5(SNAPSHOTS_DIR)) return [];
   return readdirSync(SNAPSHOTS_DIR).filter((f) => f.endsWith(".yaml")).sort().reverse().map((f) => {
-    const file = join4(SNAPSHOTS_DIR, f);
+    const file = join5(SNAPSHOTS_DIR, f);
     const snapshot = parseYaml2(readFileSync4(file, "utf-8"));
     return { file, snapshot };
   });
@@ -1264,16 +1349,6 @@ var updateCommand = new Command7("update").description("Update Horus to the late
     snapshotSpinner.warn("Could not save snapshot (update will proceed)");
     console.log(chalk7.dim(error.message));
   }
-  const ghcrToken = config.github_token || process.env.GITHUB_TOKEN || "";
-  if (ghcrToken) {
-    const loginSpinner = ora6("Authenticating with ghcr.io...").start();
-    const ok = await registryLogin(runtime, "ghcr.io", ghcrToken);
-    if (ok) {
-      loginSpinner.succeed("Authenticated with ghcr.io");
-    } else {
-      loginSpinner.warn("GHCR login failed \u2014 private images may not pull");
-    }
-  }
   console.log("");
   console.log(chalk7.bold("Pulling latest images..."));
   try {
@@ -1338,9 +1413,9 @@ var updateCommand = new Command7("update").description("Update Horus to the late
 // src/commands/doctor.ts
 import { Command as Command8 } from "commander";
 import chalk8 from "chalk";
-import { execSync } from "child_process";
-import { existsSync as existsSync5, accessSync, statfsSync, constants } from "fs";
-import { join as join5 } from "path";
+import { execSync as execSync2 } from "child_process";
+import { existsSync as existsSync6, accessSync, statfsSync, constants } from "fs";
+import { join as join6 } from "path";
 function symbol(status) {
   switch (status) {
     case "pass":
@@ -1363,11 +1438,11 @@ function colorMessage(status, msg) {
 }
 async function checkRuntime2() {
   try {
-    execSync("docker info", { stdio: "ignore" });
+    execSync2("docker info", { stdio: "ignore" });
     return { status: "pass", label: "Runtime", message: "Docker is running" };
   } catch {
     try {
-      execSync("podman info", { stdio: "ignore" });
+      execSync2("podman info", { stdio: "ignore" });
       return { status: "pass", label: "Runtime", message: "Podman is running" };
     } catch {
       return {
@@ -1381,11 +1456,11 @@ async function checkRuntime2() {
 }
 async function checkCompose() {
   try {
-    execSync("docker compose version", { stdio: "ignore" });
+    execSync2("docker compose version", { stdio: "ignore" });
     return { status: "pass", label: "Compose", message: "Compose plugin available" };
   } catch {
     try {
-      execSync("podman compose version", { stdio: "ignore" });
+      execSync2("podman compose version", { stdio: "ignore" });
       return { status: "pass", label: "Compose", message: "Compose plugin available (podman)" };
     } catch {
       return {
@@ -1409,7 +1484,7 @@ function checkConfig() {
   };
 }
 function checkComposeFile() {
-  if (existsSync5(COMPOSE_PATH)) {
+  if (existsSync6(COMPOSE_PATH)) {
     return { status: "pass", label: "Compose file", message: "Compose file installed (~/.horus/docker-compose.yml)" };
   }
   return {
@@ -1421,7 +1496,7 @@ function checkComposeFile() {
 }
 function checkPort(port, serviceName) {
   try {
-    const output = execSync(`lsof -i :${port} -sTCP:LISTEN -t 2>/dev/null || true`, {
+    const output = execSync2(`lsof -i :${port} -sTCP:LISTEN -t 2>/dev/null || true`, {
       encoding: "utf-8"
     }).trim();
     if (!output) {
@@ -1430,7 +1505,7 @@ function checkPort(port, serviceName) {
     const pids = output.split("\n").filter(Boolean);
     for (const pid of pids) {
       try {
-        const cmdline = execSync(`ps -p ${pid} -o comm= 2>/dev/null || true`, {
+        const cmdline = execSync2(`ps -p ${pid} -o comm= 2>/dev/null || true`, {
           encoding: "utf-8"
         }).trim();
         if (cmdline.toLowerCase().includes("docker") || cmdline.toLowerCase().includes("podman")) {
@@ -1450,7 +1525,7 @@ function checkPort(port, serviceName) {
   }
 }
 function checkDataDir(dataDir) {
-  if (!existsSync5(dataDir)) {
+  if (!existsSync6(dataDir)) {
     return {
       status: "warn",
       label: "Data directory",
@@ -1471,7 +1546,7 @@ function checkDataDir(dataDir) {
   }
 }
 function checkDiskSpace(dataDir) {
-  const checkDir = existsSync5(dataDir) ? dataDir : join5(dataDir, "..");
+  const checkDir = existsSync6(dataDir) ? dataDir : join6(dataDir, "..");
   try {
     const stats = statfsSync(checkDir);
     const freeBytes = stats.bfree * stats.bsize;
@@ -1555,7 +1630,7 @@ var doctorCommand = new Command8("doctor").description("Diagnose common Horus is
   allResults.push(checkComposeFile());
   const config = configExists() ? loadConfig() : null;
   const ports = config?.ports ?? DEFAULT_PORTS;
-  const dataDir = config?.data_dir ?? join5(process.env.HOME ?? "~", ".horus", "data");
+  const dataDir = config?.data_dir ?? join6(process.env.HOME ?? "~", ".horus", "data");
   allResults.push(checkPort(ports.anvil, "Anvil"));
   allResults.push(checkPort(ports.vault_rest, "Vault"));
   allResults.push(checkPort(ports.vault_mcp, "Vault MCP"));
@@ -1610,13 +1685,13 @@ import { Command as Command9 } from "commander";
 import chalk9 from "chalk";
 import ora7 from "ora";
 import { confirm as confirm4 } from "@inquirer/prompts";
-import { mkdirSync as mkdirSync4, statSync, existsSync as existsSync6, writeFileSync as writeFileSync5 } from "fs";
-import { join as join6, basename } from "path";
-import { execSync as execSync2 } from "child_process";
+import { mkdirSync as mkdirSync5, statSync, existsSync as existsSync7, writeFileSync as writeFileSync5 } from "fs";
+import { join as join7, basename } from "path";
+import { execSync as execSync3 } from "child_process";
 import { stringify as stringifyYaml3 } from "yaml";
-var BACKUPS_DIR = join6(HORUS_DIR, "backups");
+var BACKUPS_DIR = join7(HORUS_DIR, "backups");
 function ensureBackupsDir() {
-  mkdirSync4(BACKUPS_DIR, { recursive: true });
+  mkdirSync5(BACKUPS_DIR, { recursive: true });
 }
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes}B`;
@@ -1661,11 +1736,11 @@ async function createBackup(yes) {
   }
   ensureBackupsDir();
   const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-  const tarFile = join6(BACKUPS_DIR, `${timestamp}.tar.gz`);
-  const metaFile = join6(BACKUPS_DIR, `${timestamp}.meta.yaml`);
+  const tarFile = join7(BACKUPS_DIR, `${timestamp}.tar.gz`);
+  const metaFile = join7(BACKUPS_DIR, `${timestamp}.meta.yaml`);
   const backupSpinner = ora7("Creating backup archive...").start();
   try {
-    execSync2(`tar -czf "${tarFile}" -C "${HORUS_DIR}" data/`, {
+    execSync3(`tar -czf "${tarFile}" -C "${HORUS_DIR}" data/`, {
       stdio: "pipe"
     });
     backupSpinner.succeed(`Archive created: ${chalk9.dim(tarFile)}`);
@@ -1711,7 +1786,7 @@ async function restoreBackup(file, yes) {
   console.log(chalk9.bold("Horus Restore"));
   console.log(chalk9.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
   console.log("");
-  if (!existsSync6(file)) {
+  if (!existsSync7(file)) {
     console.log(chalk9.red(`Backup file not found: ${file}`));
     process.exit(1);
   }
@@ -1749,7 +1824,7 @@ async function restoreBackup(file, yes) {
   }
   const extractSpinner = ora7("Extracting backup...").start();
   try {
-    execSync2(`tar -xzf "${file}" -C "${HORUS_DIR}/"`, { stdio: "pipe" });
+    execSync3(`tar -xzf "${file}" -C "${HORUS_DIR}/"`, { stdio: "pipe" });
     extractSpinner.succeed("Backup extracted");
   } catch (error) {
     extractSpinner.fail("Failed to extract backup");
