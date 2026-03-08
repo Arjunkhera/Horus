@@ -15,7 +15,7 @@
 #   Copy .env.example to .env and edit, or export variables before running.
 #   HORUS_DATA_PATH and HOST_REPOS_PATH are required.
 #
-# Images are pulled from ghcr.io/arkhera/horus/. No source repos are cloned
+# Images are pulled from ghcr.io/arjunkhera/horus/. No source repos are cloned
 # or built — this file is for operators and external users.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ services:
   # Vault pay the model-load cost only once.
   # start_period covers first-boot GGUF model download (~1-2 GB) + initial embed.
   qmd-daemon:
-    image: ghcr.io/arkhera/horus/qmd-daemon:latest
+    image: ghcr.io/arjunkhera/horus/qmd-daemon:latest
     environment:
       - QMD_DAEMON_PORT=8181
     volumes:
@@ -50,7 +50,7 @@ services:
 
   # ── Anvil ──────────────────────────────────────────────────────────────────
   anvil:
-    image: ghcr.io/arkhera/horus/anvil:latest
+    image: ghcr.io/arjunkhera/horus/anvil:latest
     ports:
       - "${ANVIL_PORT:-8100}:8100"
     volumes:
@@ -89,7 +89,7 @@ services:
 
   # ── Vault ──────────────────────────────────────────────────────────────────
   vault:
-    image: ghcr.io/arkhera/horus/vault:latest
+    image: ghcr.io/arjunkhera/horus/vault:latest
     ports:
       - "${VAULT_PORT:-8000}:8000"
     volumes:
@@ -130,7 +130,7 @@ services:
 
   # ── Vault MCP ──────────────────────────────────────────────────────────────
   vault-mcp:
-    image: ghcr.io/arkhera/horus/vault-mcp:latest
+    image: ghcr.io/arjunkhera/horus/vault-mcp:latest
     ports:
       - "${VAULT_MCP_PORT:-8300}:8300"
     environment:
@@ -160,7 +160,7 @@ services:
 
   # ── Forge ──────────────────────────────────────────────────────────────────
   forge:
-    image: ghcr.io/arkhera/horus/forge:latest
+    image: ghcr.io/arjunkhera/horus/forge:latest
     ports:
       - "${FORGE_PORT:-8200}:8200"
     volumes:

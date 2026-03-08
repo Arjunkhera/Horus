@@ -10,7 +10,7 @@ import {
   defaultConfig,
   type Config,
 } from '../lib/config.js';
-import { checkRuntime, detectRuntime, composeStreaming } from '../lib/runtime.js';
+import { checkRuntime, detectRuntime, composeStreaming, registryLogin } from '../lib/runtime.js';
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { installComposeFile } from '../lib/compose.js';
 import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
@@ -190,15 +190,26 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 7: Pull images
+    // Step 7: Authenticate with GHCR if a token is available
+    const ghcrToken = config.github_token || process.env.GITHUB_TOKEN || '';
+    if (ghcrToken) {
+      const loginSpinner = ora('Authenticating with ghcr.io...').start();
+      const ok = await registryLogin(runtime, 'ghcr.io', ghcrToken);
+      if (ok) {
+        loginSpinner.succeed('Authenticated with ghcr.io');
+      } else {
+        loginSpinner.warn('GHCR login failed — private images may not pull');
+      }
+    }
+
+    // Step 8: Pull images (non-fatal — images may not be published yet)
     console.log('');
     console.log(chalk.bold('Pulling container images...'));
     try {
-      await composeStreaming(runtime, ['pull']);
-    } catch (error) {
-      console.log(chalk.red('Failed to pull images.'));
-      console.log(chalk.dim((error as Error).message));
-      process.exit(1);
+      await composeStreaming(runtime, ['pull', '--ignore-pull-failures']);
+    } catch {
+      console.log(chalk.yellow('Some images could not be pulled.'));
+      console.log(chalk.dim('Continuing — services will be built from source if build contexts are available.'));
     }
 
     // Step 8: Start services
