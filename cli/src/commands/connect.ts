@@ -110,6 +110,27 @@ async function syncSkills(runtime: ReturnType<typeof detectRuntime> extends Prom
   }
 }
 
+// ── Cursor rules sync ─────────────────────────────────────────────────────────
+
+async function syncSkillsForCursor(runtime: ReturnType<typeof detectRuntime> extends Promise<infer R> ? R : never): Promise<void> {
+  const home = homedir();
+  const rulesDir = join(home, '.cursor', 'rules');
+  const skills = ['horus-anvil', 'horus-vault', 'horus-forge'] as const;
+  const forgeContainer = 'horus-forge-1';
+
+  mkdirSync(rulesDir, { recursive: true });
+
+  for (const skill of skills) {
+    const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
+    const dest = join(rulesDir, `${skill}.mdc`);
+    const result = await runtime.exec(forgeContainer, 'cat', src);
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      const frontmatter = `---\ndescription: Horus ${skill} reference\nalwaysApply: true\n---\n\n`;
+      writeFileSync(dest, frontmatter + result.stdout, 'utf-8');
+    }
+  }
+}
+
 // ── Next steps messaging ──────────────────────────────────────────────────────
 
 function printNextSteps(targets: ClientTarget[]): void {
@@ -124,7 +145,7 @@ function printNextSteps(targets: ClientTarget[]): void {
         console.log(`  ${chalk.cyan('Claude Code')}     Start a new Claude Code session`);
         break;
       case 'cursor':
-        console.log(`  ${chalk.cyan('Cursor')}          Restart Cursor`);
+        console.log(`  ${chalk.cyan('Cursor')}          Restart Cursor to pick up the new MCP configuration and rules`);
         break;
     }
   }
@@ -239,6 +260,18 @@ export const connectCommand = new Command('connect')
         skillsSpinner.succeed('horus-core skills synced to ~/.claude/skills/');
       } catch (error) {
         skillsSpinner.warn('Could not sync skills (Forge container may not be running)');
+        console.log(chalk.dim((error as Error).message));
+      }
+    }
+
+    // Step 7b: Sync horus-core rules for Cursor
+    if (targets.includes('cursor')) {
+      const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor...').start();
+      try {
+        await syncSkillsForCursor(runtime);
+        cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/');
+      } catch (error) {
+        cursorRulesSpinner.warn('Could not sync Cursor rules (Forge container may not be running)');
         console.log(chalk.dim((error as Error).message));
       }
     }
