@@ -168,6 +168,10 @@ export const setupCommand = new Command('setup')
       console.log(chalk.dim('Horus stores notes and knowledge in Git repos you own.'));
       console.log(chalk.dim('Create empty repos on your Git server, then paste the URLs below.'));
       console.log('');
+      console.log(chalk.yellow('  Use HTTPS URLs — container services do not have SSH keys.'));
+      console.log(chalk.dim('  SSH URLs (git@github.com:...) will fail at runtime inside Docker/Podman.'));
+      console.log(chalk.dim('  Set GITHUB_TOKEN for private repos.'));
+      console.log('');
 
       const git_host = await input({
         message: 'Git server hostname:',
@@ -175,7 +179,7 @@ export const setupCommand = new Command('setup')
       });
 
       const host = git_host.trim();
-      const example = (repo: string) => chalk.dim(`  e.g., git@${host}:<owner>/${repo}.git`);
+      const example = (repo: string) => chalk.dim(`  e.g., https://${host}/<owner>/${repo}`);
 
       console.log('');
 
