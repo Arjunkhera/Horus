@@ -10,7 +10,8 @@ import { composeFileExists } from '../lib/compose.js';
 
 export const upCommand = new Command('up')
   .description('Start the Horus stack')
-  .action(async () => {
+  .option('--no-pull', 'Skip pulling latest images before starting')
+  .action(async (opts) => {
     // Check that setup has been run
     if (!configExists() || !composeFileExists()) {
       console.log(chalk.red('Horus is not set up yet.'));
@@ -32,7 +33,16 @@ export const upCommand = new Command('up')
       process.exit(1);
     }
 
-    // Start services
+    if (opts.pull) {
+      const pullSpinner = ora('Pulling latest images...').start();
+      try {
+        await composeStreaming(runtime, ['pull', '--ignore-pull-failures']);
+        pullSpinner.succeed('Images up to date');
+      } catch {
+        pullSpinner.warn('Could not pull images, using cached');
+      }
+    }
+
     console.log('');
     console.log(chalk.bold('Starting Horus services...'));
     try {
