@@ -741,7 +741,7 @@ ${example("forge-registry")}
 import { Command as Command2 } from "commander";
 import chalk2 from "chalk";
 import ora2 from "ora";
-var upCommand = new Command2("up").description("Start the Horus stack").action(async () => {
+var upCommand = new Command2("up").description("Start the Horus stack").option("--no-pull", "Skip pulling latest images before starting").action(async (opts) => {
   if (!configExists() || !composeFileExists()) {
     console.log(chalk2.red("Horus is not set up yet."));
     console.log(chalk2.dim("Run `horus setup` first."));
@@ -757,6 +757,15 @@ var upCommand = new Command2("up").description("Start the Horus stack").action(a
     spinner.fail("No container runtime found");
     console.log(error.message);
     process.exit(1);
+  }
+  if (opts.pull) {
+    const pullSpinner = ora2("Pulling latest images...").start();
+    try {
+      await composeStreaming(runtime, ["pull", "--ignore-pull-failures"]);
+      pullSpinner.succeed("Images up to date");
+    } catch {
+      pullSpinner.warn("Could not pull images, using cached");
+    }
   }
   console.log("");
   console.log(chalk2.bold("Starting Horus services..."));

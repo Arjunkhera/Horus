@@ -1,6 +1,6 @@
 {
   "name": "@arkhera30/cli",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "CLI for managing the Horus AI development stack",
   "type": "module",
   "bin": {
