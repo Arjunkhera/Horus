@@ -138,7 +138,7 @@ export function generateEnv(config: Config): string {
     `VAULT_MCP_PORT=${config.ports.vault_mcp}`,
     `FORGE_PORT=${config.ports.forge}`,
     '',
-    '# Repository URLs',
+    '# Repository URLs (must be HTTPS — container services do not have SSH keys)',
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
     `VAULT_KNOWLEDGE_REPO_URL=${config.repos.vault_knowledge}`,
     `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
