@@ -237,6 +237,10 @@ export const updateCommand = new Command('update')
       console.log(chalk.dim('  Could not reach GitHub to check latest version.'));
     }
     console.log('');
+    console.log(chalk.dim('  Note: this updates the Horus container services only.'));
+    console.log(chalk.dim('  To update the Horus CLI itself, run:'));
+    console.log(`    ${chalk.cyan('npm install -g @arkhera30/cli@latest')}`);
+    console.log('');
 
     if (!opts.yes) {
       const confirmed = await confirm({
