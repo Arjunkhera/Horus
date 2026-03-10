@@ -21,6 +21,29 @@ Vault MCP (8300) is the public-facing MCP adapter that proxies calls to Vault RE
 - Docker + Docker Compose
 - All sibling repos cloned at the same directory level as this one
 
+## Installation
+
+```bash
+npm install -g @arkhera30/cli
+horus setup
+```
+
+## Updating
+
+**Update container services** (Vault, Anvil, Forge — pulls latest images):
+
+```bash
+horus update
+```
+
+**Update the Horus CLI itself:**
+
+```bash
+npm install -g @arkhera30/cli@latest
+```
+
+Run `horus --version` to confirm the new version. To roll back services after an update: `horus update --rollback`.
+
 ## Running the stack
 
 ```bash
