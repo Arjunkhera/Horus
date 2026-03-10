@@ -143,6 +143,9 @@ export function generateEnv(config: Config): string {
     `VAULT_KNOWLEDGE_REPO_URL=${config.repos.vault_knowledge}`,
     `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
     '',
+    '# Authentication',
+    `GITHUB_TOKEN=${config.github_token}`,
+    '',
   ];
 
   return lines.join('\n');

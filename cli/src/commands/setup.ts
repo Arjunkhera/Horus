@@ -4,7 +4,7 @@ import ora from 'ora';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { input, confirm, number, select } from '@inquirer/prompts';
+import { input, confirm, number, select, password } from '@inquirer/prompts';
 import {
   loadConfig,
   saveConfig,
@@ -18,6 +18,25 @@ import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { installComposeFile } from '../lib/compose.js';
 import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Embed a token into an HTTPS clone URL so git can authenticate without a
+ * credential helper. Returns the URL unchanged if no token is provided.
+ * git masks passwords in error output, so the token won't appear in logs.
+ */
+function injectToken(url: string, token: string): string {
+  if (!token) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.username = 'oauth2';
+    parsed.password = token;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 // ── Setup command ───────────────────────────────────────────────────────────
 
 export const setupCommand = new Command('setup')
@@ -30,6 +49,7 @@ export const setupCommand = new Command('setup')
   .option('--anvil-repo <url>', 'Anvil notes repository URL')
   .option('--vault-repo <url>', 'Vault knowledge-base repository URL')
   .option('--forge-repo <url>', 'Forge registry repository URL')
+  .option('--github-token <token>', 'GitHub personal access token for private repos')
   .action(async (opts) => {
     console.log('');
     console.log(chalk.bold('Horus Setup'));
@@ -117,6 +137,7 @@ export const setupCommand = new Command('setup')
           vault_knowledge: opts.vaultRepo || process.env.VAULT_KNOWLEDGE_REPO_URL || defaults.repos.vault_knowledge,
           forge_registry: opts.forgeRepo || process.env.FORGE_REGISTRY_REPO_URL || defaults.repos.forge_registry,
         },
+        github_token: opts.githubToken || process.env.GITHUB_TOKEN || '',
       };
     } else {
       // Interactive mode
@@ -170,7 +191,6 @@ export const setupCommand = new Command('setup')
       console.log('');
       console.log(chalk.yellow('  Use HTTPS URLs — container services do not have SSH keys.'));
       console.log(chalk.dim('  SSH URLs (git@github.com:...) will fail at runtime inside Docker/Podman.'));
-      console.log(chalk.dim('  Set GITHUB_TOKEN for private repos.'));
       console.log('');
 
       const git_host = await input({
@@ -198,6 +218,16 @@ export const setupCommand = new Command('setup')
         validate: (v) => v.trim().length > 0 || 'Forge needs a registry repo.',
       });
 
+      console.log('');
+      console.log(chalk.bold('Authentication'));
+      console.log(chalk.dim('A personal access token is required for private repositories.'));
+      console.log('');
+
+      const github_token = await password({
+        message: 'GitHub personal access token (leave empty to skip):',
+        mask: '*',
+      });
+
       config = {
         ...defaultConfig(),
         data_dir,
@@ -210,6 +240,7 @@ export const setupCommand = new Command('setup')
           vault_knowledge: vault_knowledge.trim(),
           forge_registry: forge_registry.trim(),
         },
+        github_token: github_token.trim(),
       };
     }
 
@@ -272,7 +303,8 @@ export const setupCommand = new Command('setup')
 
         try {
           mkdirSync(repo.dest, { recursive: true });
-          execSync(`git clone "${repo.url}" "${repo.dest}"`, {
+          const cloneUrl = injectToken(repo.url, config.github_token);
+          execSync(`git clone "${cloneUrl}" "${repo.dest}"`, {
             stdio: 'pipe',
             timeout: 60_000,
           });
@@ -286,7 +318,9 @@ export const setupCommand = new Command('setup')
             console.log(chalk.dim(`  ${msg.split('\n')[0]}`));
           }
           console.log(chalk.dim(`  URL: ${repo.url}`));
-          console.log(chalk.dim('  Ensure you have git access (SSH key or credential helper).'));
+          if (!config.github_token) {
+            console.log(chalk.dim('  Tip: Re-run setup and provide a GitHub token if the repo is private.'));
+          }
           process.exit(1);
         }
       }
