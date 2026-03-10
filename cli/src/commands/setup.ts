@@ -266,10 +266,10 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 6: Install compose file
+    // Step 6: Install compose file (Podman gets user override for UID mapping)
     const composeSpinner = ora('Installing docker-compose.yml...').start();
     try {
-      installComposeFile();
+      installComposeFile(runtime.name);
       composeSpinner.succeed('Compose file installed to ~/.horus/docker-compose.yml');
     } catch (error) {
       composeSpinner.fail('Failed to install compose file');
