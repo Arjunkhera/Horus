@@ -31,6 +31,7 @@ export interface Config {
     forge_registry: string;
   };
   host_repos_path: string;
+  host_repos_extra_scan_dirs: string[];
   github_token: string;
 }
 
@@ -45,6 +46,7 @@ export function defaultConfig(): Config {
     git_host: 'github.com',
     repos: { ...DEFAULT_REPOS },
     host_repos_path: '',
+    host_repos_extra_scan_dirs: [],
     github_token: '',
   };
 }
@@ -91,6 +93,7 @@ export function loadConfig(): Config {
       forge_registry: parsed.repos?.forge_registry ?? defaults.repos.forge_registry,
     },
     host_repos_path: parsed.host_repos_path ?? defaults.host_repos_path,
+    host_repos_extra_scan_dirs: parsed.host_repos_extra_scan_dirs ?? defaults.host_repos_extra_scan_dirs,
     github_token: parsed.github_token ?? defaults.github_token,
   };
 }
@@ -123,6 +126,14 @@ export function generateEnv(config: Config): string {
     ? resolvePath(config.host_repos_path)
     : '';
 
+  // Build FORGE_SCAN_PATHS: base container path + any extra subdirectory paths
+  const baseScanPath = '/data/repos';
+  const extraScanPaths = (config.host_repos_extra_scan_dirs ?? [])
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .map((d) => `${baseScanPath}/${d}`);
+  const forgeScanPaths = [baseScanPath, ...extraScanPaths].join(':');
+
   const lines: string[] = [
     '# ─────────────────────────────────────────────────────────────────────────────',
     '# Horus — Generated .env file',
@@ -131,6 +142,7 @@ export function generateEnv(config: Config): string {
     '',
     `HORUS_DATA_PATH=${dataDir}`,
     `HOST_REPOS_PATH=${hostReposPath}`,
+    `FORGE_SCAN_PATHS=${forgeScanPaths}`,
     '',
     '# Ports',
     `ANVIL_PORT=${config.ports.anvil}`,
@@ -168,6 +180,7 @@ export function writeEnvFile(config: Config): void {
 export const CONFIG_KEYS = [
   'data-dir',
   'host-repos-path',
+  'host-repos-extra-scan-dirs',
   'runtime',
   'port.anvil',
   'port.vault-rest',
@@ -191,6 +204,8 @@ export function getConfigValue(config: Config, key: ConfigKey): string {
       return config.data_dir;
     case 'host-repos-path':
       return config.host_repos_path;
+    case 'host-repos-extra-scan-dirs':
+      return (config.host_repos_extra_scan_dirs ?? []).join(', ');
     case 'runtime':
       return config.runtime;
     case 'port.anvil':
@@ -226,6 +241,12 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
       break;
     case 'host-repos-path':
       updated.host_repos_path = value;
+      break;
+    case 'host-repos-extra-scan-dirs':
+      updated.host_repos_extra_scan_dirs = value
+        .split(',')
+        .map((d) => d.trim())
+        .filter(Boolean);
       break;
     case 'runtime':
       if (value !== 'docker' && value !== 'podman') {

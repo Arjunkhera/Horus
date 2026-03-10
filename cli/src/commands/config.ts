@@ -33,8 +33,10 @@ export const configCommand = new Command('config')
     console.log(`  ${chalk.bold('version:')}          ${config.version}`);
     console.log(`  ${chalk.bold('data-dir:')}         ${config.data_dir}`);
     console.log(`  ${chalk.bold('runtime:')}          ${config.runtime}`);
-    console.log(`  ${chalk.bold('host-repos-path:')}  ${config.host_repos_path || chalk.dim('(not set)')}`);
-    console.log(`  ${chalk.bold('git-host:')}         ${config.git_host || chalk.dim('(not set)')}`);
+    console.log(`  ${chalk.bold('host-repos-path:')}             ${config.host_repos_path || chalk.dim('(not set)')}`);
+    const extraDirs = (config.host_repos_extra_scan_dirs ?? []).join(', ');
+    console.log(`  ${chalk.bold('host-repos-extra-scan-dirs:')}  ${extraDirs || chalk.dim('(not set)')}`);
+    console.log(`  ${chalk.bold('git-host:')}                    ${config.git_host || chalk.dim('(not set)')}`);
     console.log(`  ${chalk.bold('github-token:')}     ${config.github_token ? maskApiKey(config.github_token) : chalk.dim('(not set)')}`);
     console.log('');
     console.log(chalk.bold('  Ports:'));
@@ -119,6 +121,7 @@ configCommand
     const needsRestart = [
       'data-dir',
       'host-repos-path',
+      'host-repos-extra-scan-dirs',
       'runtime',
       'port.anvil',
       'port.vault-rest',
