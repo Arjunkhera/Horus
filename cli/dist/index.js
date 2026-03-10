@@ -12,7 +12,7 @@ import ora from "ora";
 import { execSync } from "child_process";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "fs";
 import { join as join3 } from "path";
-import { input, confirm, number, select } from "@inquirer/prompts";
+import { input, confirm, number, select, password } from "@inquirer/prompts";
 
 // src/lib/config.ts
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
@@ -123,10 +123,13 @@ function generateEnv(config) {
     `VAULT_MCP_PORT=${config.ports.vault_mcp}`,
     `FORGE_PORT=${config.ports.forge}`,
     "",
-    "# Repository URLs",
+    "# Repository URLs (must be HTTPS \u2014 container services do not have SSH keys)",
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
     `VAULT_KNOWLEDGE_REPO_URL=${config.repos.vault_knowledge}`,
     `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
+    "",
+    "# Authentication",
+    `GITHUB_TOKEN=${config.github_token}`,
     ""
   ];
   return lines.join("\n");
@@ -428,7 +431,18 @@ function installComposeFile() {
 }
 
 // src/commands/setup.ts
-var setupCommand = new Command("setup").description("Interactive first-run setup for Horus").option("-y, --yes", "Non-interactive mode (use defaults + env vars)").option("--runtime <runtime>", "Container runtime to use: docker or podman (non-interactive only)").option("--data-dir <path>", "Data directory path").option("--repos-path <path>", "Host repos path for Forge scanning").option("--git-host <host>", "Git server hostname (e.g., github.com, gitlab.corp.com)").option("--anvil-repo <url>", "Anvil notes repository URL").option("--vault-repo <url>", "Vault knowledge-base repository URL").option("--forge-repo <url>", "Forge registry repository URL").action(async (opts) => {
+function injectToken(url, token) {
+  if (!token) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.username = "oauth2";
+    parsed.password = token;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+var setupCommand = new Command("setup").description("Interactive first-run setup for Horus").option("-y, --yes", "Non-interactive mode (use defaults + env vars)").option("--runtime <runtime>", "Container runtime to use: docker or podman (non-interactive only)").option("--data-dir <path>", "Data directory path").option("--repos-path <path>", "Host repos path for Forge scanning").option("--git-host <host>", "Git server hostname (e.g., github.com, gitlab.corp.com)").option("--anvil-repo <url>", "Anvil notes repository URL").option("--vault-repo <url>", "Vault knowledge-base repository URL").option("--forge-repo <url>", "Forge registry repository URL").option("--github-token <token>", "GitHub personal access token for private repos").action(async (opts) => {
   console.log("");
   console.log(chalk.bold("Horus Setup"));
   console.log(chalk.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
@@ -500,7 +514,8 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
         anvil_notes: opts.anvilRepo || process.env.ANVIL_REPO_URL || defaults.repos.anvil_notes,
         vault_knowledge: opts.vaultRepo || process.env.VAULT_KNOWLEDGE_REPO_URL || defaults.repos.vault_knowledge,
         forge_registry: opts.forgeRepo || process.env.FORGE_REGISTRY_REPO_URL || defaults.repos.forge_registry
-      }
+      },
+      github_token: opts.githubToken || process.env.GITHUB_TOKEN || ""
     };
   } else {
     const data_dir = await input({
@@ -545,12 +560,15 @@ var setupCommand = new Command("setup").description("Interactive first-run setup
     console.log(chalk.dim("Horus stores notes and knowledge in Git repos you own."));
     console.log(chalk.dim("Create empty repos on your Git server, then paste the URLs below."));
     console.log("");
+    console.log(chalk.yellow("  Use HTTPS URLs \u2014 container services do not have SSH keys."));
+    console.log(chalk.dim("  SSH URLs (git@github.com:...) will fail at runtime inside Docker/Podman."));
+    console.log("");
     const git_host = await input({
       message: "Git server hostname:",
       default: "github.com"
     });
     const host = git_host.trim();
-    const example = (repo) => chalk.dim(`  e.g., git@${host}:<owner>/${repo}.git`);
+    const example = (repo) => chalk.dim(`  e.g., https://${host}/<owner>/${repo}`);
     console.log("");
     const anvil_notes = await input({
       message: `Anvil notes repo URL:
@@ -570,6 +588,14 @@ ${example("forge-registry")}
 `,
       validate: (v) => v.trim().length > 0 || "Forge needs a registry repo."
     });
+    console.log("");
+    console.log(chalk.bold("Authentication"));
+    console.log(chalk.dim("A personal access token is required for private repositories."));
+    console.log("");
+    const github_token = await password({
+      message: "GitHub personal access token (leave empty to skip):",
+      mask: "*"
+    });
     config = {
       ...defaultConfig(),
       data_dir,
@@ -581,7 +607,8 @@ ${example("forge-registry")}
         anvil_notes: anvil_notes.trim(),
         vault_knowledge: vault_knowledge.trim(),
         forge_registry: forge_registry.trim()
-      }
+      },
+      github_token: github_token.trim()
     };
   }
   const configSpinner = ora("Saving configuration...").start();
@@ -629,7 +656,8 @@ ${example("forge-registry")}
       }
       try {
         mkdirSync2(repo.dest, { recursive: true });
-        execSync(`git clone "${repo.url}" "${repo.dest}"`, {
+        const cloneUrl = injectToken(repo.url, config.github_token);
+        execSync(`git clone "${cloneUrl}" "${repo.dest}"`, {
           stdio: "pipe",
           timeout: 6e4
         });
@@ -643,7 +671,9 @@ ${example("forge-registry")}
           console.log(chalk.dim(`  ${msg.split("\n")[0]}`));
         }
         console.log(chalk.dim(`  URL: ${repo.url}`));
-        console.log(chalk.dim("  Ensure you have git access (SSH key or credential helper)."));
+        if (!config.github_token) {
+          console.log(chalk.dim("  Tip: Re-run setup and provide a GitHub token if the repo is private."));
+        }
         process.exit(1);
       }
     }
@@ -1056,6 +1086,27 @@ async function syncSkills(runtime) {
     }
   }
 }
+async function syncSkillsForCursor(runtime) {
+  const home = homedir3();
+  const rulesDir = join4(home, ".cursor", "rules");
+  const skills = ["horus-anvil", "horus-vault", "horus-forge"];
+  const forgeContainer = "horus-forge-1";
+  mkdirSync3(rulesDir, { recursive: true });
+  for (const skill of skills) {
+    const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
+    const dest = join4(rulesDir, `${skill}.mdc`);
+    const result = await runtime.exec(forgeContainer, "cat", src);
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      const frontmatter = `---
+description: Horus ${skill} reference
+alwaysApply: true
+---
+
+`;
+      writeFileSync3(dest, frontmatter + result.stdout, "utf-8");
+    }
+  }
+}
 function printNextSteps(targets) {
   console.log("");
   console.log(chalk6.bold("Next steps:"));
@@ -1068,7 +1119,7 @@ function printNextSteps(targets) {
         console.log(`  ${chalk6.cyan("Claude Code")}     Start a new Claude Code session`);
         break;
       case "cursor":
-        console.log(`  ${chalk6.cyan("Cursor")}          Restart Cursor`);
+        console.log(`  ${chalk6.cyan("Cursor")}          Restart Cursor to pick up the new MCP configuration and rules`);
         break;
     }
   }
@@ -1156,6 +1207,16 @@ var connectCommand = new Command6("connect").description("Configure Claude/Curso
       skillsSpinner.succeed("horus-core skills synced to ~/.claude/skills/");
     } catch (error) {
       skillsSpinner.warn("Could not sync skills (Forge container may not be running)");
+      console.log(chalk6.dim(error.message));
+    }
+  }
+  if (targets.includes("cursor")) {
+    const cursorRulesSpinner = ora5("Syncing horus-core rules for Cursor...").start();
+    try {
+      await syncSkillsForCursor(runtime);
+      cursorRulesSpinner.succeed("horus-core rules synced to ~/.cursor/rules/");
+    } catch (error) {
+      cursorRulesSpinner.warn("Could not sync Cursor rules (Forge container may not be running)");
       console.log(chalk6.dim(error.message));
     }
   }
@@ -1334,6 +1395,10 @@ var updateCommand = new Command7("update").description("Update Horus to the late
   } else {
     console.log(chalk7.dim("  Could not reach GitHub to check latest version."));
   }
+  console.log("");
+  console.log(chalk7.dim("  Note: this updates the Horus container services only."));
+  console.log(chalk7.dim("  To update the Horus CLI itself, run:"));
+  console.log(`    ${chalk7.cyan("npm install -g @arkhera30/cli@latest")}`);
   console.log("");
   if (!opts.yes) {
     const confirmed = await confirm3({
