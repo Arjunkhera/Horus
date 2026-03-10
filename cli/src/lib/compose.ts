@@ -33,6 +33,27 @@ function getBundledComposePath(): string {
   );
 }
 
+// ── Podman rootless compatibility ────────────────────────────────────────────
+
+/**
+ * Podman rootless on macOS uses a Linux VM with virtiofs volume sharing.
+ * Host-mounted directories appear as root:nogroup inside the container, so
+ * non-root service users (forge, anvil, appuser) get EACCES on write.
+ *
+ * The fix: override every service to run as root (UID 0) inside the container.
+ * In rootless Podman this is safe — "root" in the container maps to the
+ * unprivileged host user via user-namespace remapping, so the security
+ * boundary is preserved.
+ *
+ * Inserts `user: "0:0"` after each `image:` line in the compose YAML.
+ */
+function applyPodmanUserOverride(compose: string): string {
+  return compose.replace(
+    /^(    image: .+)$/gm,
+    '$1\n    user: "0:0"',
+  );
+}
+
 // ── Compose file management ─────────────────────────────────────────────────
 
 /**
@@ -43,12 +64,19 @@ export function composeFileExists(): boolean {
 }
 
 /**
- * Copy the bundled docker-compose.yml to ~/.horus/docker-compose.yml.
+ * Install the bundled docker-compose.yml to ~/.horus/docker-compose.yml.
+ * When the runtime is Podman, services are overridden to run as root inside
+ * the container so they can write to host-mounted volumes.
  */
-export function installComposeFile(): void {
+export function installComposeFile(runtime?: 'docker' | 'podman'): void {
   ensureHorusDir();
   const bundledPath = getBundledComposePath();
-  const content = readFileSync(bundledPath, 'utf-8');
+  let content = readFileSync(bundledPath, 'utf-8');
+
+  if (runtime === 'podman') {
+    content = applyPodmanUserOverride(content);
+  }
+
   writeFileSync(COMPOSE_PATH, content, 'utf-8');
 }
 

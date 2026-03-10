@@ -420,13 +420,22 @@ function getBundledComposePath() {
 Searched: ${candidates.join(", ")}`
   );
 }
+function applyPodmanUserOverride(compose) {
+  return compose.replace(
+    /^(    image: .+)$/gm,
+    '$1\n    user: "0:0"'
+  );
+}
 function composeFileExists() {
   return existsSync2(COMPOSE_PATH);
 }
-function installComposeFile() {
+function installComposeFile(runtime) {
   ensureHorusDir();
   const bundledPath = getBundledComposePath();
-  const content = readFileSync2(bundledPath, "utf-8");
+  let content = readFileSync2(bundledPath, "utf-8");
+  if (runtime === "podman") {
+    content = applyPodmanUserOverride(content);
+  }
   writeFileSync2(COMPOSE_PATH, content, "utf-8");
 }
 
@@ -631,7 +640,7 @@ ${example("forge-registry")}
   }
   const composeSpinner = ora("Installing docker-compose.yml...").start();
   try {
-    installComposeFile();
+    installComposeFile(runtime.name);
     composeSpinner.succeed("Compose file installed to ~/.horus/docker-compose.yml");
   } catch (error) {
     composeSpinner.fail("Failed to install compose file");
