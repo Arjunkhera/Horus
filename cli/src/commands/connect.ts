@@ -6,12 +6,12 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execa } from 'execa';
-import { loadConfig } from '../lib/config.js';
+import { loadConfig, type Config } from '../lib/config.js';
 import { detectRuntime } from '../lib/runtime.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type ClientTarget = 'claude-desktop' | 'claude-code' | 'cursor';
+export type ClientTarget = 'claude-desktop' | 'claude-code' | 'cursor';
 
 interface McpServerEntry {
   url: string;
@@ -23,7 +23,7 @@ interface McpConfig {
 
 // ── Client detection ─────────────────────────────────────────────────────────
 
-function detectInstalledClients(): ClientTarget[] {
+export function detectInstalledClients(): ClientTarget[] {
   const detected: ClientTarget[] = [];
   const home = homedir();
 
@@ -193,6 +193,102 @@ function printNextSteps(targets: ClientTarget[]): void {
   console.log('');
 }
 
+// ── Shared connect logic ─────────────────────────────────────────────────────
+
+type Runtime = Awaited<ReturnType<typeof detectRuntime>>;
+
+export async function runConnect(
+  config: Config,
+  runtime: Runtime,
+  targets: ClientTarget[],
+  host: string = 'localhost',
+): Promise<ClientTarget[]> {
+  // Build MCP config
+  const mcpServers: Record<string, McpServerEntry> = {
+    anvil: { url: `http://${host}:${config.ports.anvil}/sse` },
+    vault: { url: `http://${host}:${config.ports.vault_mcp}/sse` },
+    forge: { url: `http://${host}:${config.ports.forge}/sse` },
+  };
+
+  const configured: ClientTarget[] = [];
+
+  // Write config for each target
+  for (const target of targets) {
+    if (target === 'claude-code') {
+      // Claude Code CLI reads MCPs from ~/.claude.json via `claude mcp add`,
+      // not from ~/.claude/settings.json — so we use the CLI when available.
+      const cliSpinner = ora('Registering MCP servers with Claude Code CLI...').start();
+      const cliAvailable = await isClaudeCliAvailable();
+      if (cliAvailable) {
+        const { registered, failed } = await registerWithClaudeCode(mcpServers);
+        if (failed.length === 0) {
+          cliSpinner.succeed(
+            `Registered with Claude Code: ${registered.map((n) => chalk.cyan(n)).join(', ')}`,
+          );
+          configured.push(target);
+        } else if (registered.length > 0) {
+          cliSpinner.warn(
+            `Partially registered — ok: ${registered.join(', ')}, failed: ${failed.join(', ')}`,
+          );
+          configured.push(target);
+        } else {
+          cliSpinner.fail('Failed to register MCP servers with Claude Code CLI');
+        }
+      } else {
+        cliSpinner.warn('claude CLI not found on PATH — register manually:');
+        for (const [name, entry] of Object.entries(mcpServers)) {
+          const baseUrl = entry.url.replace(/\/sse$/, '');
+          console.log(
+            chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`),
+          );
+        }
+      }
+    } else {
+      const configPath = getConfigPath(target);
+      const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
+      try {
+        mergeAndWriteConfig(configPath, mcpServers);
+        writeSpinner.succeed(`Configured ${chalk.cyan(target)} — ${chalk.dim(configPath)}`);
+        configured.push(target);
+      } catch (error) {
+        writeSpinner.fail(`Failed to configure ${target}`);
+        console.log(chalk.dim((error as Error).message));
+      }
+    }
+  }
+
+  // Sync horus-core skills (only when claude-code is a target)
+  if (targets.includes('claude-code')) {
+    const skillsSpinner = ora('Syncing horus-core skills...').start();
+    try {
+      await syncSkills(runtime);
+      skillsSpinner.succeed('horus-core skills synced to ~/.claude/skills/');
+    } catch (error) {
+      skillsSpinner.warn('Could not sync skills (Forge container may not be running)');
+      console.log(chalk.dim((error as Error).message));
+    }
+  }
+
+  // Sync horus-core rules for Cursor
+  if (targets.includes('cursor')) {
+    const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor...').start();
+    try {
+      await syncSkillsForCursor(runtime);
+      cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/');
+    } catch (error) {
+      cursorRulesSpinner.warn('Could not sync Cursor rules (Forge container may not be running)');
+      console.log(chalk.dim((error as Error).message));
+    }
+  }
+
+  // Print next steps
+  if (configured.length > 0) {
+    printNextSteps(configured);
+  }
+
+  return configured;
+}
+
 // ── Connect command ───────────────────────────────────────────────────────────
 
 export const connectCommand = new Command('connect')
@@ -272,80 +368,6 @@ export const connectCommand = new Command('connect')
       return;
     }
 
-    // Step 5: Build MCP config
-    const host = opts.host as string;
-    const mcpServers: Record<string, McpServerEntry> = {
-      anvil: { url: `http://${host}:${config.ports.anvil}/sse` },
-      vault: { url: `http://${host}:${config.ports.vault_mcp}/sse` },
-      forge: { url: `http://${host}:${config.ports.forge}/sse` },
-    };
-
-    // Step 6: Write config for each target
-    for (const target of targets) {
-      if (target === 'claude-code') {
-        // Claude Code CLI reads MCPs from ~/.claude.json via `claude mcp add`,
-        // not from ~/.claude/settings.json — so we use the CLI when available.
-        const cliSpinner = ora('Registering MCP servers with Claude Code CLI...').start();
-        const cliAvailable = await isClaudeCliAvailable();
-        if (cliAvailable) {
-          const { registered, failed } = await registerWithClaudeCode(mcpServers);
-          if (failed.length === 0) {
-            cliSpinner.succeed(
-              `Registered with Claude Code: ${registered.map((n) => chalk.cyan(n)).join(', ')}`,
-            );
-          } else if (registered.length > 0) {
-            cliSpinner.warn(
-              `Partially registered — ok: ${registered.join(', ')}, failed: ${failed.join(', ')}`,
-            );
-          } else {
-            cliSpinner.fail('Failed to register MCP servers with Claude Code CLI');
-          }
-        } else {
-          cliSpinner.warn('claude CLI not found on PATH — register manually:');
-          for (const [name, entry] of Object.entries(mcpServers)) {
-            const baseUrl = entry.url.replace(/\/sse$/, '');
-            console.log(
-              chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`),
-            );
-          }
-        }
-      } else {
-        const configPath = getConfigPath(target);
-        const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
-        try {
-          mergeAndWriteConfig(configPath, mcpServers);
-          writeSpinner.succeed(`Configured ${chalk.cyan(target)} — ${chalk.dim(configPath)}`);
-        } catch (error) {
-          writeSpinner.fail(`Failed to configure ${target}`);
-          console.log(chalk.dim((error as Error).message));
-        }
-      }
-    }
-
-    // Step 7: Sync horus-core skills (only when claude-code is a target)
-    if (targets.includes('claude-code')) {
-      const skillsSpinner = ora('Syncing horus-core skills...').start();
-      try {
-        await syncSkills(runtime);
-        skillsSpinner.succeed('horus-core skills synced to ~/.claude/skills/');
-      } catch (error) {
-        skillsSpinner.warn('Could not sync skills (Forge container may not be running)');
-        console.log(chalk.dim((error as Error).message));
-      }
-    }
-
-    // Step 7b: Sync horus-core rules for Cursor
-    if (targets.includes('cursor')) {
-      const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor...').start();
-      try {
-        await syncSkillsForCursor(runtime);
-        cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/');
-      } catch (error) {
-        cursorRulesSpinner.warn('Could not sync Cursor rules (Forge container may not be running)');
-        console.log(chalk.dim((error as Error).message));
-      }
-    }
-
-    // Step 8: Print next steps
-    printNextSteps(targets);
+    // Step 5–8: Delegate to shared logic
+    await runConnect(config, runtime, targets, opts.host as string);
   });
