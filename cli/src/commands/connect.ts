@@ -5,6 +5,7 @@ import { checkbox } from '@inquirer/prompts';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { execa } from 'execa';
 import { loadConfig } from '../lib/config.js';
 import { detectRuntime } from '../lib/runtime.js';
 
@@ -87,6 +88,46 @@ function mergeAndWriteConfig(configPath: string, mcpServers: Record<string, McpS
   mkdirSync(dir, { recursive: true });
 
   writeFileSync(configPath, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
+}
+
+// ── Claude Code CLI MCP registration ─────────────────────────────────────────
+
+async function isClaudeCliAvailable(): Promise<boolean> {
+  try {
+    const result = await execa('claude', ['--version'], { reject: false });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+interface ClaudeCodeRegistrationResult {
+  registered: string[];
+  failed: string[];
+}
+
+async function registerWithClaudeCode(
+  mcpServers: Record<string, McpServerEntry>,
+): Promise<ClaudeCodeRegistrationResult> {
+  const registered: string[] = [];
+  const failed: string[] = [];
+
+  for (const [name, entry] of Object.entries(mcpServers)) {
+    // claude mcp add expects the base URL without the /sse suffix
+    const baseUrl = entry.url.replace(/\/sse$/, '');
+    const result = await execa(
+      'claude',
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', name, baseUrl],
+      { reject: false },
+    );
+    if (result.exitCode === 0) {
+      registered.push(name);
+    } else {
+      failed.push(name);
+    }
+  }
+
+  return { registered, failed };
 }
 
 // ── Skills sync ───────────────────────────────────────────────────────────────
@@ -241,14 +282,43 @@ export const connectCommand = new Command('connect')
 
     // Step 6: Write config for each target
     for (const target of targets) {
-      const configPath = getConfigPath(target);
-      const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
-      try {
-        mergeAndWriteConfig(configPath, mcpServers);
-        writeSpinner.succeed(`Configured ${chalk.cyan(target)} — ${chalk.dim(configPath)}`);
-      } catch (error) {
-        writeSpinner.fail(`Failed to configure ${target}`);
-        console.log(chalk.dim((error as Error).message));
+      if (target === 'claude-code') {
+        // Claude Code CLI reads MCPs from ~/.claude.json via `claude mcp add`,
+        // not from ~/.claude/settings.json — so we use the CLI when available.
+        const cliSpinner = ora('Registering MCP servers with Claude Code CLI...').start();
+        const cliAvailable = await isClaudeCliAvailable();
+        if (cliAvailable) {
+          const { registered, failed } = await registerWithClaudeCode(mcpServers);
+          if (failed.length === 0) {
+            cliSpinner.succeed(
+              `Registered with Claude Code: ${registered.map((n) => chalk.cyan(n)).join(', ')}`,
+            );
+          } else if (registered.length > 0) {
+            cliSpinner.warn(
+              `Partially registered — ok: ${registered.join(', ')}, failed: ${failed.join(', ')}`,
+            );
+          } else {
+            cliSpinner.fail('Failed to register MCP servers with Claude Code CLI');
+          }
+        } else {
+          cliSpinner.warn('claude CLI not found on PATH — register manually:');
+          for (const [name, entry] of Object.entries(mcpServers)) {
+            const baseUrl = entry.url.replace(/\/sse$/, '');
+            console.log(
+              chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`),
+            );
+          }
+        }
+      } else {
+        const configPath = getConfigPath(target);
+        const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
+        try {
+          mergeAndWriteConfig(configPath, mcpServers);
+          writeSpinner.succeed(`Configured ${chalk.cyan(target)} — ${chalk.dim(configPath)}`);
+        } catch (error) {
+          writeSpinner.fail(`Failed to configure ${target}`);
+          console.log(chalk.dim((error as Error).message));
+        }
       }
     }
 
