@@ -58,6 +58,7 @@ function defaultConfig() {
     git_host: "github.com",
     repos: { ...DEFAULT_REPOS },
     host_repos_path: "",
+    host_repos_extra_scan_dirs: [],
     github_token: ""
   };
 }
@@ -91,6 +92,7 @@ function loadConfig() {
       forge_registry: parsed.repos?.forge_registry ?? defaults.repos.forge_registry
     },
     host_repos_path: parsed.host_repos_path ?? defaults.host_repos_path,
+    host_repos_extra_scan_dirs: parsed.host_repos_extra_scan_dirs ?? defaults.host_repos_extra_scan_dirs,
     github_token: parsed.github_token ?? defaults.github_token
   };
 }
@@ -108,6 +110,9 @@ function resolvePath(p) {
 function generateEnv(config) {
   const dataDir = resolvePath(config.data_dir);
   const hostReposPath = config.host_repos_path ? resolvePath(config.host_repos_path) : "";
+  const baseScanPath = "/data/repos";
+  const extraScanPaths = (config.host_repos_extra_scan_dirs ?? []).map((d) => d.trim()).filter(Boolean).map((d) => `${baseScanPath}/${d}`);
+  const forgeScanPaths = [baseScanPath, ...extraScanPaths].join(":");
   const lines = [
     "# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
     "# Horus \u2014 Generated .env file",
@@ -116,6 +121,7 @@ function generateEnv(config) {
     "",
     `HORUS_DATA_PATH=${dataDir}`,
     `HOST_REPOS_PATH=${hostReposPath}`,
+    `FORGE_SCAN_PATHS=${forgeScanPaths}`,
     "",
     "# Ports",
     `ANVIL_PORT=${config.ports.anvil}`,
@@ -142,6 +148,7 @@ function writeEnvFile(config) {
 var CONFIG_KEYS = [
   "data-dir",
   "host-repos-path",
+  "host-repos-extra-scan-dirs",
   "runtime",
   "port.anvil",
   "port.vault-rest",
@@ -159,6 +166,8 @@ function getConfigValue(config, key) {
       return config.data_dir;
     case "host-repos-path":
       return config.host_repos_path;
+    case "host-repos-extra-scan-dirs":
+      return (config.host_repos_extra_scan_dirs ?? []).join(", ");
     case "runtime":
       return config.runtime;
     case "port.anvil":
@@ -189,6 +198,9 @@ function setConfigValue(config, key, value) {
       break;
     case "host-repos-path":
       updated.host_repos_path = value;
+      break;
+    case "host-repos-extra-scan-dirs":
+      updated.host_repos_extra_scan_dirs = value.split(",").map((d) => d.trim()).filter(Boolean);
       break;
     case "runtime":
       if (value !== "docker" && value !== "podman") {
@@ -258,11 +270,13 @@ async function commandExists(command) {
 }
 function createRuntime(name) {
   const bin = name;
+  const composeEnv = { ...process.env, HORUS_RUNTIME: name };
   return {
     name,
     async compose(...args) {
       const result = await execa(bin, ["compose", ...args], {
         cwd: HORUS_DIR,
+        env: composeEnv,
         reject: false
       });
       if (result.exitCode !== 0) {
@@ -290,6 +304,7 @@ function createRuntime(name) {
       try {
         const result = await execa(bin, ["compose", "ps", "--format", "json"], {
           cwd: HORUS_DIR,
+          env: composeEnv,
           reject: false
         });
         return result.exitCode === 0 && result.stdout.toString().trim().length > 0;
@@ -331,6 +346,7 @@ async function composeStreaming(runtime, args) {
   const bin = runtime.name;
   const result = await execa(bin, ["compose", ...args], {
     cwd: HORUS_DIR,
+    env: { ...process.env, HORUS_RUNTIME: runtime.name },
     stdio: "inherit",
     reject: false
   });
@@ -447,6 +463,7 @@ import { checkbox } from "@inquirer/prompts";
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir3 } from "os";
+import { execa as execa2 } from "execa";
 function detectInstalledClients() {
   const detected = [];
   const home = homedir3();
@@ -491,6 +508,32 @@ function mergeAndWriteConfig(configPath, mcpServers) {
   const dir = configPath.substring(0, configPath.lastIndexOf("/"));
   mkdirSync2(dir, { recursive: true });
   writeFileSync3(configPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+}
+async function isClaudeCliAvailable() {
+  try {
+    const result = await execa2("claude", ["--version"], { reject: false });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+async function registerWithClaudeCode(mcpServers) {
+  const registered = [];
+  const failed = [];
+  for (const [name, entry] of Object.entries(mcpServers)) {
+    const baseUrl = entry.url.replace(/\/sse$/, "");
+    const result = await execa2(
+      "claude",
+      ["mcp", "add", "--transport", "http", "--scope", "user", name, baseUrl],
+      { reject: false }
+    );
+    if (result.exitCode === 0) {
+      registered.push(name);
+    } else {
+      failed.push(name);
+    }
+  }
+  return { registered, failed };
 }
 async function syncSkills(runtime) {
   const home = homedir3();
@@ -555,15 +598,44 @@ async function runConnect(config, runtime, targets, host = "localhost") {
   };
   const configured = [];
   for (const target of targets) {
-    const configPath = getConfigPath(target);
-    const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
-    try {
-      mergeAndWriteConfig(configPath, mcpServers);
-      writeSpinner.succeed(`Configured ${chalk.cyan(target)} \u2014 ${chalk.dim(configPath)}`);
-      configured.push(target);
-    } catch (error) {
-      writeSpinner.fail(`Failed to configure ${target}`);
-      console.log(chalk.dim(error.message));
+    if (target === "claude-code") {
+      const cliSpinner = ora("Registering MCP servers with Claude Code CLI...").start();
+      const cliAvailable = await isClaudeCliAvailable();
+      if (cliAvailable) {
+        const { registered, failed } = await registerWithClaudeCode(mcpServers);
+        if (failed.length === 0) {
+          cliSpinner.succeed(
+            `Registered with Claude Code: ${registered.map((n) => chalk.cyan(n)).join(", ")}`
+          );
+          configured.push(target);
+        } else if (registered.length > 0) {
+          cliSpinner.warn(
+            `Partially registered \u2014 ok: ${registered.join(", ")}, failed: ${failed.join(", ")}`
+          );
+          configured.push(target);
+        } else {
+          cliSpinner.fail("Failed to register MCP servers with Claude Code CLI");
+        }
+      } else {
+        cliSpinner.warn("claude CLI not found on PATH \u2014 register manually:");
+        for (const [name, entry] of Object.entries(mcpServers)) {
+          const baseUrl = entry.url.replace(/\/sse$/, "");
+          console.log(
+            chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`)
+          );
+        }
+      }
+    } else {
+      const configPath = getConfigPath(target);
+      const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
+      try {
+        mergeAndWriteConfig(configPath, mcpServers);
+        writeSpinner.succeed(`Configured ${chalk.cyan(target)} \u2014 ${chalk.dim(configPath)}`);
+        configured.push(target);
+      } catch (error) {
+        writeSpinner.fail(`Failed to configure ${target}`);
+        console.log(chalk.dim(error.message));
+      }
     }
   }
   if (targets.includes("claude-code")) {
@@ -748,6 +820,11 @@ var setupCommand = new Command2("setup").description("Interactive first-run setu
       message: "Host repos path (for Forge repo scanning, leave empty to skip):",
       default: ""
     });
+    const extra_scan_dirs_raw = await input({
+      message: "Extra subdirectories to scan within repos path (comma-separated, e.g. ArjunKhera \u2014 leave empty to skip):",
+      default: ""
+    });
+    const host_repos_extra_scan_dirs = extra_scan_dirs_raw.split(",").map((d) => d.trim()).filter(Boolean);
     const customize_ports = await confirm({
       message: "Customize port assignments?",
       default: false
@@ -822,6 +899,7 @@ ${example("forge-registry")}
       ...defaultConfig(),
       data_dir,
       host_repos_path,
+      host_repos_extra_scan_dirs,
       runtime: runtime.name,
       ports,
       git_host: git_host.trim(),
@@ -1174,8 +1252,10 @@ var configCommand = new Command6("config").description("View or modify Horus con
   console.log(`  ${chalk6.bold("version:")}          ${config.version}`);
   console.log(`  ${chalk6.bold("data-dir:")}         ${config.data_dir}`);
   console.log(`  ${chalk6.bold("runtime:")}          ${config.runtime}`);
-  console.log(`  ${chalk6.bold("host-repos-path:")}  ${config.host_repos_path || chalk6.dim("(not set)")}`);
-  console.log(`  ${chalk6.bold("git-host:")}         ${config.git_host || chalk6.dim("(not set)")}`);
+  console.log(`  ${chalk6.bold("host-repos-path:")}             ${config.host_repos_path || chalk6.dim("(not set)")}`);
+  const extraDirs = (config.host_repos_extra_scan_dirs ?? []).join(", ");
+  console.log(`  ${chalk6.bold("host-repos-extra-scan-dirs:")}  ${extraDirs || chalk6.dim("(not set)")}`);
+  console.log(`  ${chalk6.bold("git-host:")}                    ${config.git_host || chalk6.dim("(not set)")}`);
   console.log(`  ${chalk6.bold("github-token:")}     ${config.github_token ? maskApiKey(config.github_token) : chalk6.dim("(not set)")}`);
   console.log("");
   console.log(chalk6.bold("  Ports:"));
@@ -1236,6 +1316,7 @@ configCommand.command("set <key> <value>").description("Set a configuration valu
   const needsRestart = [
     "data-dir",
     "host-repos-path",
+    "host-repos-extra-scan-dirs",
     "runtime",
     "port.anvil",
     "port.vault-rest",
