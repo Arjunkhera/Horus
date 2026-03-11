@@ -17,6 +17,7 @@ import { checkRuntime, detectRuntime, composeStreaming } from '../lib/runtime.js
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { installComposeFile } from '../lib/compose.js';
 import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
+import { runConnect, detectInstalledClients } from './connect.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -383,7 +384,22 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 10: Print success summary
+    // Step 10: Configure AI clients
+    console.log('');
+    const detectedClients = detectInstalledClients();
+    if (detectedClients.length > 0) {
+      console.log(chalk.bold('Configuring AI clients...'));
+      try {
+        await runConnect(config, runtime, detectedClients, 'localhost');
+      } catch (error) {
+        console.log(chalk.yellow('Could not configure AI clients automatically.'));
+        console.log(chalk.dim(`Run ${chalk.cyan('horus connect')} to configure them manually.`));
+      }
+    } else {
+      console.log(chalk.dim(`No AI clients detected. Run ${chalk.cyan('horus connect')} after installing Claude Desktop, Claude Code, or Cursor.`));
+    }
+
+    // Step 11: Print success summary
     console.log('');
     console.log(chalk.bold.green('Setup complete!'));
     console.log(chalk.dim('──────────────────────────────────────'));
