@@ -92,7 +92,7 @@ function mergeAndWriteConfig(configPath: string, mcpServers: Record<string, McpS
 
 // ── Claude Code CLI MCP registration ─────────────────────────────────────────
 
-async function isClaudeCliAvailable(): Promise<boolean> {
+export async function isClaudeCliAvailable(): Promise<boolean> {
   try {
     const result = await execa('claude', ['--version'], { reject: false });
     return result.exitCode === 0;
@@ -106,7 +106,7 @@ interface ClaudeCodeRegistrationResult {
   failed: string[];
 }
 
-async function registerWithClaudeCode(
+export async function registerWithClaudeCode(
   mcpServers: Record<string, McpServerEntry>,
 ): Promise<ClaudeCodeRegistrationResult> {
   const registered: string[] = [];

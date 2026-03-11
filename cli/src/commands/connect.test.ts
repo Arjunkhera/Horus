@@ -1,0 +1,143 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock execa before importing the module under test
+vi.mock('execa', () => ({
+  execa: vi.fn(),
+}));
+
+// Mock node:fs and node:os to avoid touching the real filesystem
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  existsSync: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('node:os', () => ({
+  homedir: vi.fn().mockReturnValue('/home/testuser'),
+}));
+
+vi.mock('../lib/config.js', () => ({
+  loadConfig: vi.fn(),
+}));
+
+vi.mock('../lib/runtime.js', () => ({
+  detectRuntime: vi.fn(),
+}));
+
+import { execa } from 'execa';
+import { isClaudeCliAvailable, registerWithClaudeCode } from './connect.js';
+
+const mockExeca = vi.mocked(execa);
+
+function makeResult(exitCode: number, stdout = '', stderr = '') {
+  return { exitCode, stdout, stderr } as any;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+// ── isClaudeCliAvailable ──────────────────────────────────────────────────────
+
+describe('isClaudeCliAvailable', () => {
+  it('returns true when claude --version exits 0', async () => {
+    mockExeca.mockResolvedValueOnce(makeResult(0, 'Claude 1.0.0'));
+    const result = await isClaudeCliAvailable();
+    expect(result).toBe(true);
+    expect(mockExeca).toHaveBeenCalledWith('claude', ['--version'], { reject: false });
+  });
+
+  it('returns false when claude --version exits non-zero', async () => {
+    mockExeca.mockResolvedValueOnce(makeResult(1));
+    const result = await isClaudeCliAvailable();
+    expect(result).toBe(false);
+  });
+
+  it('returns false when claude binary is not on PATH (ENOENT)', async () => {
+    mockExeca.mockRejectedValueOnce(
+      Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }),
+    );
+    const result = await isClaudeCliAvailable();
+    expect(result).toBe(false);
+  });
+});
+
+// ── registerWithClaudeCode ────────────────────────────────────────────────────
+
+describe('registerWithClaudeCode', () => {
+  const servers = {
+    anvil: { url: 'http://localhost:8100/sse' },
+    vault: { url: 'http://localhost:8300/sse' },
+    forge: { url: 'http://localhost:8200/sse' },
+  };
+
+  it('calls claude mcp add for each server with --transport http --scope user', async () => {
+    mockExeca.mockResolvedValue(makeResult(0));
+
+    await registerWithClaudeCode(servers);
+
+    expect(mockExeca).toHaveBeenCalledTimes(3);
+    expect(mockExeca).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100'],
+      { reject: false },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'vault', 'http://localhost:8300'],
+      { reject: false },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'forge', 'http://localhost:8200'],
+      { reject: false },
+    );
+  });
+
+  it('strips /sse suffix from URL before passing to claude mcp add', async () => {
+    mockExeca.mockResolvedValue(makeResult(0));
+    await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100/sse' } });
+
+    const call = mockExeca.mock.calls[0];
+    const urlArg = call[1][call[1].length - 1] as string;
+    expect(urlArg).toBe('http://localhost:8100');
+    expect(urlArg).not.toContain('/sse');
+  });
+
+  it('returns all names in registered when all succeed', async () => {
+    mockExeca.mockResolvedValue(makeResult(0));
+    const { registered, failed } = await registerWithClaudeCode(servers);
+    expect(registered).toEqual(expect.arrayContaining(['anvil', 'vault', 'forge']));
+    expect(failed).toHaveLength(0);
+  });
+
+  it('returns failed names when claude mcp add exits non-zero', async () => {
+    mockExeca
+      .mockResolvedValueOnce(makeResult(0))  // anvil ok
+      .mockResolvedValueOnce(makeResult(1))  // vault fail
+      .mockResolvedValueOnce(makeResult(0)); // forge ok
+
+    const { registered, failed } = await registerWithClaudeCode(servers);
+    expect(registered).toContain('anvil');
+    expect(registered).toContain('forge');
+    expect(failed).toContain('vault');
+    expect(failed).toHaveLength(1);
+  });
+
+  it('returns all names in failed when all registrations fail', async () => {
+    mockExeca.mockResolvedValue(makeResult(1));
+    const { registered, failed } = await registerWithClaudeCode(servers);
+    expect(registered).toHaveLength(0);
+    expect(failed).toEqual(expect.arrayContaining(['anvil', 'vault', 'forge']));
+  });
+
+  it('does not include /sse in the URL for servers that already lack it', async () => {
+    mockExeca.mockResolvedValue(makeResult(0));
+    await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100' } });
+
+    const call = mockExeca.mock.calls[0];
+    const urlArg = call[1][call[1].length - 1] as string;
+    expect(urlArg).toBe('http://localhost:8100');
+  });
+});
