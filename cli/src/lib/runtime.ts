@@ -49,6 +49,8 @@ async function commandExists(command: string): Promise<boolean> {
 
 function createRuntime(name: 'docker' | 'podman'): Runtime {
   const bin = name;
+  // Pass HORUS_RUNTIME to compose so entrypoints can detect docker vs podman
+  const composeEnv = { ...process.env, HORUS_RUNTIME: name };
 
   return {
     name,
@@ -56,6 +58,7 @@ function createRuntime(name: 'docker' | 'podman'): Runtime {
     async compose(...args: string[]): Promise<ExecResult> {
       const result = await execa(bin, ['compose', ...args], {
         cwd: HORUS_DIR,
+        env: composeEnv,
         reject: false,
       });
       if (result.exitCode !== 0) {
@@ -86,6 +89,7 @@ function createRuntime(name: 'docker' | 'podman'): Runtime {
       try {
         const result = await execa(bin, ['compose', 'ps', '--format', 'json'], {
           cwd: HORUS_DIR,
+          env: composeEnv,
           reject: false,
         });
         return result.exitCode === 0 && result.stdout.toString().trim().length > 0;
@@ -180,6 +184,7 @@ export async function composeStreaming(
   const bin = runtime.name;
   const result = await execa(bin, ['compose', ...args], {
     cwd: HORUS_DIR,
+    env: { ...process.env, HORUS_RUNTIME: runtime.name },
     stdio: 'inherit',
     reject: false,
   });
