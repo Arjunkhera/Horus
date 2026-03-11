@@ -151,6 +151,15 @@ export const setupCommand = new Command('setup')
         default: '',
       });
 
+      const extra_scan_dirs_raw = await input({
+        message: 'Extra subdirectories to scan within repos path (comma-separated, e.g. ArjunKhera — leave empty to skip):',
+        default: '',
+      });
+      const host_repos_extra_scan_dirs = extra_scan_dirs_raw
+        .split(',')
+        .map((d) => d.trim())
+        .filter(Boolean);
+
       const customize_ports = await confirm({
         message: 'Customize port assignments?',
         default: false,
@@ -232,6 +241,7 @@ export const setupCommand = new Command('setup')
         ...defaultConfig(),
         data_dir,
         host_repos_path,
+        host_repos_extra_scan_dirs,
         runtime: runtime.name,
         ports,
         git_host: git_host.trim(),
