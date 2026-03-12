@@ -15,14 +15,20 @@ import { join as join4 } from "path";
 import { input, confirm, number, select, password } from "@inquirer/prompts";
 
 // src/lib/config.ts
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { resolve } from "path";
+import { readFileSync as readFileSync2, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
+import { resolve, join as pathJoin, relative } from "path";
 import { homedir as homedir2 } from "os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // src/lib/constants.ts
 import { homedir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+var __pkg_dirname = dirname(fileURLToPath(import.meta.url));
+var pkgPath = join(__pkg_dirname, "..", "..", "package.json");
+var pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+var CLI_VERSION = pkg.version;
 var HORUS_DIR = join(homedir(), ".horus");
 var CONFIG_PATH = join(HORUS_DIR, "config.yaml");
 var ENV_PATH = join(HORUS_DIR, ".env");
@@ -72,7 +78,7 @@ function loadConfig() {
   if (!existsSync(CONFIG_PATH)) {
     return defaultConfig();
   }
-  const raw = readFileSync(CONFIG_PATH, "utf-8");
+  const raw = readFileSync2(CONFIG_PATH, "utf-8");
   const parsed = parseYaml(raw);
   const defaults = defaultConfig();
   return {
@@ -107,12 +113,54 @@ function resolvePath(p) {
   }
   return resolve(p);
 }
+function discoverRepoDirs(rootDir, maxDepth = 4) {
+  const repoDirs = /* @__PURE__ */ new Set();
+  function walk(dir, depth) {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry === "node_modules" || entry === ".git") continue;
+      const full = pathJoin(dir, entry);
+      try {
+        if (!statSync(full).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      if (existsSync(pathJoin(full, ".git"))) {
+        repoDirs.add(dir);
+      }
+      walk(full, depth + 1);
+    }
+  }
+  if (existsSync(rootDir)) {
+    walk(rootDir, 0);
+  }
+  return [...repoDirs];
+}
 function generateEnv(config) {
   const dataDir = resolvePath(config.data_dir);
   const hostReposPath = config.host_repos_path ? resolvePath(config.host_repos_path) : "";
   const baseScanPath = "/data/repos";
-  const extraScanPaths = (config.host_repos_extra_scan_dirs ?? []).map((d) => d.trim()).filter(Boolean).map((d) => `${baseScanPath}/${d}`);
-  const forgeScanPaths = [baseScanPath, ...extraScanPaths].join(":");
+  let forgeScanPaths;
+  if (hostReposPath) {
+    const discoveredDirs = discoverRepoDirs(hostReposPath);
+    const containerPaths = discoveredDirs.map((dir) => {
+      const rel = relative(hostReposPath, dir);
+      return rel ? `${baseScanPath}/${rel}` : baseScanPath;
+    });
+    const allPaths = [baseScanPath, ...containerPaths];
+    const extraScanPaths = (config.host_repos_extra_scan_dirs ?? []).map((d) => d.trim()).filter(Boolean).map((d) => `${baseScanPath}/${d}`);
+    const uniquePaths = [.../* @__PURE__ */ new Set([...allPaths, ...extraScanPaths])];
+    forgeScanPaths = uniquePaths.join(":");
+  } else {
+    const extraScanPaths = (config.host_repos_extra_scan_dirs ?? []).map((d) => d.trim()).filter(Boolean).map((d) => `${baseScanPath}/${d}`);
+    forgeScanPaths = [baseScanPath, ...extraScanPaths].join(":");
+  }
   const lines = [
     "# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
     "# Horus \u2014 Generated .env file",
@@ -299,6 +347,9 @@ function createRuntime(name) {
       const result = await execa(bin, ["inspect", "--format", format, container], {
         reject: false
       });
+      if (result.exitCode !== 0) {
+        throw new Error(`inspect failed: ${result.stderr}`);
+      }
       return result.stdout?.toString().trim() ?? "";
     },
     async isRunning() {
@@ -314,6 +365,24 @@ function createRuntime(name) {
       }
     }
   };
+}
+function parseComposeJson(output) {
+  const trimmed = output.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+    }
+  }
+  return trimmed.split("\n").filter((line) => line.trim()).map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return null;
+    }
+  }).filter((item) => item !== null);
 }
 async function checkRuntime(name) {
   return tryCommand(name, ["compose", "version"]);
@@ -358,14 +427,22 @@ async function composeStreaming(runtime, args) {
 
 // src/lib/health.ts
 async function checkContainerHealth(runtime, service) {
-  const containerName = `horus-${service}-1`;
-  try {
-    const status = await runtime.inspect(containerName, "{{.State.Health.Status}}");
-    const mappedStatus = mapStatus(status);
-    return { name: service, status: mappedStatus };
-  } catch {
-    return { name: service, status: "stopped" };
+  const candidates = [`horus-${service}-1`, `horus_${service}_1`];
+  for (const containerName of candidates) {
+    try {
+      const healthStatus = await runtime.inspect(containerName, "{{.State.Health.Status}}");
+      if (healthStatus && !healthStatus.includes("<nil>") && healthStatus.trim() !== "") {
+        return { name: service, status: mapStatus(healthStatus) };
+      }
+      const stateStatus = await runtime.inspect(containerName, "{{.State.Status}}");
+      if (stateStatus && stateStatus.trim() !== "") {
+        return { name: service, status: mapStateStatus(stateStatus) };
+      }
+    } catch {
+      continue;
+    }
   }
+  return { name: service, status: "stopped" };
 }
 function mapStatus(raw) {
   switch (raw.trim().toLowerCase()) {
@@ -379,13 +456,28 @@ function mapStatus(raw) {
       return "unknown";
   }
 }
+function mapStateStatus(raw) {
+  switch (raw.trim().toLowerCase()) {
+    case "running":
+      return "healthy";
+    case "created":
+    case "restarting":
+      return "starting";
+    case "exited":
+    case "dead":
+    case "removing":
+      return "unhealthy";
+    default:
+      return "unknown";
+  }
+}
 async function checkAllHealth(runtime) {
   const results = await Promise.all(
     SERVICES.map((service) => checkContainerHealth(runtime, service))
   );
   return results;
 }
-async function pollUntilHealthy(runtime, onUpdate, timeoutMs = 6e5, intervalMs = 5e3) {
+async function pollUntilHealthy(runtime, onUpdate, timeoutMs = 3e5, intervalMs = 5e3) {
   const startTime = Date.now();
   while (true) {
     const states = await checkAllHealth(runtime);
@@ -401,7 +493,7 @@ async function pollUntilHealthy(runtime, onUpdate, timeoutMs = 6e5, intervalMs =
       const unhealthyServices = states.filter((s) => s.status === "unhealthy").map((s) => s.name).join(", ");
       throw new Error(
         `Services failed health check: ${unhealthyServices}
-Run 'docker compose logs <service>' from ~/.horus/ to investigate.`
+Run '${runtime.name} compose logs <service>' from ~/.horus/ to investigate.`
       );
     }
     const elapsed = Date.now() - startTime;
@@ -409,7 +501,7 @@ Run 'docker compose logs <service>' from ~/.horus/ to investigate.`
       const notReady = states.filter((s) => s.status !== "healthy").map((s) => `${s.name} (${s.status})`).join(", ");
       throw new Error(
         `Timed out after ${Math.round(timeoutMs / 1e3)}s waiting for services: ${notReady}
-Run 'docker compose logs' from ~/.horus/ to investigate.`
+Run '${runtime.name} compose logs' from ~/.horus/ to investigate.`
       );
     }
     await new Promise((resolve2) => setTimeout(resolve2, intervalMs));
@@ -417,11 +509,11 @@ Run 'docker compose logs' from ~/.horus/ to investigate.`
 }
 
 // src/lib/compose.ts
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
-import { join as join2, dirname } from "path";
-import { fileURLToPath } from "url";
-var __filename = fileURLToPath(import.meta.url);
-var __dirname = dirname(__filename);
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
+import { join as join2, dirname as dirname2 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
+var __filename = fileURLToPath2(import.meta.url);
+var __dirname = dirname2(__filename);
 function getBundledComposePath() {
   const candidates = [
     join2(__dirname, "..", "..", "compose", "docker-compose.yml"),
@@ -449,7 +541,7 @@ function composeFileExists() {
 function installComposeFile(runtime) {
   ensureHorusDir();
   const bundledPath = getBundledComposePath();
-  let content = readFileSync2(bundledPath, "utf-8");
+  let content = readFileSync3(bundledPath, "utf-8");
   if (runtime === "podman") {
     content = applyPodmanUserOverride(content);
   }
@@ -461,7 +553,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { checkbox } from "@inquirer/prompts";
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir3 } from "os";
 import { execa as execa2 } from "execa";
@@ -498,7 +590,7 @@ function mergeAndWriteConfig(configPath, mcpServers) {
   let existing = {};
   if (existsSync3(configPath)) {
     try {
-      const raw = readFileSync3(configPath, "utf-8");
+      const raw = readFileSync4(configPath, "utf-8");
       existing = JSON.parse(raw);
     } catch {
       existing = {};
@@ -821,11 +913,7 @@ var setupCommand = new Command2("setup").description("Interactive first-run setu
       message: "Host repos path (for Forge repo scanning, leave empty to skip):",
       default: ""
     });
-    const extra_scan_dirs_raw = await input({
-      message: "Extra subdirectories to scan within repos path (comma-separated, e.g. ArjunKhera \u2014 leave empty to skip):",
-      default: ""
-    });
-    const host_repos_extra_scan_dirs = extra_scan_dirs_raw.split(",").map((d) => d.trim()).filter(Boolean);
+    const host_repos_extra_scan_dirs = [];
     const customize_ports = await confirm({
       message: "Customize port assignments?",
       default: false
@@ -939,7 +1027,7 @@ ${example("forge-registry")}
     console.error(error.message);
     process.exit(1);
   }
-  const dataDir = config.data_dir.startsWith("~") ? join4(process.env.HOME || "", config.data_dir.slice(1)) : config.data_dir;
+  const dataDir = resolvePath(config.data_dir);
   const reposToClone = [
     { url: config.repos.anvil_notes, dest: join4(dataDir, "notes"), label: "Anvil notes" },
     { url: config.repos.vault_knowledge, dest: join4(dataDir, "knowledge-base"), label: "Vault knowledge-base" },
@@ -1173,17 +1261,14 @@ var statusCommand = new Command5("status").description("Show status of Horus ser
   let containers = [];
   try {
     const result = await runtime.compose("ps", "--format", "json");
-    const output = result.stdout.trim();
-    if (output) {
-      containers = output.split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
-    }
+    containers = parseComposeJson(result.stdout);
   } catch {
   }
   spinner.stop();
   console.log("");
   console.log(chalk5.bold("Horus Status"));
   console.log(chalk5.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
-  console.log(`  ${chalk5.bold("Version:")}  ${config.version}`);
+  console.log(`  ${chalk5.bold("Version:")}  ${CLI_VERSION}`);
   console.log(`  ${chalk5.bold("Runtime:")}  ${runtime.name}`);
   console.log(`  ${chalk5.bold("Config:")}   ~/.horus/config.yaml`);
   console.log("");
@@ -1348,7 +1433,7 @@ import { Command as Command7 } from "commander";
 import chalk7 from "chalk";
 import ora6 from "ora";
 import { select as select2, confirm as confirm3 } from "@inquirer/prompts";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, readdirSync, existsSync as existsSync5 } from "fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, readdirSync as readdirSync2, existsSync as existsSync5 } from "fs";
 import { join as join5 } from "path";
 import { createHash } from "crypto";
 import { stringify as stringifyYaml2, parse as parseYaml2 } from "yaml";
@@ -1358,7 +1443,7 @@ function ensureSnapshotsDir() {
 }
 function composeFileHash() {
   if (!existsSync5(COMPOSE_PATH)) return "";
-  const content = readFileSync4(COMPOSE_PATH, "utf-8");
+  const content = readFileSync5(COMPOSE_PATH, "utf-8");
   return createHash("sha256").update(content).digest("hex").slice(0, 12);
 }
 async function captureCurrentImages(runtime) {
@@ -1393,9 +1478,9 @@ function saveSnapshot(images) {
 }
 function listSnapshots() {
   if (!existsSync5(SNAPSHOTS_DIR)) return [];
-  return readdirSync(SNAPSHOTS_DIR).filter((f) => f.endsWith(".yaml")).sort().reverse().map((f) => {
+  return readdirSync2(SNAPSHOTS_DIR).filter((f) => f.endsWith(".yaml")).sort().reverse().map((f) => {
     const file = join5(SNAPSHOTS_DIR, f);
-    const snapshot = parseYaml2(readFileSync4(file, "utf-8"));
+    const snapshot = parseYaml2(readFileSync5(file, "utf-8"));
     return { file, snapshot };
   });
 }
@@ -1626,41 +1711,38 @@ function colorMessage(status, msg) {
       return chalk8.red(msg);
   }
 }
-async function checkRuntime2() {
-  try {
-    execSync2("docker info", { stdio: "ignore" });
-    return { status: "pass", label: "Runtime", message: "Docker is running" };
-  } catch {
+async function checkRuntimeAvailability(preferred) {
+  const order = preferred === "podman" ? ["podman", "docker"] : ["docker", "podman"];
+  for (const rt of order) {
     try {
-      execSync2("podman info", { stdio: "ignore" });
-      return { status: "pass", label: "Runtime", message: "Podman is running" };
+      execSync2(`${rt} info`, { stdio: "ignore" });
+      return { status: "pass", label: "Runtime", message: `${rt === "docker" ? "Docker" : "Podman"} is running` };
     } catch {
-      return {
-        status: "fail",
-        label: "Runtime",
-        message: "Docker/Podman is not running",
-        hint: "Start Docker Desktop or Podman Desktop"
-      };
     }
   }
+  return {
+    status: "fail",
+    label: "Runtime",
+    message: "Docker/Podman is not running",
+    hint: "Start Docker Desktop or Podman Desktop"
+  };
 }
-async function checkCompose() {
-  try {
-    execSync2("docker compose version", { stdio: "ignore" });
-    return { status: "pass", label: "Compose", message: "Compose plugin available" };
-  } catch {
+async function checkCompose(preferred) {
+  const order = preferred === "podman" ? ["podman", "docker"] : ["docker", "podman"];
+  for (const rt of order) {
     try {
-      execSync2("podman compose version", { stdio: "ignore" });
-      return { status: "pass", label: "Compose", message: "Compose plugin available (podman)" };
+      execSync2(`${rt} compose version`, { stdio: "ignore" });
+      const label = rt === "podman" ? "Compose plugin available (podman)" : "Compose plugin available";
+      return { status: "pass", label: "Compose", message: label };
     } catch {
-      return {
-        status: "fail",
-        label: "Compose",
-        message: "Compose plugin not found",
-        hint: "Install Docker Compose plugin: https://docs.docker.com/compose/install/"
-      };
     }
   }
+  return {
+    status: "fail",
+    label: "Compose",
+    message: "Compose plugin not found",
+    hint: "Install Docker Compose plugin or podman-compose"
+  };
 }
 function checkConfig() {
   if (configExists()) {
@@ -1760,8 +1842,8 @@ async function checkServices(runtime) {
   const results = [];
   try {
     const psResult = await runtime.compose("ps", "--format", "json");
-    const lines = psResult.stdout.trim().split("\n").filter(Boolean);
-    if (lines.length === 0) {
+    const containers = parseComposeJson(psResult.stdout);
+    if (containers.length === 0) {
       return [
         {
           status: "warn",
@@ -1771,17 +1853,10 @@ async function checkServices(runtime) {
         }
       ];
     }
-    const containers = lines.map((l) => {
-      try {
-        return JSON.parse(l);
-      } catch {
-        return null;
-      }
-    }).filter((c) => c !== null);
     for (const c of containers) {
-      const name = c.Service ?? "unknown";
+      const name = c.Service ?? c.Name ?? "unknown";
       const health = (c.Health || c.State || "unknown").toLowerCase();
-      if (health === "healthy" || health === "running") {
+      if (health === "healthy" || health === "running" || health === "up") {
         results.push({ status: "pass", label: `Service: ${name}`, message: `${name} is ${health}` });
       } else if (health === "starting") {
         results.push({
@@ -1814,11 +1889,11 @@ var doctorCommand = new Command8("doctor").description("Diagnose common Horus is
   console.log(chalk8.bold("Horus Doctor"));
   console.log(chalk8.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
   const allResults = [];
-  allResults.push(await checkRuntime2());
-  allResults.push(await checkCompose());
+  const config = configExists() ? loadConfig() : null;
+  allResults.push(await checkRuntimeAvailability(config?.runtime));
+  allResults.push(await checkCompose(config?.runtime));
   allResults.push(checkConfig());
   allResults.push(checkComposeFile());
-  const config = configExists() ? loadConfig() : null;
   const ports = config?.ports ?? DEFAULT_PORTS;
   const dataDir = config?.data_dir ?? join6(process.env.HOME ?? "~", ".horus", "data");
   allResults.push(checkPort(ports.anvil, "Anvil"));
@@ -1875,7 +1950,7 @@ import { Command as Command9 } from "commander";
 import chalk9 from "chalk";
 import ora7 from "ora";
 import { confirm as confirm4 } from "@inquirer/prompts";
-import { mkdirSync as mkdirSync5, statSync, existsSync as existsSync7, writeFileSync as writeFileSync5 } from "fs";
+import { mkdirSync as mkdirSync5, statSync as statSync2, existsSync as existsSync7, writeFileSync as writeFileSync5 } from "fs";
 import { join as join7, basename } from "path";
 import { execSync as execSync3 } from "child_process";
 import { stringify as stringifyYaml3 } from "yaml";
@@ -1943,7 +2018,7 @@ async function createBackup(yes) {
   }
   let sizeBytes = 0;
   try {
-    sizeBytes = statSync(tarFile).size;
+    sizeBytes = statSync2(tarFile).size;
   } catch {
   }
   const meta = {

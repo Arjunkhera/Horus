@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, accessSync, statfsSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig, configExists } from '../lib/config.js';
-import { detectRuntime } from '../lib/runtime.js';
+import { detectRuntime, parseComposeJson } from '../lib/runtime.js';
 import { COMPOSE_PATH, DEFAULT_PORTS } from '../lib/constants.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -44,42 +44,50 @@ function colorMessage(status: CheckStatus, msg: string): string {
 
 // ── Individual checks ─────────────────────────────────────────────────────────
 
-async function checkRuntime(): Promise<CheckResult> {
-  try {
-    execSync('docker info', { stdio: 'ignore' });
-    return { status: 'pass', label: 'Runtime', message: 'Docker is running' };
-  } catch {
+async function checkRuntimeAvailability(preferred?: 'docker' | 'podman'): Promise<CheckResult> {
+  // Check the preferred runtime first, then the other
+  const order: Array<'docker' | 'podman'> = preferred === 'podman'
+    ? ['podman', 'docker']
+    : ['docker', 'podman'];
+
+  for (const rt of order) {
     try {
-      execSync('podman info', { stdio: 'ignore' });
-      return { status: 'pass', label: 'Runtime', message: 'Podman is running' };
+      execSync(`${rt} info`, { stdio: 'ignore' });
+      return { status: 'pass', label: 'Runtime', message: `${rt === 'docker' ? 'Docker' : 'Podman'} is running` };
     } catch {
-      return {
-        status: 'fail',
-        label: 'Runtime',
-        message: 'Docker/Podman is not running',
-        hint: 'Start Docker Desktop or Podman Desktop',
-      };
+      // Try next
     }
   }
+
+  return {
+    status: 'fail',
+    label: 'Runtime',
+    message: 'Docker/Podman is not running',
+    hint: 'Start Docker Desktop or Podman Desktop',
+  };
 }
 
-async function checkCompose(): Promise<CheckResult> {
-  try {
-    execSync('docker compose version', { stdio: 'ignore' });
-    return { status: 'pass', label: 'Compose', message: 'Compose plugin available' };
-  } catch {
+async function checkCompose(preferred?: 'docker' | 'podman'): Promise<CheckResult> {
+  const order: Array<'docker' | 'podman'> = preferred === 'podman'
+    ? ['podman', 'docker']
+    : ['docker', 'podman'];
+
+  for (const rt of order) {
     try {
-      execSync('podman compose version', { stdio: 'ignore' });
-      return { status: 'pass', label: 'Compose', message: 'Compose plugin available (podman)' };
+      execSync(`${rt} compose version`, { stdio: 'ignore' });
+      const label = rt === 'podman' ? 'Compose plugin available (podman)' : 'Compose plugin available';
+      return { status: 'pass', label: 'Compose', message: label };
     } catch {
-      return {
-        status: 'fail',
-        label: 'Compose',
-        message: 'Compose plugin not found',
-        hint: 'Install Docker Compose plugin: https://docs.docker.com/compose/install/',
-      };
+      // Try next
     }
   }
+
+  return {
+    status: 'fail',
+    label: 'Compose',
+    message: 'Compose plugin not found',
+    hint: 'Install Docker Compose plugin or podman-compose',
+  };
 }
 
 function checkConfig(): CheckResult {
@@ -193,9 +201,16 @@ async function checkServices(runtime: Awaited<ReturnType<typeof detectRuntime>>)
   const results: CheckResult[] = [];
   try {
     const psResult = await runtime.compose('ps', '--format', 'json');
-    const lines = psResult.stdout.trim().split('\n').filter(Boolean);
 
-    if (lines.length === 0) {
+    interface ContainerPs {
+      Service?: string;
+      State?: string;
+      Health?: string;
+    }
+
+    const containers = parseComposeJson<ContainerPs>(psResult.stdout);
+
+    if (containers.length === 0) {
       return [
         {
           status: 'warn',
@@ -206,26 +221,10 @@ async function checkServices(runtime: Awaited<ReturnType<typeof detectRuntime>>)
       ];
     }
 
-    interface ContainerPs {
-      Service?: string;
-      State?: string;
-      Health?: string;
-    }
-
-    const containers: ContainerPs[] = lines
-      .map((l) => {
-        try {
-          return JSON.parse(l) as ContainerPs;
-        } catch {
-          return null;
-        }
-      })
-      .filter((c): c is ContainerPs => c !== null);
-
     for (const c of containers) {
-      const name = c.Service ?? 'unknown';
+      const name = c.Service ?? (c as any).Name ?? 'unknown';
       const health = (c.Health || c.State || 'unknown').toLowerCase();
-      if (health === 'healthy' || health === 'running') {
+      if (health === 'healthy' || health === 'running' || health === 'up') {
         results.push({ status: 'pass', label: `Service: ${name}`, message: `${name} is ${health}` });
       } else if (health === 'starting') {
         results.push({
@@ -266,11 +265,14 @@ export const doctorCommand = new Command('doctor')
 
     const allResults: CheckResult[] = [];
 
+    // Load config early to know preferred runtime
+    const config = configExists() ? loadConfig() : null;
+
     // 1. Runtime
-    allResults.push(await checkRuntime());
+    allResults.push(await checkRuntimeAvailability(config?.runtime));
 
     // 2. Compose
-    allResults.push(await checkCompose());
+    allResults.push(await checkCompose(config?.runtime));
 
     // 3. Config
     allResults.push(checkConfig());
@@ -278,8 +280,6 @@ export const doctorCommand = new Command('doctor')
     // 4. Compose file
     allResults.push(checkComposeFile());
 
-    // Load config for subsequent checks (use defaults if not set up)
-    const config = configExists() ? loadConfig() : null;
     const ports = config?.ports ?? DEFAULT_PORTS;
     const dataDir = config?.data_dir ?? join(process.env.HOME ?? '~', '.horus', 'data');
 

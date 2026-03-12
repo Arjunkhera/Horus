@@ -13,19 +13,42 @@ export interface ServiceHealth {
 
 /**
  * Check the health status of a single container.
+ *
+ * Podman may not populate .State.Health when no HEALTHCHECK is defined, so we
+ * fall back to .State.Status ("running") which is always present.  Container
+ * naming also varies between runtimes / compose versions (horus-svc-1 vs
+ * horus_svc_1), so we try both conventions.
  */
 async function checkContainerHealth(
   runtime: Runtime,
   service: ServiceName
 ): Promise<ServiceHealth> {
-  const containerName = `horus-${service}-1`;
-  try {
-    const status = await runtime.inspect(containerName, '{{.State.Health.Status}}');
-    const mappedStatus = mapStatus(status);
-    return { name: service, status: mappedStatus };
-  } catch {
-    return { name: service, status: 'stopped' };
+  // Try both naming conventions: Docker Compose v2 uses hyphens, older
+  // podman-compose uses underscores.
+  const candidates = [`horus-${service}-1`, `horus_${service}_1`];
+
+  for (const containerName of candidates) {
+    try {
+      // 1. Try the HEALTHCHECK status first (populated by Docker, and by
+      //    Podman when a HEALTHCHECK is defined).
+      const healthStatus = await runtime.inspect(containerName, '{{.State.Health.Status}}');
+      if (healthStatus && !healthStatus.includes('<nil>') && healthStatus.trim() !== '') {
+        return { name: service, status: mapStatus(healthStatus) };
+      }
+
+      // 2. Fall back to container state — this is always present on both
+      //    Docker and Podman and returns "running", "exited", etc.
+      const stateStatus = await runtime.inspect(containerName, '{{.State.Status}}');
+      if (stateStatus && stateStatus.trim() !== '') {
+        return { name: service, status: mapStateStatus(stateStatus) };
+      }
+    } catch {
+      // Container with this name doesn't exist — try next candidate.
+      continue;
+    }
   }
+
+  return { name: service, status: 'stopped' };
 }
 
 function mapStatus(raw: string): ServiceHealth['status'] {
@@ -35,6 +58,26 @@ function mapStatus(raw: string): ServiceHealth['status'] {
     case 'starting':
       return 'starting';
     case 'unhealthy':
+      return 'unhealthy';
+    default:
+      return 'unknown';
+  }
+}
+
+/**
+ * Map a container .State.Status value (used as a fallback when no HEALTHCHECK
+ * is present, which is the common case on Podman).
+ */
+function mapStateStatus(raw: string): ServiceHealth['status'] {
+  switch (raw.trim().toLowerCase()) {
+    case 'running':
+      return 'healthy';
+    case 'created':
+    case 'restarting':
+      return 'starting';
+    case 'exited':
+    case 'dead':
+    case 'removing':
       return 'unhealthy';
     default:
       return 'unknown';
@@ -64,7 +107,7 @@ export async function checkAllHealth(runtime: Runtime): Promise<ServiceHealth[]>
 export async function pollUntilHealthy(
   runtime: Runtime,
   onUpdate?: (states: ServiceHealth[]) => void,
-  timeoutMs: number = 600_000,
+  timeoutMs: number = 300_000,
   intervalMs: number = 5_000
 ): Promise<ServiceHealth[]> {
   const startTime = Date.now();
@@ -89,7 +132,7 @@ export async function pollUntilHealthy(
         .join(', ');
       throw new Error(
         `Services failed health check: ${unhealthyServices}\n` +
-          `Run 'docker compose logs <service>' from ~/.horus/ to investigate.`
+          `Run '${runtime.name} compose logs <service>' from ~/.horus/ to investigate.`
       );
     }
 
@@ -101,7 +144,7 @@ export async function pollUntilHealthy(
         .join(', ');
       throw new Error(
         `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for services: ${notReady}\n` +
-          `Run 'docker compose logs' from ~/.horus/ to investigate.`
+          `Run '${runtime.name} compose logs' from ~/.horus/ to investigate.`
       );
     }
 

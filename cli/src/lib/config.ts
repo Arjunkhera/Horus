@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { resolve, join as pathJoin, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import {
@@ -109,11 +109,52 @@ export function saveConfig(config: Config): void {
 /**
  * Resolve a path that may contain ~ to an absolute path.
  */
+export { resolvePath as resolveConfigPath };
 function resolvePath(p: string): string {
   if (p.startsWith('~')) {
     return resolve(homedir(), p.slice(2));
   }
   return resolve(p);
+}
+
+/**
+ * Recursively discover directories containing a .git folder under `rootDir`.
+ * Returns the set of unique *parent* directories that contain repos — these
+ * are the directories Forge should scan.
+ *
+ * Limits recursion depth to avoid traversing enormous trees.
+ */
+export function discoverRepoDirs(rootDir: string, maxDepth = 4): string[] {
+  const repoDirs = new Set<string>();
+
+  function walk(dir: string, depth: number): void {
+    if (depth > maxDepth) return;
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return; // Permission denied or not a directory
+    }
+    for (const entry of entries) {
+      if (entry === 'node_modules' || entry === '.git') continue;
+      const full = pathJoin(dir, entry);
+      try {
+        if (!statSync(full).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      // If this directory contains a .git, record its parent as a scan dir
+      if (existsSync(pathJoin(full, '.git'))) {
+        repoDirs.add(dir);
+      }
+      walk(full, depth + 1);
+    }
+  }
+
+  if (existsSync(rootDir)) {
+    walk(rootDir, 0);
+  }
+  return [...repoDirs];
 }
 
 /**
@@ -126,13 +167,35 @@ export function generateEnv(config: Config): string {
     ? resolvePath(config.host_repos_path)
     : '';
 
-  // Build FORGE_SCAN_PATHS: base container path + any extra subdirectory paths
+  // Build FORGE_SCAN_PATHS by auto-discovering repos under host_repos_path,
+  // with manual overrides from host_repos_extra_scan_dirs as a fallback.
   const baseScanPath = '/data/repos';
-  const extraScanPaths = (config.host_repos_extra_scan_dirs ?? [])
-    .map((d) => d.trim())
-    .filter(Boolean)
-    .map((d) => `${baseScanPath}/${d}`);
-  const forgeScanPaths = [baseScanPath, ...extraScanPaths].join(':');
+
+  let forgeScanPaths: string;
+  if (hostReposPath) {
+    // Auto-discover directories containing git repos
+    const discoveredDirs = discoverRepoDirs(hostReposPath);
+    const containerPaths = discoveredDirs.map((dir) => {
+      const rel = relative(hostReposPath, dir);
+      return rel ? `${baseScanPath}/${rel}` : baseScanPath;
+    });
+    // Always include the base path; dedupe
+    const allPaths = [baseScanPath, ...containerPaths];
+    // Also include manually configured extra dirs (backward compat)
+    const extraScanPaths = (config.host_repos_extra_scan_dirs ?? [])
+      .map((d) => d.trim())
+      .filter(Boolean)
+      .map((d) => `${baseScanPath}/${d}`);
+    const uniquePaths = [...new Set([...allPaths, ...extraScanPaths])];
+    forgeScanPaths = uniquePaths.join(':');
+  } else {
+    // No host repos path — use manual config only
+    const extraScanPaths = (config.host_repos_extra_scan_dirs ?? [])
+      .map((d) => d.trim())
+      .filter(Boolean)
+      .map((d) => `${baseScanPath}/${d}`);
+    forgeScanPaths = [baseScanPath, ...extraScanPaths].join(':');
+  }
 
   const lines: string[] = [
     '# ─────────────────────────────────────────────────────────────────────────────',
