@@ -29,6 +29,7 @@ services:
     image: ghcr.io/arjunkhera/horus/qmd-daemon:latest
     environment:
       - QMD_DAEMON_PORT=8181
+      - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
     volumes:
       - qmd-daemon-data:/home/qmd/.cache/qmd
     networks:
@@ -60,6 +61,7 @@ services:
       # Shared QMD database + model cache (same volume as qmd-daemon).
       - qmd-daemon-data:/home/anvil/.cache/qmd
     environment:
+      - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
       - ANVIL_TRANSPORT=http
       - ANVIL_PORT=8100
       - ANVIL_HOST=0.0.0.0
@@ -105,6 +107,7 @@ services:
       # Shared QMD database + model cache (same volume as qmd-daemon).
       - qmd-daemon-data:/home/appuser/.cache/qmd
     environment:
+      - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
       - KNOWLEDGE_REPO_PATH=/data/knowledge-repo
       - WORKSPACE_PATH=/data/workspace
       - VAULT_KNOWLEDGE_REPO_URL=${VAULT_KNOWLEDGE_REPO_URL:-}
@@ -183,6 +186,7 @@ services:
       # Local repos — read-only; lets Forge scan host repos for the index
       - ${HOST_REPOS_PATH}:/data/repos:ro
     environment:
+      - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
       - FORGE_PORT=8200
       - FORGE_HOST=0.0.0.0
       - FORGE_REGISTRY_PATH=/data/registry
