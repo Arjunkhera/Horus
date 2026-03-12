@@ -140,6 +140,7 @@ export function generateEnv(config: Config): string {
     '# Do not edit manually. Use `horus config set <key> <value>` instead.',
     '# ─────────────────────────────────────────────────────────────────────────────',
     '',
+    `HORUS_RUNTIME=${config.runtime}`,
     `HORUS_DATA_PATH=${dataDir}`,
     `HOST_REPOS_PATH=${hostReposPath}`,
     `FORGE_SCAN_PATHS=${forgeScanPaths}`,
