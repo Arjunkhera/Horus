@@ -11,6 +11,7 @@ import {
   writeEnvFile,
   configExists,
   defaultConfig,
+  resolveConfigPath,
   type Config,
 } from '../lib/config.js';
 import { checkRuntime, detectRuntime, composeStreaming } from '../lib/runtime.js';
@@ -151,15 +152,8 @@ export const setupCommand = new Command('setup')
         message: 'Host repos path (for Forge repo scanning, leave empty to skip):',
         default: '',
       });
-
-      const extra_scan_dirs_raw = await input({
-        message: 'Extra subdirectories to scan within repos path (comma-separated, e.g. ArjunKhera — leave empty to skip):',
-        default: '',
-      });
-      const host_repos_extra_scan_dirs = extra_scan_dirs_raw
-        .split(',')
-        .map((d) => d.trim())
-        .filter(Boolean);
+      // Repos are now auto-discovered recursively — no manual subdirectory prompt needed.
+      const host_repos_extra_scan_dirs: string[] = [];
 
       const customize_ports = await confirm({
         message: 'Customize port assignments?',
@@ -289,9 +283,7 @@ export const setupCommand = new Command('setup')
     }
 
     // Step 7: Clone repos to data directory using host git credentials
-    const dataDir = config.data_dir.startsWith('~')
-      ? join(process.env.HOME || '', config.data_dir.slice(1))
-      : config.data_dir;
+    const dataDir = resolveConfigPath(config.data_dir);
 
     const reposToClone: Array<{ url: string; dest: string; label: string }> = [
       { url: config.repos.anvil_notes, dest: join(dataDir, 'notes'), label: 'Anvil notes' },

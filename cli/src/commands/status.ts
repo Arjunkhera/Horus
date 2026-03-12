@@ -2,9 +2,9 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { configExists, loadConfig } from '../lib/config.js';
-import { detectRuntime } from '../lib/runtime.js';
+import { detectRuntime, parseComposeJson } from '../lib/runtime.js';
 import { composeFileExists } from '../lib/compose.js';
-import { SERVICES } from '../lib/constants.js';
+import { SERVICES, CLI_VERSION } from '../lib/constants.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -51,14 +51,7 @@ export const statusCommand = new Command('status')
     let containers: ContainerInfo[] = [];
     try {
       const result = await runtime.compose('ps', '--format', 'json');
-      const output = result.stdout.trim();
-      if (output) {
-        // Docker compose outputs one JSON object per line (not a JSON array)
-        containers = output
-          .split('\n')
-          .filter((line) => line.trim())
-          .map((line) => JSON.parse(line) as ContainerInfo);
-      }
+      containers = parseComposeJson<ContainerInfo>(result.stdout);
     } catch {
       // Stack may not be running
     }
@@ -68,7 +61,7 @@ export const statusCommand = new Command('status')
     console.log('');
     console.log(chalk.bold('Horus Status'));
     console.log(chalk.dim('──────────────────────────────────────'));
-    console.log(`  ${chalk.bold('Version:')}  ${config.version}`);
+    console.log(`  ${chalk.bold('Version:')}  ${CLI_VERSION}`);
     console.log(`  ${chalk.bold('Runtime:')}  ${runtime.name}`);
     console.log(`  ${chalk.bold('Config:')}   ~/.horus/config.yaml`);
     console.log('');

@@ -1,5 +1,13 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// ── CLI version (from package.json) ─────────────────────────────────────────
+const __pkg_dirname = dirname(fileURLToPath(import.meta.url));
+const pkgPath = join(__pkg_dirname, '..', '..', 'package.json');
+const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+export const CLI_VERSION: string = pkg.version;
 
 // ── Horus directory paths ───────────────────────────────────────────────────
 export const HORUS_DIR = join(homedir(), '.horus');

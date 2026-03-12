@@ -82,6 +82,9 @@ function createRuntime(name: 'docker' | 'podman'): Runtime {
       const result = await execa(bin, ['inspect', '--format', format, container], {
         reject: false,
       });
+      if (result.exitCode !== 0) {
+        throw new Error(`inspect failed: ${result.stderr}`);
+      }
       return result.stdout?.toString().trim() ?? '';
     },
 
@@ -98,6 +101,47 @@ function createRuntime(name: 'docker' | 'podman'): Runtime {
       }
     },
   };
+}
+
+// ── Compose JSON output parsing ─────────────────────────────────────────────
+
+/**
+ * Parse the JSON output of `compose ps --format json`.
+ *
+ * Docker Compose v2 emits one JSON object per line (newline-delimited):
+ *   {"Service":"anvil", ...}\n{"Service":"vault", ...}
+ *
+ * Podman Compose emits a JSON array:
+ *   [{"Service":"anvil", ...}, {"Service":"vault", ...}]
+ *
+ * This function handles both formats.
+ */
+export function parseComposeJson<T = Record<string, unknown>>(output: string): T[] {
+  const trimmed = output.trim();
+  if (!trimmed) return [];
+
+  // Try parsing as a JSON array first (Podman Compose format)
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed as T[];
+    } catch {
+      // Fall through to line-by-line parsing
+    }
+  }
+
+  // Docker Compose format: one JSON object per line
+  return trimmed
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => {
+      try {
+        return JSON.parse(line) as T;
+      } catch {
+        return null;
+      }
+    })
+    .filter((item): item is T => item !== null);
 }
 
 // ── Detection ───────────────────────────────────────────────────────────────
