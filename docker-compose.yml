@@ -50,9 +50,14 @@ services:
         reservations:
           memory: 512m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8181/health"]
+      # Hits /query instead of /health so the reranker GGUF model is loaded
+      # (warmed up) before dependent services start sending real queries.
+      # The generous start_period covers the first-boot model download + load.
+      test: ["CMD", "curl", "-sf", "-X", "POST", "-H", "Content-Type: application/json",
+             "-d", "{\"searches\":[{\"type\":\"lex\",\"query\":\"warmup\"}],\"limit\":1}",
+             "http://localhost:8181/query"]
       interval: 30s
-      timeout: 10s
+      timeout: 60s
       start_period: 600s
       retries: 3
 
