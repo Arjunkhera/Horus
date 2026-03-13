@@ -222,15 +222,15 @@ describe('buildStdioServers', () => {
 
     expect(servers.anvil).toEqual({
       command: '/usr/local/bin/mcp-remote-wrapper',
-      args: ['http://localhost:8100/mcp'],
+      args: ['http://localhost:8100/mcp', '--transport', 'http-only'],
     });
     expect(servers.vault).toEqual({
       command: '/usr/local/bin/mcp-remote-wrapper',
-      args: ['http://localhost:8300/mcp'],
+      args: ['http://localhost:8300/mcp', '--transport', 'http-only'],
     });
     expect(servers.forge).toEqual({
       command: '/usr/local/bin/mcp-remote-wrapper',
-      args: ['http://localhost:8200/mcp'],
+      args: ['http://localhost:8200/mcp', '--transport', 'http-only'],
     });
   });
 
