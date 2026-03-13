@@ -16,14 +16,14 @@ horus setup [--api-key <key>] [--data-dir <path>] [--repos-path <path>] [--yes]
 
 **Description:**
 
-Runs an interactive wizard that detects your container runtime, prompts for configuration, pulls Docker images, starts the Horus stack, and verifies all services are healthy. Configuration is saved to `~/.horus/config.json`.
+Runs an interactive wizard that detects your container runtime, prompts for configuration, pulls Docker images, starts the Horus stack, and verifies all services are healthy. Configuration is saved to `~/Horus/config.json`.
 
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
 | `--api-key <key>` | Provide the Anthropic API key non-interactively. Skips the prompt. |
-| `--data-dir <path>` | Set the data directory. Must be an absolute path. Default: `~/.horus/data` |
+| `--data-dir <path>` | Set the data directory. Must be an absolute path. Default: `~/Horus/data` |
 | `--repos-path <path>` | Absolute path to your local git repositories. Mounted read-only into Forge for repo indexing. |
 | `--yes` | Accept all defaults without prompting. Useful for scripted installs. |
 
@@ -51,10 +51,10 @@ Horus Setup
 
 [2/6] Anthropic API key:
       Enter your API key (sk-ant-...): sk-ant-••••••••
-      Saved to ~/.horus/config.json
+      Saved to ~/Horus/config.json
 
 [3/6] Data directory:
-      Where should Horus store data? (~/.horus/data)
+      Where should Horus store data? (~/Horus/data)
       Created /Users/you/.horus/data
 
 [4/6] Port configuration:
@@ -228,14 +228,14 @@ horus config set <key> <value>
 
 **Description:**
 
-Manages the Horus configuration stored in `~/.horus/config.json`. Running `horus config` with no arguments prints all current settings. Use `get` to read a single value or `set` to change one.
+Manages the Horus configuration stored in `~/Horus/config.json`. Running `horus config` with no arguments prints all current settings. Use `get` to read a single value or `set` to change one.
 
 **Available keys:**
 
 | Key | Description | Default |
 |-----|-------------|---------|
 | `api-key` | Anthropic API key | (set during setup) |
-| `data-dir` | Absolute path to the Horus data directory | `~/.horus/data` |
+| `data-dir` | Absolute path to the Horus data directory | `~/Horus/data` |
 | `host-repos-path` | Absolute path to your local git repositories | (set during setup) |
 | `runtime` | Container runtime (`docker` or `podman`) | auto-detected |
 | `port.anvil` | Host port for Anvil MCP server | `8100` |
@@ -251,7 +251,7 @@ View all settings:
 ```
 $ horus config
 
-Current configuration (~/.horus/config.json):
+Current configuration (~/Horus/config.json):
 
   api-key:          sk-ant-••••••••
   data-dir:         /Users/you/.horus/data
@@ -420,7 +420,7 @@ Horus Doctor
 
   Container runtime:   Docker 27.1.1              pass
   Compose plugin:      v2.29.1                    pass
-  Config file:         ~/.horus/config.json        pass
+  Config file:         ~/Horus/config.json        pass
   Data directory:      /Users/you/.horus/data      pass
   Disk space:          42 GB free                  pass
   Port 8100 (Anvil):   available                   pass
@@ -449,7 +449,7 @@ Horus Doctor
 
   Container runtime:   Docker 27.1.1              pass
   Compose plugin:      v2.29.1                    pass
-  Config file:         ~/.horus/config.json        pass
+  Config file:         ~/Horus/config.json        pass
   Data directory:      /Users/you/.horus/data      pass
   Disk space:          42 GB free                  pass
   Port 8100 (Anvil):   in use by PID 12345        FAIL
@@ -480,7 +480,7 @@ horus backup restore <file>
 
 **Description:**
 
-Creates a compressed archive of the Horus data directory (`~/.horus/data/`), including notes, knowledge base, registry, and workspace configurations. Use `restore` to replace the current data directory with a backup.
+Creates a compressed archive of the Horus data directory (`~/Horus/data/`), including notes, knowledge base, registry, and workspace configurations. Use `restore` to replace the current data directory with a backup.
 
 **Examples:**
 
@@ -495,13 +495,13 @@ Creating backup...
   registry/         1.2 MB
   workspaces/       340 KB
 
-Backup saved: ~/.horus/backups/horus-backup-2026-03-06-143022.tar.gz (11.8 MB)
+Backup saved: ~/Horus/backups/horus-backup-2026-03-06-143022.tar.gz (11.8 MB)
 ```
 
 Restore from a backup:
 
 ```
-$ horus backup restore ~/.horus/backups/horus-backup-2026-03-06-143022.tar.gz
+$ horus backup restore ~/Horus/backups/horus-backup-2026-03-06-143022.tar.gz
 
 Restoring from horus-backup-2026-03-06-143022.tar.gz...
   Stopping stack...           done
@@ -530,7 +530,7 @@ These flags are available on all commands:
 
 ## Configuration File
 
-All configuration is stored in `~/.horus/config.json`:
+All configuration is stored in `~/Horus/config.json`:
 
 ```json
 {
