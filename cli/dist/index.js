@@ -656,21 +656,25 @@ async function syncSkills(runtime) {
 async function syncSkillsForCursor(runtime) {
   const home = homedir3();
   const rulesDir = join3(home, ".cursor", "rules");
+  const skillsBase = join3(home, ".cursor", "skills-cursor");
   const skills = ["horus-anvil", "horus-vault", "horus-forge"];
   const forgeContainer = "horus-forge-1";
   mkdirSync2(rulesDir, { recursive: true });
   for (const skill of skills) {
     const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
-    const dest = join3(rulesDir, `${skill}.mdc`);
     const result = await runtime.exec(forgeContainer, "cat", src);
     if (result.exitCode === 0 && result.stdout.trim()) {
+      const ruleDest = join3(rulesDir, `${skill}.mdc`);
       const frontmatter = `---
 description: Horus ${skill} reference
 alwaysApply: true
 ---
 
 `;
-      writeFileSync3(dest, frontmatter + result.stdout, "utf-8");
+      writeFileSync3(ruleDest, frontmatter + result.stdout, "utf-8");
+      const skillDir = join3(skillsBase, skill);
+      mkdirSync2(skillDir, { recursive: true });
+      writeFileSync3(join3(skillDir, "SKILL.md"), result.stdout, "utf-8");
     }
   }
 }
@@ -754,7 +758,7 @@ async function runConnect(config, runtime, targets, host = "localhost") {
     const cursorRulesSpinner = ora("Syncing horus-core rules for Cursor...").start();
     try {
       await syncSkillsForCursor(runtime);
-      cursorRulesSpinner.succeed("horus-core rules synced to ~/.cursor/rules/");
+      cursorRulesSpinner.succeed("horus-core rules synced to ~/.cursor/rules/ and skills to ~/.cursor/skills-cursor/");
     } catch (error) {
       cursorRulesSpinner.warn("Could not sync Cursor rules (Forge container may not be running)");
       console.log(chalk.dim(error.message));

@@ -153,11 +153,12 @@ async function syncSkills(runtime: ReturnType<typeof detectRuntime> extends Prom
   }
 }
 
-// ── Cursor rules sync ─────────────────────────────────────────────────────────
+// ── Cursor rules + skills sync ────────────────────────────────────────────────
 
 async function syncSkillsForCursor(runtime: ReturnType<typeof detectRuntime> extends Promise<infer R> ? R : never): Promise<void> {
   const home = homedir();
   const rulesDir = join(home, '.cursor', 'rules');
+  const skillsBase = join(home, '.cursor', 'skills-cursor');
   const skills = ['horus-anvil', 'horus-vault', 'horus-forge'] as const;
   const forgeContainer = 'horus-forge-1';
 
@@ -165,11 +166,17 @@ async function syncSkillsForCursor(runtime: ReturnType<typeof detectRuntime> ext
 
   for (const skill of skills) {
     const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
-    const dest = join(rulesDir, `${skill}.mdc`);
     const result = await runtime.exec(forgeContainer, 'cat', src);
     if (result.exitCode === 0 && result.stdout.trim()) {
+      // Emit as Cursor rule (always-on context)
+      const ruleDest = join(rulesDir, `${skill}.mdc`);
       const frontmatter = `---\ndescription: Horus ${skill} reference\nalwaysApply: true\n---\n\n`;
-      writeFileSync(dest, frontmatter + result.stdout, 'utf-8');
+      writeFileSync(ruleDest, frontmatter + result.stdout, 'utf-8');
+
+      // Emit as Cursor skill (on-demand, structured instructions)
+      const skillDir = join(skillsBase, skill);
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), result.stdout, 'utf-8');
     }
   }
 }
@@ -276,7 +283,7 @@ export async function runConnect(
     const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor...').start();
     try {
       await syncSkillsForCursor(runtime);
-      cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/');
+      cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/ and skills to ~/.cursor/skills-cursor/');
     } catch (error) {
       cursorRulesSpinner.warn('Could not sync Cursor rules (Forge container may not be running)');
       console.log(chalk.dim((error as Error).message));
