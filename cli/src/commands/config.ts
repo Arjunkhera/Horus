@@ -50,7 +50,7 @@ export const configCommand = new Command('config')
     console.log(`    ${chalk.bold('vault-knowledge:')}  ${config.repos.vault_knowledge || chalk.dim('(not set)')}`);
     console.log(`    ${chalk.bold('forge-registry:')}   ${config.repos.forge_registry || chalk.dim('(not set)')}`);
     console.log('');
-    console.log(chalk.dim(`  Config file: ~/.horus/config.yaml`));
+    console.log(chalk.dim(`  Config file: ~/Horus/config.yaml`));
     console.log(chalk.dim(`  Use 'horus config get <key>' or 'horus config set <key> <value>'`));
     console.log('');
   });

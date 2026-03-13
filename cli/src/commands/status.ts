@@ -63,7 +63,7 @@ export const statusCommand = new Command('status')
     console.log(chalk.dim('──────────────────────────────────────'));
     console.log(`  ${chalk.bold('Version:')}  ${CLI_VERSION}`);
     console.log(`  ${chalk.bold('Runtime:')}  ${runtime.name}`);
-    console.log(`  ${chalk.bold('Config:')}   ~/.horus/config.yaml`);
+    console.log(`  ${chalk.bold('Config:')}   ~/Horus/config.yaml`);
     console.log('');
 
     if (containers.length === 0) {

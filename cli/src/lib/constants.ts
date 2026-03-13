@@ -20,7 +20,8 @@ const pkg = JSON.parse(readFileSync(findPackageJson(), 'utf-8'));
 export const CLI_VERSION: string = pkg.version;
 
 // ── Horus directory paths ───────────────────────────────────────────────────
-export const HORUS_DIR = join(homedir(), '.horus');
+export const HORUS_DIR = join(homedir(), 'Horus');
+export const LEGACY_HORUS_DIR = join(homedir(), '.horus');
 export const CONFIG_PATH = join(HORUS_DIR, 'config.yaml');
 export const ENV_PATH = join(HORUS_DIR, '.env');
 export const COMPOSE_PATH = join(HORUS_DIR, 'docker-compose.yml');
@@ -42,7 +43,7 @@ export const DEFAULT_REPOS = {
 } as const;
 
 // ── Default data directory ──────────────────────────────────────────────────
-export const DEFAULT_DATA_DIR = join(homedir(), '.horus', 'data');
+export const DEFAULT_DATA_DIR = join(homedir(), 'Horus', 'data');
 
 // ── Service names (as they appear in docker-compose.yml) ────────────────────
 export const SERVICES = [

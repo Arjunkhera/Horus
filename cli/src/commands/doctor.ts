@@ -5,7 +5,7 @@ import { existsSync, accessSync, statfsSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig, configExists } from '../lib/config.js';
 import { detectRuntime, parseComposeJson } from '../lib/runtime.js';
-import { COMPOSE_PATH, DEFAULT_PORTS } from '../lib/constants.js';
+import { COMPOSE_PATH, DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -92,24 +92,24 @@ async function checkCompose(preferred?: 'docker' | 'podman'): Promise<CheckResul
 
 function checkConfig(): CheckResult {
   if (configExists()) {
-    return { status: 'pass', label: 'Config', message: 'Configuration file exists (~/.horus/config.yaml)' };
+    return { status: 'pass', label: 'Config', message: 'Configuration file exists (~/Horus/config.yaml)' };
   }
   return {
     status: 'fail',
     label: 'Config',
-    message: 'Configuration file missing (~/.horus/config.yaml)',
+    message: 'Configuration file missing (~/Horus/config.yaml)',
     hint: 'Run `horus setup` to create the configuration',
   };
 }
 
 function checkComposeFile(): CheckResult {
   if (existsSync(COMPOSE_PATH)) {
-    return { status: 'pass', label: 'Compose file', message: 'Compose file installed (~/.horus/docker-compose.yml)' };
+    return { status: 'pass', label: 'Compose file', message: 'Compose file installed (~/Horus/docker-compose.yml)' };
   }
   return {
     status: 'fail',
     label: 'Compose file',
-    message: 'Compose file missing (~/.horus/docker-compose.yml)',
+    message: 'Compose file missing (~/Horus/docker-compose.yml)',
     hint: 'Run `horus setup` to install the compose file',
   };
 }
@@ -281,7 +281,7 @@ export const doctorCommand = new Command('doctor')
     allResults.push(checkComposeFile());
 
     const ports = config?.ports ?? DEFAULT_PORTS;
-    const dataDir = config?.data_dir ?? join(process.env.HOME ?? '~', '.horus', 'data');
+    const dataDir = config?.data_dir ?? DEFAULT_DATA_DIR;
 
     // 5. Ports
     allResults.push(checkPort(ports.anvil, 'Anvil'));

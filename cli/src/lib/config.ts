@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import {
   HORUS_DIR,
+  LEGACY_HORUS_DIR,
   CONFIG_PATH,
   ENV_PATH,
   DEFAULT_PORTS,
@@ -69,6 +70,36 @@ export function configExists(): boolean {
 
 export function loadConfig(): Config {
   if (!existsSync(CONFIG_PATH)) {
+    const legacyConfigPath = pathJoin(LEGACY_HORUS_DIR, 'config.yaml');
+    if (existsSync(legacyConfigPath)) {
+      console.warn(
+        `\nWarning: Horus config found at ~/.horus/config.yaml (legacy location).\n` +
+        `The new default is ~/Horus. Run \`horus setup\` to migrate.\n`
+      );
+      const raw = readFileSync(legacyConfigPath, 'utf-8');
+      const parsed = parseYaml(raw) as Partial<Config>;
+      const defaults = defaultConfig();
+      return {
+        version: parsed.version ?? defaults.version,
+        data_dir: parsed.data_dir ?? defaults.data_dir,
+        runtime: parsed.runtime ?? defaults.runtime,
+        ports: {
+          anvil: parsed.ports?.anvil ?? defaults.ports.anvil,
+          vault_rest: parsed.ports?.vault_rest ?? defaults.ports.vault_rest,
+          vault_mcp: parsed.ports?.vault_mcp ?? defaults.ports.vault_mcp,
+          forge: parsed.ports?.forge ?? defaults.ports.forge,
+        },
+        git_host: parsed.git_host ?? defaults.git_host,
+        repos: {
+          anvil_notes: parsed.repos?.anvil_notes ?? defaults.repos.anvil_notes,
+          vault_knowledge: parsed.repos?.vault_knowledge ?? defaults.repos.vault_knowledge,
+          forge_registry: parsed.repos?.forge_registry ?? defaults.repos.forge_registry,
+        },
+        host_repos_path: parsed.host_repos_path ?? defaults.host_repos_path,
+        host_repos_extra_scan_dirs: parsed.host_repos_extra_scan_dirs ?? defaults.host_repos_extra_scan_dirs,
+        github_token: parsed.github_token ?? defaults.github_token,
+      };
+    }
     return defaultConfig();
   }
 
@@ -228,7 +259,7 @@ export function generateEnv(config: Config): string {
 }
 
 /**
- * Write the generated .env file to ~/.horus/.env.
+ * Write the generated .env file to ~/Horus/.env.
  */
 export function writeEnvFile(config: Config): void {
   ensureHorusDir();
