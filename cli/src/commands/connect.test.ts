@@ -99,8 +99,8 @@ describe('registerWithClaudeCode', () => {
     mockExeca.mockResolvedValue(makeResult(0));
     await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100/sse' } });
 
-    const call = mockExeca.mock.calls[0];
-    const urlArg = call[1][call[1].length - 1] as string;
+    const args = mockExeca.mock.calls[0]![1] as string[];
+    const urlArg = args[args.length - 1] as string;
     expect(urlArg).toBe('http://localhost:8100');
     expect(urlArg).not.toContain('/sse');
   });
@@ -136,8 +136,8 @@ describe('registerWithClaudeCode', () => {
     mockExeca.mockResolvedValue(makeResult(0));
     await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100' } });
 
-    const call = mockExeca.mock.calls[0];
-    const urlArg = call[1][call[1].length - 1] as string;
+    const args = mockExeca.mock.calls[0]![1] as string[];
+    const urlArg = args[args.length - 1] as string;
     expect(urlArg).toBe('http://localhost:8100');
   });
 });
