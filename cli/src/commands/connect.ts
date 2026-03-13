@@ -115,6 +115,8 @@ export async function registerWithClaudeCode(
   for (const [name, entry] of Object.entries(mcpServers)) {
     // claude mcp add expects the base URL without the /sse suffix
     const baseUrl = entry.url.replace(/\/sse$/, '');
+    // Remove first so re-runs and URL changes are handled cleanly (ignore exit code)
+    await execa('claude', ['mcp', 'remove', '--scope', 'user', name], { reject: false });
     const result = await execa(
       'claude',
       ['mcp', 'add', '--transport', 'http', '--scope', 'user', name, baseUrl],

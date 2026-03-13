@@ -72,12 +72,18 @@ describe('registerWithClaudeCode', () => {
     forge: { url: 'http://localhost:8200/sse' },
   };
 
-  it('calls claude mcp add for each server with --transport http --scope user', async () => {
+  it('calls claude mcp remove then add for each server', async () => {
     mockExeca.mockResolvedValue(makeResult(0));
 
     await registerWithClaudeCode(servers);
 
-    expect(mockExeca).toHaveBeenCalledTimes(3);
+    // 3 removes + 3 adds = 6 calls total
+    expect(mockExeca).toHaveBeenCalledTimes(6);
+    expect(mockExeca).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'remove', '--scope', 'user', 'anvil'],
+      { reject: false },
+    );
     expect(mockExeca).toHaveBeenCalledWith(
       'claude',
       ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100'],
@@ -85,7 +91,17 @@ describe('registerWithClaudeCode', () => {
     );
     expect(mockExeca).toHaveBeenCalledWith(
       'claude',
+      ['mcp', 'remove', '--scope', 'user', 'vault'],
+      { reject: false },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'claude',
       ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'vault', 'http://localhost:8300'],
+      { reject: false },
+    );
+    expect(mockExeca).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'remove', '--scope', 'user', 'forge'],
       { reject: false },
     );
     expect(mockExeca).toHaveBeenCalledWith(
@@ -99,10 +115,13 @@ describe('registerWithClaudeCode', () => {
     mockExeca.mockResolvedValue(makeResult(0));
     await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100/sse' } });
 
-    const args = mockExeca.mock.calls[0]![1] as string[];
-    const urlArg = args[args.length - 1] as string;
-    expect(urlArg).toBe('http://localhost:8100');
-    expect(urlArg).not.toContain('/sse');
+    // second call is the add (first is remove)
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'claude',
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100'],
+      { reject: false },
+    );
   });
 
   it('returns all names in registered when all succeed', async () => {
@@ -114,9 +133,12 @@ describe('registerWithClaudeCode', () => {
 
   it('returns failed names when claude mcp add exits non-zero', async () => {
     mockExeca
-      .mockResolvedValueOnce(makeResult(0))  // anvil ok
-      .mockResolvedValueOnce(makeResult(1))  // vault fail
-      .mockResolvedValueOnce(makeResult(0)); // forge ok
+      .mockResolvedValueOnce(makeResult(0))  // remove anvil (ok)
+      .mockResolvedValueOnce(makeResult(0))  // add anvil (ok)
+      .mockResolvedValueOnce(makeResult(0))  // remove vault (ok)
+      .mockResolvedValueOnce(makeResult(1))  // add vault (fail)
+      .mockResolvedValueOnce(makeResult(0))  // remove forge (ok)
+      .mockResolvedValueOnce(makeResult(0)); // add forge (ok)
 
     const { registered, failed } = await registerWithClaudeCode(servers);
     expect(registered).toContain('anvil');
@@ -125,8 +147,29 @@ describe('registerWithClaudeCode', () => {
     expect(failed).toHaveLength(1);
   });
 
-  it('returns all names in failed when all registrations fail', async () => {
-    mockExeca.mockResolvedValue(makeResult(1));
+  it('succeeds even when remove exits non-zero (server did not exist yet)', async () => {
+    mockExeca
+      .mockResolvedValueOnce(makeResult(1))  // remove anvil (server not found — ignored)
+      .mockResolvedValueOnce(makeResult(0))  // add anvil (ok)
+      .mockResolvedValueOnce(makeResult(1))  // remove vault (server not found — ignored)
+      .mockResolvedValueOnce(makeResult(0))  // add vault (ok)
+      .mockResolvedValueOnce(makeResult(1))  // remove forge (server not found — ignored)
+      .mockResolvedValueOnce(makeResult(0)); // add forge (ok)
+
+    const { registered, failed } = await registerWithClaudeCode(servers);
+    expect(registered).toEqual(expect.arrayContaining(['anvil', 'vault', 'forge']));
+    expect(failed).toHaveLength(0);
+  });
+
+  it('returns all names in failed when all add calls fail', async () => {
+    mockExeca
+      .mockResolvedValueOnce(makeResult(0))  // remove anvil
+      .mockResolvedValueOnce(makeResult(1))  // add anvil (fail)
+      .mockResolvedValueOnce(makeResult(0))  // remove vault
+      .mockResolvedValueOnce(makeResult(1))  // add vault (fail)
+      .mockResolvedValueOnce(makeResult(0))  // remove forge
+      .mockResolvedValueOnce(makeResult(1)); // add forge (fail)
+
     const { registered, failed } = await registerWithClaudeCode(servers);
     expect(registered).toHaveLength(0);
     expect(failed).toEqual(expect.arrayContaining(['anvil', 'vault', 'forge']));
@@ -136,8 +179,12 @@ describe('registerWithClaudeCode', () => {
     mockExeca.mockResolvedValue(makeResult(0));
     await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100' } });
 
-    const args = mockExeca.mock.calls[0]![1] as string[];
-    const urlArg = args[args.length - 1] as string;
-    expect(urlArg).toBe('http://localhost:8100');
+    // second call is the add (first is remove)
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'claude',
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100'],
+      { reject: false },
+    );
   });
 });
