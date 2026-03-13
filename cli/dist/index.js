@@ -3,19 +3,18 @@
 // src/index.ts
 import { Command as Command10 } from "commander";
 import chalk10 from "chalk";
-import { createRequire } from "module";
 
 // src/commands/setup.ts
 import { Command as Command2 } from "commander";
 import chalk2 from "chalk";
 import ora2 from "ora";
 import { execSync } from "child_process";
-import { existsSync as existsSync4, mkdirSync as mkdirSync3 } from "fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync3 } from "fs";
 import { join as join4 } from "path";
 import { input, confirm, number, select, password } from "@inquirer/prompts";
 
 // src/lib/config.ts
-import { readFileSync as readFileSync2, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
+import { readFileSync as readFileSync2, writeFileSync, mkdirSync, existsSync as existsSync2, readdirSync, statSync } from "fs";
 import { resolve, join as pathJoin, relative } from "path";
 import { homedir as homedir2 } from "os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -23,11 +22,21 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 // src/lib/constants.ts
 import { homedir } from "os";
 import { join, dirname } from "path";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
-var __pkg_dirname = dirname(fileURLToPath(import.meta.url));
-var pkgPath = join(__pkg_dirname, "..", "..", "package.json");
-var pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+function findPackageJson() {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (dir !== dirname(dir)) {
+    const candidate = join(dir, "package.json");
+    if (existsSync(candidate)) {
+      const pkg2 = JSON.parse(readFileSync(candidate, "utf-8"));
+      if (pkg2.name === "@arkhera30/cli") return candidate;
+    }
+    dir = dirname(dir);
+  }
+  throw new Error("Could not find @arkhera30/cli package.json");
+}
+var pkg = JSON.parse(readFileSync(findPackageJson(), "utf-8"));
 var CLI_VERSION = pkg.version;
 var HORUS_DIR = join(homedir(), ".horus");
 var CONFIG_PATH = join(HORUS_DIR, "config.yaml");
@@ -72,10 +81,10 @@ function ensureHorusDir() {
   mkdirSync(HORUS_DIR, { recursive: true });
 }
 function configExists() {
-  return existsSync(CONFIG_PATH);
+  return existsSync2(CONFIG_PATH);
 }
 function loadConfig() {
-  if (!existsSync(CONFIG_PATH)) {
+  if (!existsSync2(CONFIG_PATH)) {
     return defaultConfig();
   }
   const raw = readFileSync2(CONFIG_PATH, "utf-8");
@@ -131,13 +140,13 @@ function discoverRepoDirs(rootDir, maxDepth = 4) {
       } catch {
         continue;
       }
-      if (existsSync(pathJoin(full, ".git"))) {
+      if (existsSync2(pathJoin(full, ".git"))) {
         repoDirs.add(dir);
       }
       walk(full, depth + 1);
     }
   }
-  if (existsSync(rootDir)) {
+  if (existsSync2(rootDir)) {
     walk(rootDir, 0);
   }
   return [...repoDirs];
@@ -509,7 +518,7 @@ Run '${runtime.name} compose logs' from ~/.horus/ to investigate.`
 }
 
 // src/lib/compose.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, existsSync as existsSync3 } from "fs";
 import { join as join2, dirname as dirname2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var __filename = fileURLToPath2(import.meta.url);
@@ -520,7 +529,7 @@ function getBundledComposePath() {
     join2(__dirname, "..", "compose", "docker-compose.yml")
   ];
   for (const candidate of candidates) {
-    if (existsSync2(candidate)) {
+    if (existsSync3(candidate)) {
       return candidate;
     }
   }
@@ -536,7 +545,7 @@ function applyPodmanUserOverride(compose) {
   );
 }
 function composeFileExists() {
-  return existsSync2(COMPOSE_PATH);
+  return existsSync3(COMPOSE_PATH);
 }
 function installComposeFile(runtime) {
   ensureHorusDir();
@@ -553,7 +562,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { checkbox } from "@inquirer/prompts";
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, mkdirSync as mkdirSync2, existsSync as existsSync4 } from "fs";
 import { join as join3 } from "path";
 import { homedir as homedir3 } from "os";
 import { execa as execa2 } from "execa";
@@ -561,16 +570,16 @@ function detectInstalledClients() {
   const detected = [];
   const home = homedir3();
   const claudeDesktopDir = join3(home, "Library", "Application Support", "Claude");
-  if (existsSync3(claudeDesktopDir)) {
+  if (existsSync4(claudeDesktopDir)) {
     detected.push("claude-desktop");
   }
   const claudeCodeDir = join3(home, ".claude");
-  if (existsSync3(claudeCodeDir)) {
+  if (existsSync4(claudeCodeDir)) {
     detected.push("claude-code");
   }
   const cursorDir = join3(home, ".cursor");
   const cursorAppDir = join3(home, "Library", "Application Support", "Cursor");
-  if (existsSync3(cursorDir) || existsSync3(cursorAppDir)) {
+  if (existsSync4(cursorDir) || existsSync4(cursorAppDir)) {
     detected.push("cursor");
   }
   return detected;
@@ -588,7 +597,7 @@ function getConfigPath(target) {
 }
 function mergeAndWriteConfig(configPath, mcpServers) {
   let existing = {};
-  if (existsSync3(configPath)) {
+  if (existsSync4(configPath)) {
     try {
       const raw = readFileSync4(configPath, "utf-8");
       existing = JSON.parse(raw);
@@ -1039,7 +1048,7 @@ ${example("forge-registry")}
     mkdirSync3(dataDir, { recursive: true });
     for (const repo of reposToClone) {
       const spinner = ora2(`Cloning ${repo.label}...`).start();
-      if (existsSync4(join4(repo.dest, ".git"))) {
+      if (existsSync5(join4(repo.dest, ".git"))) {
         spinner.succeed(`${repo.label} already cloned`);
         continue;
       }
@@ -1433,7 +1442,7 @@ import { Command as Command7 } from "commander";
 import chalk7 from "chalk";
 import ora6 from "ora";
 import { select as select2, confirm as confirm3 } from "@inquirer/prompts";
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, readdirSync as readdirSync2, existsSync as existsSync5 } from "fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, readdirSync as readdirSync2, existsSync as existsSync6 } from "fs";
 import { join as join5 } from "path";
 import { createHash } from "crypto";
 import { stringify as stringifyYaml2, parse as parseYaml2 } from "yaml";
@@ -1442,7 +1451,7 @@ function ensureSnapshotsDir() {
   mkdirSync4(SNAPSHOTS_DIR, { recursive: true });
 }
 function composeFileHash() {
-  if (!existsSync5(COMPOSE_PATH)) return "";
+  if (!existsSync6(COMPOSE_PATH)) return "";
   const content = readFileSync5(COMPOSE_PATH, "utf-8");
   return createHash("sha256").update(content).digest("hex").slice(0, 12);
 }
@@ -1477,7 +1486,7 @@ function saveSnapshot(images) {
   return filePath;
 }
 function listSnapshots() {
-  if (!existsSync5(SNAPSHOTS_DIR)) return [];
+  if (!existsSync6(SNAPSHOTS_DIR)) return [];
   return readdirSync2(SNAPSHOTS_DIR).filter((f) => f.endsWith(".yaml")).sort().reverse().map((f) => {
     const file = join5(SNAPSHOTS_DIR, f);
     const snapshot = parseYaml2(readFileSync5(file, "utf-8"));
@@ -1689,7 +1698,7 @@ var updateCommand = new Command7("update").description("Update Horus to the late
 import { Command as Command8 } from "commander";
 import chalk8 from "chalk";
 import { execSync as execSync2 } from "child_process";
-import { existsSync as existsSync6, accessSync, statfsSync, constants } from "fs";
+import { existsSync as existsSync7, accessSync, statfsSync, constants } from "fs";
 import { join as join6 } from "path";
 function symbol(status) {
   switch (status) {
@@ -1756,7 +1765,7 @@ function checkConfig() {
   };
 }
 function checkComposeFile() {
-  if (existsSync6(COMPOSE_PATH)) {
+  if (existsSync7(COMPOSE_PATH)) {
     return { status: "pass", label: "Compose file", message: "Compose file installed (~/.horus/docker-compose.yml)" };
   }
   return {
@@ -1797,7 +1806,7 @@ function checkPort(port, serviceName) {
   }
 }
 function checkDataDir(dataDir) {
-  if (!existsSync6(dataDir)) {
+  if (!existsSync7(dataDir)) {
     return {
       status: "warn",
       label: "Data directory",
@@ -1818,7 +1827,7 @@ function checkDataDir(dataDir) {
   }
 }
 function checkDiskSpace(dataDir) {
-  const checkDir = existsSync6(dataDir) ? dataDir : join6(dataDir, "..");
+  const checkDir = existsSync7(dataDir) ? dataDir : join6(dataDir, "..");
   try {
     const stats = statfsSync(checkDir);
     const freeBytes = stats.bfree * stats.bsize;
@@ -1950,7 +1959,7 @@ import { Command as Command9 } from "commander";
 import chalk9 from "chalk";
 import ora7 from "ora";
 import { confirm as confirm4 } from "@inquirer/prompts";
-import { mkdirSync as mkdirSync5, statSync as statSync2, existsSync as existsSync7, writeFileSync as writeFileSync5 } from "fs";
+import { mkdirSync as mkdirSync5, statSync as statSync2, existsSync as existsSync8, writeFileSync as writeFileSync5 } from "fs";
 import { join as join7, basename } from "path";
 import { execSync as execSync3 } from "child_process";
 import { stringify as stringifyYaml3 } from "yaml";
@@ -2051,7 +2060,7 @@ async function restoreBackup(file, yes) {
   console.log(chalk9.bold("Horus Restore"));
   console.log(chalk9.dim("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"));
   console.log("");
-  if (!existsSync7(file)) {
+  if (!existsSync8(file)) {
     console.log(chalk9.red(`Backup file not found: ${file}`));
     process.exit(1);
   }
@@ -2140,10 +2149,8 @@ backupCommand.command("restore <file>").description("Restore Horus data from a b
 });
 
 // src/index.ts
-var require2 = createRequire(import.meta.url);
-var { version } = require2("../package.json");
 var program = new Command10();
-program.name("horus").description("CLI for managing the Horus Docker Compose stack").version(version);
+program.name("horus").description("CLI for managing the Horus Docker Compose stack").version(CLI_VERSION);
 program.addCommand(setupCommand);
 program.addCommand(upCommand);
 program.addCommand(downCommand);

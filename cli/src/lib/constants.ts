@@ -1,12 +1,22 @@
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // ── CLI version (from package.json) ─────────────────────────────────────────
-const __pkg_dirname = dirname(fileURLToPath(import.meta.url));
-const pkgPath = join(__pkg_dirname, '..', '..', 'package.json');
-const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+function findPackageJson(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (dir !== dirname(dir)) {
+    const candidate = join(dir, 'package.json');
+    if (existsSync(candidate)) {
+      const pkg = JSON.parse(readFileSync(candidate, 'utf-8'));
+      if (pkg.name === '@arkhera30/cli') return candidate;
+    }
+    dir = dirname(dir);
+  }
+  throw new Error('Could not find @arkhera30/cli package.json');
+}
+const pkg = JSON.parse(readFileSync(findPackageJson(), 'utf-8'));
 export const CLI_VERSION: string = pkg.version;
 
 // ── Horus directory paths ───────────────────────────────────────────────────
