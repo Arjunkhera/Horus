@@ -46,7 +46,7 @@ Horus Setup
       Compose plugin: v2.29.1
 
 [2/5] Data directory:
-      Where should Horus store data? (~/.horus/data)
+      Where should Horus store data? (~/Horus/data)
       Created /Users/you/.horus/data
 
 [3/5] Port configuration:
@@ -79,7 +79,7 @@ Setup complete.
 **What happened at each step:**
 
 1. **Runtime detection** -- Horus found Docker (or Podman) and verified the Compose plugin is available.
-2. **Data directory** -- Created `~/.horus/data/` with subdirectories for notes, knowledge-base, registry, and workspaces.
+2. **Data directory** -- Created `~/Horus/data/` with subdirectories for notes, knowledge-base, registry, and workspaces.
 3. **Port configuration** -- Checked that the default ports (8100, 8200, 8300) are available on your machine.
 4. **Image pull** -- Downloaded the five Docker images that make up the Horus stack.
 5. **Stack start + health check** -- Started all containers and waited for each service to report healthy.

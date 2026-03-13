@@ -43,7 +43,7 @@ Technical overview of the Horus system for users who want to understand how the 
 |  +---------------------------------------------------------------+
 |                                                                  |
 |  Host Filesystem                                                 |
-|  ~/.horus/data/                                                  |
+|  ~/Horus/data/                                                  |
 |    notes/            Anvil markdown notes (git repo)             |
 |    knowledge-base/   Vault knowledge pages (git repo)            |
 |    registry/         Forge plugin registry (git repo)            |
@@ -81,7 +81,7 @@ A request travels through Horus in four stages:
 ```
 Claude --MCP/HTTP--> Anvil (:8100) --search--> QMD Daemon (:8181)
                          |
-                         +--> reads/writes --> ~/.horus/data/notes/
+                         +--> reads/writes --> ~/Horus/data/notes/
 ```
 
 **Vault (knowledge base):**
@@ -90,15 +90,15 @@ Claude --MCP/HTTP--> Anvil (:8100) --search--> QMD Daemon (:8181)
 Claude --MCP/HTTP--> Vault MCP (:8300) --REST/HTTP--> Vault REST (:8000)
                                                           |
                                                           +--> search --> QMD Daemon (:8181)
-                                                          +--> reads/writes --> ~/.horus/data/knowledge-base/
+                                                          +--> reads/writes --> ~/Horus/data/knowledge-base/
 ```
 
 **Forge (workspaces, repos, plugins):**
 
 ```
-Claude --MCP/HTTP--> Forge (:8200) --reads--> ~/.horus/data/registry/
+Claude --MCP/HTTP--> Forge (:8200) --reads--> ~/Horus/data/registry/
                          |
-                         +--> reads/writes --> ~/.horus/data/workspaces/
+                         +--> reads/writes --> ~/Horus/data/workspaces/
                          +--> reads (ro) ----> /path/to/your/repos/
 ```
 
@@ -164,14 +164,14 @@ Phase 4:  forge starts
 
 ### Host Bind Mounts
 
-All user data is stored on the host filesystem under the configured data directory (default: `~/.horus/data/`). These are Docker bind mounts, meaning data survives container removal, image updates, and `docker compose down`.
+All user data is stored on the host filesystem under the configured data directory (default: `~/Horus/data/`). These are Docker bind mounts, meaning data survives container removal, image updates, and `docker compose down`.
 
 | Host Path | Container Mount | Service | Purpose |
 |-----------|----------------|---------|---------|
-| `~/.horus/data/notes/` | `/data/notes` | Anvil | Notes, tasks, journals (git repo) |
-| `~/.horus/data/knowledge-base/` | `/data/knowledge-repo` | Vault REST | Knowledge pages, guides, decisions (git repo) |
-| `~/.horus/data/registry/` | `/data/registry` | Forge | Plugin/skill registry (git repo) |
-| `~/.horus/data/workspaces/` | `/data/workspaces` | Forge | Workspace directories |
+| `~/Horus/data/notes/` | `/data/notes` | Anvil | Notes, tasks, journals (git repo) |
+| `~/Horus/data/knowledge-base/` | `/data/knowledge-repo` | Vault REST | Knowledge pages, guides, decisions (git repo) |
+| `~/Horus/data/registry/` | `/data/registry` | Forge | Plugin/skill registry (git repo) |
+| `~/Horus/data/workspaces/` | `/data/workspaces` | Forge | Workspace directories |
 | `<host-repos-path>/` | `/data/repos` (read-only) | Forge | Your local git repositories for indexing |
 
 ### Named Docker Volumes

@@ -190,7 +190,7 @@ You: "You have 3 pending tasks: ..."
 |  |         +------------+                                            |
 |  +-------------------------------------------------------------------+
 |                                                                   |
-|  ~/.horus/data/                                                   |
+|  ~/Horus/data/                                                   |
 |    notes/           <-- Anvil data (git repo)                     |
 |    knowledge-base/  <-- Vault data (git repo)                     |
 |    registry/        <-- Forge plugin registry (git repo)          |
