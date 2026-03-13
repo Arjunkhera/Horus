@@ -132,7 +132,7 @@ export async function pollUntilHealthy(
         .join(', ');
       throw new Error(
         `Services failed health check: ${unhealthyServices}\n` +
-          `Run '${runtime.name} compose logs <service>' from ~/.horus/ to investigate.`
+          `Run '${runtime.name} compose logs <service>' from ~/Horus/ to investigate.`
       );
     }
 
@@ -144,7 +144,7 @@ export async function pollUntilHealthy(
         .join(', ');
       throw new Error(
         `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for services: ${notReady}\n` +
-          `Run '${runtime.name} compose logs' from ~/.horus/ to investigate.`
+          `Run '${runtime.name} compose logs' from ~/Horus/ to investigate.`
       );
     }
 

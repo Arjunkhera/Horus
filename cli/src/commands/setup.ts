@@ -253,7 +253,7 @@ export const setupCommand = new Command('setup')
     const configSpinner = ora('Saving configuration...').start();
     try {
       saveConfig(config);
-      configSpinner.succeed('Configuration saved to ~/.horus/config.yaml');
+      configSpinner.succeed('Configuration saved to ~/Horus/config.yaml');
     } catch (error) {
       configSpinner.fail('Failed to save configuration');
       console.error((error as Error).message);
@@ -264,7 +264,7 @@ export const setupCommand = new Command('setup')
     const envSpinner = ora('Generating .env file...').start();
     try {
       writeEnvFile(config);
-      envSpinner.succeed('Environment file written to ~/.horus/.env');
+      envSpinner.succeed('Environment file written to ~/Horus/.env');
     } catch (error) {
       envSpinner.fail('Failed to generate .env');
       console.error((error as Error).message);
@@ -275,7 +275,7 @@ export const setupCommand = new Command('setup')
     const composeSpinner = ora('Installing docker-compose.yml...').start();
     try {
       installComposeFile(runtime.name);
-      composeSpinner.succeed('Compose file installed to ~/.horus/docker-compose.yml');
+      composeSpinner.succeed('Compose file installed to ~/Horus/docker-compose.yml');
     } catch (error) {
       composeSpinner.fail('Failed to install compose file');
       console.error((error as Error).message);
@@ -382,7 +382,7 @@ export const setupCommand = new Command('setup')
       healthSpinner.fail('Some services did not become healthy');
       console.log(chalk.dim((error as Error).message));
       console.log('');
-      console.log(chalk.dim('Tip: Check logs with `docker compose logs` from ~/.horus/'));
+      console.log(chalk.dim('Tip: Check logs with `docker compose logs` from ~/Horus/'));
       process.exit(1);
     }
 
@@ -407,7 +407,7 @@ export const setupCommand = new Command('setup')
     console.log(chalk.dim('──────────────────────────────────────'));
     console.log('');
     console.log(`  ${chalk.bold('Runtime:')}    ${runtime.name}`);
-    console.log(`  ${chalk.bold('Config:')}     ~/.horus/config.yaml`);
+    console.log(`  ${chalk.bold('Config:')}     ~/Horus/config.yaml`);
     console.log(`  ${chalk.bold('Data:')}       ${config.data_dir}`);
     console.log('');
     console.log(chalk.bold('  Service URLs:'));

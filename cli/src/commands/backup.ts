@@ -80,7 +80,7 @@ async function createBackup(yes: boolean): Promise<void> {
 
   const backupSpinner = ora('Creating backup archive...').start();
   try {
-    // tar -czf <dest> -C ~/.horus data/
+    // tar -czf <dest> -C ~/Horus data/
     // We archive the data/ subdirectory relative to HORUS_DIR
     execSync(`tar -czf "${tarFile}" -C "${HORUS_DIR}" data/`, {
       stdio: 'pipe',

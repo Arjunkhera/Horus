@@ -57,14 +57,14 @@ function applyPodmanUserOverride(compose: string): string {
 // ── Compose file management ─────────────────────────────────────────────────
 
 /**
- * Check if the compose file is already installed at ~/.horus/.
+ * Check if the compose file is already installed at ~/Horus/.
  */
 export function composeFileExists(): boolean {
   return existsSync(COMPOSE_PATH);
 }
 
 /**
- * Install the bundled docker-compose.yml to ~/.horus/docker-compose.yml.
+ * Install the bundled docker-compose.yml to ~/Horus/docker-compose.yml.
  * When the runtime is Podman, services are overridden to run as root inside
  * the container so they can write to host-mounted volumes.
  */
