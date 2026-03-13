@@ -611,6 +611,16 @@ function mergeAndWriteConfig(configPath, mcpServers) {
   mkdirSync2(dir, { recursive: true });
   writeFileSync3(configPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
 }
+function getMcpRemoteWrapperPath() {
+  return join3(homedir3(), ".forge", "bin", "mcp-remote-wrapper");
+}
+function buildStdioServers(config, wrapperPath, host) {
+  return {
+    anvil: { command: wrapperPath, args: [`http://${host}:${config.ports.anvil}/mcp`] },
+    vault: { command: wrapperPath, args: [`http://${host}:${config.ports.vault_mcp}/mcp`] },
+    forge: { command: wrapperPath, args: [`http://${host}:${config.ports.forge}/mcp`] }
+  };
+}
 async function isClaudeCliAvailable() {
   try {
     const result = await execa2("claude", ["--version"], { reject: false });
@@ -624,6 +634,7 @@ async function registerWithClaudeCode(mcpServers) {
   const failed = [];
   for (const [name, entry] of Object.entries(mcpServers)) {
     const baseUrl = entry.url.replace(/\/sse$/, "");
+    await execa2("claude", ["mcp", "remove", "--scope", "user", name], { reject: false });
     const result = await execa2(
       "claude",
       ["mcp", "add", "--transport", "http", "--scope", "user", name, baseUrl],
@@ -697,18 +708,38 @@ function printNextSteps(targets) {
   console.log("");
 }
 async function runConnect(config, runtime, targets, host = "localhost") {
-  const mcpServers = {
+  const httpServers = {
     anvil: { url: `http://${host}:${config.ports.anvil}/sse` },
     vault: { url: `http://${host}:${config.ports.vault_mcp}/sse` },
     forge: { url: `http://${host}:${config.ports.forge}/sse` }
   };
   const configured = [];
   for (const target of targets) {
-    if (target === "claude-code") {
+    if (target === "claude-desktop") {
+      const desktopSpinner = ora(`Configuring ${chalk.cyan("claude-desktop")}...`).start();
+      const wrapperPath = getMcpRemoteWrapperPath();
+      if (!existsSync4(wrapperPath)) {
+        desktopSpinner.fail("mcp-remote-wrapper not found");
+        console.log(chalk.dim(`Expected at: ${wrapperPath}`));
+        console.log(chalk.dim("Install it with: npx --yes mcp-remote --help"));
+        console.log(chalk.dim("Then place the wrapper script at the path above."));
+        continue;
+      }
+      try {
+        const stdioServers = buildStdioServers(config, wrapperPath, host);
+        const configPath = getConfigPath(target);
+        mergeAndWriteConfig(configPath, stdioServers);
+        desktopSpinner.succeed(`Configured ${chalk.cyan("claude-desktop")} \u2014 ${chalk.dim(configPath)}`);
+        configured.push(target);
+      } catch (error) {
+        desktopSpinner.fail("Failed to configure claude-desktop");
+        console.log(chalk.dim(error.message));
+      }
+    } else if (target === "claude-code") {
       const cliSpinner = ora("Registering MCP servers with Claude Code CLI...").start();
       const cliAvailable = await isClaudeCliAvailable();
       if (cliAvailable) {
-        const { registered, failed } = await registerWithClaudeCode(mcpServers);
+        const { registered, failed } = await registerWithClaudeCode(httpServers);
         if (failed.length === 0) {
           cliSpinner.succeed(
             `Registered with Claude Code: ${registered.map((n) => chalk.cyan(n)).join(", ")}`
@@ -724,7 +755,7 @@ async function runConnect(config, runtime, targets, host = "localhost") {
         }
       } else {
         cliSpinner.warn("claude CLI not found on PATH \u2014 register manually:");
-        for (const [name, entry] of Object.entries(mcpServers)) {
+        for (const [name, entry] of Object.entries(httpServers)) {
           const baseUrl = entry.url.replace(/\/sse$/, "");
           console.log(
             chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`)
@@ -735,7 +766,7 @@ async function runConnect(config, runtime, targets, host = "localhost") {
       const configPath = getConfigPath(target);
       const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
       try {
-        mergeAndWriteConfig(configPath, mcpServers);
+        mergeAndWriteConfig(configPath, httpServers);
         writeSpinner.succeed(`Configured ${chalk.cyan(target)} \u2014 ${chalk.dim(configPath)}`);
         configured.push(target);
       } catch (error) {
