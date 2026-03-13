@@ -108,9 +108,9 @@ export function buildStdioServers(
   host: string,
 ): Record<string, StdioMcpServerEntry> {
   return {
-    anvil: { command: wrapperPath, args: [`http://${host}:${config.ports.anvil}/mcp`] },
-    vault: { command: wrapperPath, args: [`http://${host}:${config.ports.vault_mcp}/mcp`] },
-    forge: { command: wrapperPath, args: [`http://${host}:${config.ports.forge}/mcp`] },
+    anvil: { command: wrapperPath, args: [`http://${host}:${config.ports.anvil}/mcp`, '--transport', 'http-only'] },
+    vault: { command: wrapperPath, args: [`http://${host}:${config.ports.vault_mcp}/mcp`, '--transport', 'http-only'] },
+    forge: { command: wrapperPath, args: [`http://${host}:${config.ports.forge}/mcp`, '--transport', 'http-only'] },
   };
 }
 
