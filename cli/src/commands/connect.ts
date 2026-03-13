@@ -13,13 +13,16 @@ import { detectRuntime } from '../lib/runtime.js';
 
 export type ClientTarget = 'claude-desktop' | 'claude-code' | 'cursor';
 
-interface McpServerEntry {
+interface HttpMcpServerEntry {
   url: string;
 }
 
-interface McpConfig {
-  mcpServers: Record<string, McpServerEntry>;
+interface StdioMcpServerEntry {
+  command: string;
+  args: string[];
 }
+
+type McpServerEntry = HttpMcpServerEntry | StdioMcpServerEntry;
 
 // ── Client detection ─────────────────────────────────────────────────────────
 
@@ -65,7 +68,10 @@ function getConfigPath(target: ClientTarget): string {
 
 // ── MCP config merging ────────────────────────────────────────────────────────
 
-function mergeAndWriteConfig(configPath: string, mcpServers: Record<string, McpServerEntry>): void {
+export function mergeAndWriteConfig(
+  configPath: string,
+  mcpServers: Record<string, McpServerEntry>,
+): void {
   // Read existing config or start fresh
   let existing: Record<string, unknown> = {};
   if (existsSync(configPath)) {
@@ -90,6 +96,24 @@ function mergeAndWriteConfig(configPath: string, mcpServers: Record<string, McpS
   writeFileSync(configPath, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
 }
 
+// ── Claude Desktop stdio bridge ──────────────────────────────────────────────
+
+export function getMcpRemoteWrapperPath(): string {
+  return join(homedir(), '.forge', 'bin', 'mcp-remote-wrapper');
+}
+
+export function buildStdioServers(
+  config: Config,
+  wrapperPath: string,
+  host: string,
+): Record<string, StdioMcpServerEntry> {
+  return {
+    anvil: { command: wrapperPath, args: [`http://${host}:${config.ports.anvil}/mcp`] },
+    vault: { command: wrapperPath, args: [`http://${host}:${config.ports.vault_mcp}/mcp`] },
+    forge: { command: wrapperPath, args: [`http://${host}:${config.ports.forge}/mcp`] },
+  };
+}
+
 // ── Claude Code CLI MCP registration ─────────────────────────────────────────
 
 export async function isClaudeCliAvailable(): Promise<boolean> {
@@ -107,7 +131,7 @@ interface ClaudeCodeRegistrationResult {
 }
 
 export async function registerWithClaudeCode(
-  mcpServers: Record<string, McpServerEntry>,
+  mcpServers: Record<string, HttpMcpServerEntry>,
 ): Promise<ClaudeCodeRegistrationResult> {
   const registered: string[] = [];
   const failed: string[] = [];
@@ -212,8 +236,8 @@ export async function runConnect(
   targets: ClientTarget[],
   host: string = 'localhost',
 ): Promise<ClientTarget[]> {
-  // Build MCP config
-  const mcpServers: Record<string, McpServerEntry> = {
+  // Build HTTP MCP config (used by Claude Code and Cursor)
+  const httpServers: Record<string, HttpMcpServerEntry> = {
     anvil: { url: `http://${host}:${config.ports.anvil}/sse` },
     vault: { url: `http://${host}:${config.ports.vault_mcp}/sse` },
     forge: { url: `http://${host}:${config.ports.forge}/sse` },
@@ -223,13 +247,37 @@ export async function runConnect(
 
   // Write config for each target
   for (const target of targets) {
-    if (target === 'claude-code') {
+    if (target === 'claude-desktop') {
+      // Claude Desktop requires stdio-based servers (command + args).
+      // It cannot connect to HTTP URLs directly — needs mcp-remote-wrapper as a bridge.
+      const desktopSpinner = ora(`Configuring ${chalk.cyan('claude-desktop')}...`).start();
+      const wrapperPath = getMcpRemoteWrapperPath();
+
+      if (!existsSync(wrapperPath)) {
+        desktopSpinner.fail('mcp-remote-wrapper not found');
+        console.log(chalk.dim(`Expected at: ${wrapperPath}`));
+        console.log(chalk.dim('Install it with: npx --yes mcp-remote --help'));
+        console.log(chalk.dim('Then place the wrapper script at the path above.'));
+        continue;
+      }
+
+      try {
+        const stdioServers = buildStdioServers(config, wrapperPath, host);
+        const configPath = getConfigPath(target);
+        mergeAndWriteConfig(configPath, stdioServers);
+        desktopSpinner.succeed(`Configured ${chalk.cyan('claude-desktop')} — ${chalk.dim(configPath)}`);
+        configured.push(target);
+      } catch (error) {
+        desktopSpinner.fail('Failed to configure claude-desktop');
+        console.log(chalk.dim((error as Error).message));
+      }
+    } else if (target === 'claude-code') {
       // Claude Code CLI reads MCPs from ~/.claude.json via `claude mcp add`,
       // not from ~/.claude/settings.json — so we use the CLI when available.
       const cliSpinner = ora('Registering MCP servers with Claude Code CLI...').start();
       const cliAvailable = await isClaudeCliAvailable();
       if (cliAvailable) {
-        const { registered, failed } = await registerWithClaudeCode(mcpServers);
+        const { registered, failed } = await registerWithClaudeCode(httpServers);
         if (failed.length === 0) {
           cliSpinner.succeed(
             `Registered with Claude Code: ${registered.map((n) => chalk.cyan(n)).join(', ')}`,
@@ -245,7 +293,7 @@ export async function runConnect(
         }
       } else {
         cliSpinner.warn('claude CLI not found on PATH — register manually:');
-        for (const [name, entry] of Object.entries(mcpServers)) {
+        for (const [name, entry] of Object.entries(httpServers)) {
           const baseUrl = entry.url.replace(/\/sse$/, '');
           console.log(
             chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`),
@@ -253,10 +301,11 @@ export async function runConnect(
         }
       }
     } else {
+      // Cursor supports HTTP URLs natively
       const configPath = getConfigPath(target);
       const writeSpinner = ora(`Configuring ${chalk.cyan(target)}...`).start();
       try {
-        mergeAndWriteConfig(configPath, mcpServers);
+        mergeAndWriteConfig(configPath, httpServers);
         writeSpinner.succeed(`Configured ${chalk.cyan(target)} — ${chalk.dim(configPath)}`);
         configured.push(target);
       } catch (error) {

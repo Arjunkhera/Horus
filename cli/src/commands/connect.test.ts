@@ -26,7 +26,19 @@ vi.mock('../lib/runtime.js', () => ({
 }));
 
 import { execa } from 'execa';
-import { isClaudeCliAvailable, registerWithClaudeCode } from './connect.js';
+import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import {
+  isClaudeCliAvailable,
+  registerWithClaudeCode,
+  buildStdioServers,
+  getMcpRemoteWrapperPath,
+  mergeAndWriteConfig,
+} from './connect.js';
+
+const mockExistsSync = vi.mocked(existsSync);
+const mockWriteFileSync = vi.mocked(writeFileSync);
+const mockReadFileSync = vi.mocked(readFileSync);
+const mockMkdirSync = vi.mocked(mkdirSync);
 
 const mockExeca = vi.mocked(execa);
 
@@ -186,5 +198,116 @@ describe('registerWithClaudeCode', () => {
       ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100'],
       { reject: false },
     );
+  });
+});
+
+// ── getMcpRemoteWrapperPath ─────────────────────────────────────────────────
+
+describe('getMcpRemoteWrapperPath', () => {
+  it('returns ~/.forge/bin/mcp-remote-wrapper', () => {
+    const path = getMcpRemoteWrapperPath();
+    expect(path).toBe('/home/testuser/.forge/bin/mcp-remote-wrapper');
+  });
+});
+
+// ── buildStdioServers ───────────────────────────────────────────────────────
+
+describe('buildStdioServers', () => {
+  const config = {
+    ports: { anvil: 8100, vault_mcp: 8300, forge: 8200 },
+  } as any;
+
+  it('builds stdio entries with command and args using /mcp endpoint', () => {
+    const servers = buildStdioServers(config, '/usr/local/bin/mcp-remote-wrapper', 'localhost');
+
+    expect(servers.anvil).toEqual({
+      command: '/usr/local/bin/mcp-remote-wrapper',
+      args: ['http://localhost:8100/mcp'],
+    });
+    expect(servers.vault).toEqual({
+      command: '/usr/local/bin/mcp-remote-wrapper',
+      args: ['http://localhost:8300/mcp'],
+    });
+    expect(servers.forge).toEqual({
+      command: '/usr/local/bin/mcp-remote-wrapper',
+      args: ['http://localhost:8200/mcp'],
+    });
+  });
+
+  it('uses /mcp endpoint, not /sse', () => {
+    const servers = buildStdioServers(config, '/wrapper', 'localhost');
+    for (const entry of Object.values(servers)) {
+      expect(entry.args[0]).toMatch(/\/mcp$/);
+      expect(entry.args[0]).not.toMatch(/\/sse$/);
+    }
+  });
+
+  it('respects custom host', () => {
+    const servers = buildStdioServers(config, '/wrapper', '192.168.1.10');
+    expect(servers.anvil.args[0]).toBe('http://192.168.1.10:8100/mcp');
+  });
+});
+
+// ── mergeAndWriteConfig (Claude Desktop format) ─────────────────────────────
+
+describe('mergeAndWriteConfig with stdio entries', () => {
+  const configPath = '/home/testuser/Library/Application Support/Claude/claude_desktop_config.json';
+
+  it('writes command + args format for Claude Desktop', () => {
+    mockExistsSync.mockReturnValue(false);
+
+    const stdioServers = {
+      anvil: { command: '/wrapper', args: ['http://localhost:8100/mcp'] },
+      vault: { command: '/wrapper', args: ['http://localhost:8300/mcp'] },
+      forge: { command: '/wrapper', args: ['http://localhost:8200/mcp'] },
+    };
+
+    mergeAndWriteConfig(configPath, stdioServers);
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written.mcpServers.anvil).toEqual({
+      command: '/wrapper',
+      args: ['http://localhost:8100/mcp'],
+    });
+    expect(written.mcpServers.vault).toEqual({
+      command: '/wrapper',
+      args: ['http://localhost:8300/mcp'],
+    });
+    expect(written.mcpServers.forge).toEqual({
+      command: '/wrapper',
+      args: ['http://localhost:8200/mcp'],
+    });
+  });
+
+  it('preserves existing non-mcpServers keys', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({
+      preferences: { coworkWebSearchEnabled: true },
+    }));
+
+    mergeAndWriteConfig(configPath, {
+      anvil: { command: '/wrapper', args: ['http://localhost:8100/mcp'] },
+    });
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written.preferences).toEqual({ coworkWebSearchEnabled: true });
+    expect(written.mcpServers.anvil.command).toBe('/wrapper');
+  });
+
+  it('merges with existing mcpServers without overwriting unrelated entries', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({
+      mcpServers: {
+        custom: { command: '/other', args: [] },
+      },
+    }));
+
+    mergeAndWriteConfig(configPath, {
+      anvil: { command: '/wrapper', args: ['http://localhost:8100/mcp'] },
+    });
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written.mcpServers.custom).toEqual({ command: '/other', args: [] });
+    expect(written.mcpServers.anvil.command).toBe('/wrapper');
   });
 });
