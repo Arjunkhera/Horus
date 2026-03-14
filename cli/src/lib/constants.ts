@@ -29,8 +29,9 @@ export const COMPOSE_PATH = join(HORUS_DIR, 'docker-compose.yml');
 // ── Default port assignments ────────────────────────────────────────────────
 export const DEFAULT_PORTS = {
   anvil: 8100,
-  vault_rest: 8000,
+  vault_rest: 8000,   // keep for individual vault instances
   vault_mcp: 8300,
+  vault_router: 8400, // new
   forge: 8200,
 } as const;
 
@@ -38,7 +39,6 @@ export const DEFAULT_PORTS = {
 // All repo URLs default to empty — setup prompts the user for their own repos.
 export const DEFAULT_REPOS = {
   anvil_notes: '',
-  vault_knowledge: '',
   forge_registry: '',
 } as const;
 
@@ -49,7 +49,7 @@ export const DEFAULT_DATA_DIR = join(homedir(), 'Horus', 'data');
 export const SERVICES = [
   'qmd-daemon',
   'anvil',
-  'vault',
+  'vault-router',  // replaces 'vault'
   'vault-mcp',
   'forge',
 ] as const;
@@ -60,7 +60,7 @@ export type ServiceName = (typeof SERVICES)[number];
 export const HEALTH_ENDPOINTS: Record<ServiceName, { port: number; path: string }> = {
   'qmd-daemon': { port: 8181, path: '/health' },
   'anvil': { port: 8100, path: '/health' },
-  'vault': { port: 8000, path: '/health' },
+  'vault-router': { port: 8400, path: '/health' },
   'vault-mcp': { port: 8300, path: '/health' },
   'forge': { port: 8200, path: '/health' },
 };
