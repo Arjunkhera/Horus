@@ -8,12 +8,21 @@ import {
   CONFIG_PATH,
   ENV_PATH,
   DEFAULT_PORTS,
-  DEFAULT_REPOS,
   DEFAULT_DATA_DIR,
   CONFIG_VERSION,
 } from './constants.js';
 
-// ── Config type ─────────────────────────────────────────────────────────────
+// ── Config types ─────────────────────────────────────────────────────────────
+
+export interface VaultConfig {
+  repo: string;
+  default?: boolean;
+}
+
+export interface GitHubHost {
+  host: string;
+  token: string;
+}
 
 export interface Config {
   version: string;
@@ -23,17 +32,17 @@ export interface Config {
     anvil: number;
     vault_rest: number;
     vault_mcp: number;
+    vault_router: number;
     forge: number;
   };
-  git_host: string;
   repos: {
     anvil_notes: string;
-    vault_knowledge: string;
     forge_registry: string;
   };
+  vaults: Record<string, VaultConfig>;
+  github_hosts: Record<string, GitHubHost>;
   host_repos_path: string;
   host_repos_extra_scan_dirs: string[];
-  github_token: string;
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -44,11 +53,14 @@ export function defaultConfig(): Config {
     data_dir: DEFAULT_DATA_DIR,
     runtime: 'docker',
     ports: { ...DEFAULT_PORTS },
-    git_host: 'github.com',
-    repos: { ...DEFAULT_REPOS },
+    repos: {
+      anvil_notes: '',
+      forge_registry: '',
+    },
+    vaults: {},
+    github_hosts: {},
     host_repos_path: '',
     host_repos_extra_scan_dirs: [],
-    github_token: '',
   };
 }
 
@@ -77,55 +89,51 @@ export function loadConfig(): Config {
         `The new default is ~/Horus. Run \`horus setup\` to migrate.\n`
       );
       const raw = readFileSync(legacyConfigPath, 'utf-8');
-      const parsed = parseYaml(raw) as Partial<Config>;
-      const defaults = defaultConfig();
-      return {
-        version: parsed.version ?? defaults.version,
-        data_dir: parsed.data_dir ?? defaults.data_dir,
-        runtime: parsed.runtime ?? defaults.runtime,
-        ports: {
-          anvil: parsed.ports?.anvil ?? defaults.ports.anvil,
-          vault_rest: parsed.ports?.vault_rest ?? defaults.ports.vault_rest,
-          vault_mcp: parsed.ports?.vault_mcp ?? defaults.ports.vault_mcp,
-          forge: parsed.ports?.forge ?? defaults.ports.forge,
-        },
-        git_host: parsed.git_host ?? defaults.git_host,
-        repos: {
-          anvil_notes: parsed.repos?.anvil_notes ?? defaults.repos.anvil_notes,
-          vault_knowledge: parsed.repos?.vault_knowledge ?? defaults.repos.vault_knowledge,
-          forge_registry: parsed.repos?.forge_registry ?? defaults.repos.forge_registry,
-        },
-        host_repos_path: parsed.host_repos_path ?? defaults.host_repos_path,
-        host_repos_extra_scan_dirs: parsed.host_repos_extra_scan_dirs ?? defaults.host_repos_extra_scan_dirs,
-        github_token: parsed.github_token ?? defaults.github_token,
-      };
+      const parsed = parseYaml(raw) as Record<string, unknown>;
+      return buildConfigFromParsed(parsed);
     }
     return defaultConfig();
   }
 
   const raw = readFileSync(CONFIG_PATH, 'utf-8');
-  const parsed = parseYaml(raw) as Partial<Config>;
+  const parsed = parseYaml(raw) as Record<string, unknown>;
+  return buildConfigFromParsed(parsed);
+}
+
+function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
+  // Guard against old single-vault format
+  const repos = parsed.repos as Record<string, unknown> | undefined;
+  if (repos && 'vault_knowledge' in repos) {
+    throw new Error(
+      'config.yaml uses the old single-vault format (repos.vault_knowledge). ' +
+      'This version requires the new multi-vault format. ' +
+      'Please delete ~/Horus/config.yaml and run `horus setup` to reconfigure.'
+    );
+  }
+
   const defaults = defaultConfig();
 
+  const parsedPorts = parsed.ports as Record<string, number> | undefined;
+
   return {
-    version: parsed.version ?? defaults.version,
-    data_dir: parsed.data_dir ?? defaults.data_dir,
-    runtime: parsed.runtime ?? defaults.runtime,
+    version: (parsed.version as string | undefined) ?? defaults.version,
+    data_dir: (parsed.data_dir as string | undefined) ?? defaults.data_dir,
+    runtime: (parsed.runtime as 'docker' | 'podman' | undefined) ?? defaults.runtime,
     ports: {
-      anvil: parsed.ports?.anvil ?? defaults.ports.anvil,
-      vault_rest: parsed.ports?.vault_rest ?? defaults.ports.vault_rest,
-      vault_mcp: parsed.ports?.vault_mcp ?? defaults.ports.vault_mcp,
-      forge: parsed.ports?.forge ?? defaults.ports.forge,
+      anvil: parsedPorts?.anvil ?? defaults.ports.anvil,
+      vault_rest: parsedPorts?.vault_rest ?? defaults.ports.vault_rest,
+      vault_mcp: parsedPorts?.vault_mcp ?? defaults.ports.vault_mcp,
+      vault_router: parsedPorts?.vault_router ?? defaults.ports.vault_router,
+      forge: parsedPorts?.forge ?? defaults.ports.forge,
     },
-    git_host: parsed.git_host ?? defaults.git_host,
     repos: {
-      anvil_notes: parsed.repos?.anvil_notes ?? defaults.repos.anvil_notes,
-      vault_knowledge: parsed.repos?.vault_knowledge ?? defaults.repos.vault_knowledge,
-      forge_registry: parsed.repos?.forge_registry ?? defaults.repos.forge_registry,
+      anvil_notes: (repos?.anvil_notes as string | undefined) ?? defaults.repos.anvil_notes,
+      forge_registry: (repos?.forge_registry as string | undefined) ?? defaults.repos.forge_registry,
     },
-    host_repos_path: parsed.host_repos_path ?? defaults.host_repos_path,
-    host_repos_extra_scan_dirs: parsed.host_repos_extra_scan_dirs ?? defaults.host_repos_extra_scan_dirs,
-    github_token: parsed.github_token ?? defaults.github_token,
+    vaults: (parsed.vaults as Record<string, VaultConfig> | undefined) ?? defaults.vaults,
+    github_hosts: (parsed.github_hosts as Record<string, GitHubHost> | undefined) ?? defaults.github_hosts,
+    host_repos_path: (parsed.host_repos_path as string | undefined) ?? defaults.host_repos_path,
+    host_repos_extra_scan_dirs: (parsed.host_repos_extra_scan_dirs as string[] | undefined) ?? defaults.host_repos_extra_scan_dirs,
   };
 }
 
@@ -133,6 +141,32 @@ export function saveConfig(config: Config): void {
   ensureHorusDir();
   const yaml = stringifyYaml(config, { lineWidth: 0 });
   writeFileSync(CONFIG_PATH, yaml, 'utf-8');
+}
+
+// ── Config validation ────────────────────────────────────────────────────────
+
+export function validateConfig(config: Config): void {
+  if (!config.vaults || Object.keys(config.vaults).length === 0) {
+    throw new Error('config.yaml must have at least one vault in the vaults: section.');
+  }
+  const defaults = Object.entries(config.vaults).filter(([, v]) => v.default);
+  if (defaults.length !== 1) {
+    throw new Error(`Exactly one vault must have default: true. Found ${defaults.length}.`);
+  }
+  if (!config.github_hosts || Object.keys(config.github_hosts).length === 0) {
+    throw new Error('config.yaml must have at least one entry in github_hosts:.');
+  }
+}
+
+// ── GitHub host resolution ───────────────────────────────────────────────────
+
+export function resolveGitHubHost(repoUrl: string, github_hosts: Record<string, GitHubHost>): GitHubHost | undefined {
+  try {
+    const hostname = new URL(repoUrl).hostname;
+    return Object.values(github_hosts).find(h => h.host === hostname);
+  } catch {
+    return undefined;
+  }
 }
 
 // ── .env generation ─────────────────────────────────────────────────────────
@@ -243,15 +277,12 @@ export function generateEnv(config: Config): string {
     `ANVIL_PORT=${config.ports.anvil}`,
     `VAULT_PORT=${config.ports.vault_rest}`,
     `VAULT_MCP_PORT=${config.ports.vault_mcp}`,
+    `VAULT_ROUTER_PORT=${config.ports.vault_router}`,
     `FORGE_PORT=${config.ports.forge}`,
     '',
     '# Repository URLs (must be HTTPS — container services do not have SSH keys)',
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
-    `VAULT_KNOWLEDGE_REPO_URL=${config.repos.vault_knowledge}`,
     `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
-    '',
-    '# Authentication',
-    `GITHUB_TOKEN=${config.github_token}`,
     '',
   ];
 
@@ -280,11 +311,9 @@ export const CONFIG_KEYS = [
   'port.anvil',
   'port.vault-rest',
   'port.vault-mcp',
+  'port.vault-router',
   'port.forge',
-  'github-token',
-  'git-host',
   'repo.anvil-notes',
-  'repo.vault-knowledge',
   'repo.forge-registry',
 ] as const;
 
@@ -309,16 +338,12 @@ export function getConfigValue(config: Config, key: ConfigKey): string {
       return String(config.ports.vault_rest);
     case 'port.vault-mcp':
       return String(config.ports.vault_mcp);
+    case 'port.vault-router':
+      return String(config.ports.vault_router);
     case 'port.forge':
       return String(config.ports.forge);
-    case 'github-token':
-      return config.github_token;
-    case 'git-host':
-      return config.git_host;
     case 'repo.anvil-notes':
       return config.repos.anvil_notes;
-    case 'repo.vault-knowledge':
-      return config.repos.vault_knowledge;
     case 'repo.forge-registry':
       return config.repos.forge_registry;
   }
@@ -358,20 +383,14 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
     case 'port.vault-mcp':
       updated.ports = { ...updated.ports, vault_mcp: parseInt(value, 10) };
       break;
+    case 'port.vault-router':
+      updated.ports = { ...updated.ports, vault_router: parseInt(value, 10) };
+      break;
     case 'port.forge':
       updated.ports = { ...updated.ports, forge: parseInt(value, 10) };
       break;
-    case 'github-token':
-      updated.github_token = value;
-      break;
-    case 'git-host':
-      updated.git_host = value;
-      break;
     case 'repo.anvil-notes':
       updated.repos = { ...updated.repos, anvil_notes: value };
-      break;
-    case 'repo.vault-knowledge':
-      updated.repos = { ...updated.repos, vault_knowledge: value };
       break;
     case 'repo.forge-registry':
       updated.repos = { ...updated.repos, forge_registry: value };

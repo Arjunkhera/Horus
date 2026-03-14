@@ -1,5 +1,6 @@
+# NOTE: This file is superseded by dynamic compose generation in cli/src/lib/compose.ts
 # ─────────────────────────────────────────────────────────────────────────────
-# Horus — Production Docker Compose
+# Horus — Production Docker Compose (DEPRECATED static template)
 # Managed by @arkhera30/cli. Do not edit manually.
 #
 # This file uses pre-built images from ghcr.io. Once CI pipelines are set up,

@@ -36,19 +36,36 @@ export const configCommand = new Command('config')
     console.log(`  ${chalk.bold('host-repos-path:')}             ${config.host_repos_path || chalk.dim('(not set)')}`);
     const extraDirs = (config.host_repos_extra_scan_dirs ?? []).join(', ');
     console.log(`  ${chalk.bold('host-repos-extra-scan-dirs:')}  ${extraDirs || chalk.dim('(not set)')}`);
-    console.log(`  ${chalk.bold('git-host:')}                    ${config.git_host || chalk.dim('(not set)')}`);
-    console.log(`  ${chalk.bold('github-token:')}     ${config.github_token ? maskApiKey(config.github_token) : chalk.dim('(not set)')}`);
     console.log('');
     console.log(chalk.bold('  Ports:'));
-    console.log(`    ${chalk.bold('anvil:')}       ${config.ports.anvil}`);
-    console.log(`    ${chalk.bold('vault-rest:')}  ${config.ports.vault_rest}`);
-    console.log(`    ${chalk.bold('vault-mcp:')}   ${config.ports.vault_mcp}`);
-    console.log(`    ${chalk.bold('forge:')}       ${config.ports.forge}`);
+    console.log(`    ${chalk.bold('anvil:')}         ${config.ports.anvil}`);
+    console.log(`    ${chalk.bold('vault-rest:')}    ${config.ports.vault_rest}`);
+    console.log(`    ${chalk.bold('vault-mcp:')}     ${config.ports.vault_mcp}`);
+    console.log(`    ${chalk.bold('vault-router:')}  ${config.ports.vault_router}`);
+    console.log(`    ${chalk.bold('forge:')}         ${config.ports.forge}`);
     console.log('');
     console.log(chalk.bold('  Repos:'));
-    console.log(`    ${chalk.bold('anvil-notes:')}      ${config.repos.anvil_notes || chalk.dim('(not set)')}`);
-    console.log(`    ${chalk.bold('vault-knowledge:')}  ${config.repos.vault_knowledge || chalk.dim('(not set)')}`);
-    console.log(`    ${chalk.bold('forge-registry:')}   ${config.repos.forge_registry || chalk.dim('(not set)')}`);
+    console.log(`    ${chalk.bold('anvil-notes:')}    ${config.repos.anvil_notes || chalk.dim('(not set)')}`);
+    console.log(`    ${chalk.bold('forge-registry:')} ${config.repos.forge_registry || chalk.dim('(not set)')}`);
+    console.log('');
+    console.log(chalk.bold('  Vaults:'));
+    if (Object.keys(config.vaults ?? {}).length === 0) {
+      console.log(chalk.dim('    (none configured)'));
+    } else {
+      for (const [name, vault] of Object.entries(config.vaults)) {
+        const defaultLabel = vault.default ? chalk.dim(' (default)') : '';
+        console.log(`    ${chalk.bold(name)}${defaultLabel}: ${vault.repo || chalk.dim('(no repo)')}`);
+      }
+    }
+    console.log('');
+    console.log(chalk.bold('  GitHub Hosts:'));
+    if (Object.keys(config.github_hosts ?? {}).length === 0) {
+      console.log(chalk.dim('    (none configured)'));
+    } else {
+      for (const [key, gh] of Object.entries(config.github_hosts)) {
+        console.log(`    ${chalk.bold(key)}: ${gh.host}  token: ${gh.token ? maskApiKey(gh.token) : chalk.dim('(not set)')}`);
+      }
+    }
     console.log('');
     console.log(chalk.dim(`  Config file: ~/Horus/config.yaml`));
     console.log(chalk.dim(`  Use 'horus config get <key>' or 'horus config set <key> <value>'`));
@@ -75,13 +92,7 @@ configCommand
 
     const config = loadConfig();
     const value = getConfigValue(config, key as ConfigKey);
-
-    // Mask sensitive values
-    if (key === 'github-token') {
-      console.log(maskApiKey(value));
-    } else {
-      console.log(value || '');
-    }
+    console.log(value || '');
   });
 
 // ── Config set subcommand ───────────────────────────────────────────────────
@@ -126,6 +137,7 @@ configCommand
       'port.anvil',
       'port.vault-rest',
       'port.vault-mcp',
+      'port.vault-router',
       'port.forge',
     ];
 

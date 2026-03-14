@@ -12,7 +12,10 @@ import {
   configExists,
   defaultConfig,
   resolveConfigPath,
+  resolveGitHubHost,
   type Config,
+  type VaultConfig,
+  type GitHubHost,
 } from '../lib/config.js';
 import { checkRuntime, detectRuntime, composeStreaming } from '../lib/runtime.js';
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
@@ -39,6 +42,17 @@ function injectToken(url: string, token: string): string {
   }
 }
 
+/**
+ * Extract the hostname from a URL, falling back to 'github.com' on parse error.
+ */
+function extractHostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'github.com';
+  }
+}
+
 // ── Setup command ───────────────────────────────────────────────────────────
 
 export const setupCommand = new Command('setup')
@@ -47,11 +61,11 @@ export const setupCommand = new Command('setup')
   .option('--runtime <runtime>', 'Container runtime to use: docker or podman (non-interactive only)')
   .option('--data-dir <path>', 'Data directory path')
   .option('--repos-path <path>', 'Host repos path for Forge scanning')
-  .option('--git-host <host>', 'Git server hostname (e.g., github.com, gitlab.corp.com)')
   .option('--anvil-repo <url>', 'Anvil notes repository URL')
-  .option('--vault-repo <url>', 'Vault knowledge-base repository URL')
+  .option('--vault-name <name>', 'Vault name (can be specified multiple times)')
+  .option('--vault-repo <url>', 'Vault knowledge-base repository URL (matches positionally with --vault-name)')
   .option('--forge-repo <url>', 'Forge registry repository URL')
-  .option('--github-token <token>', 'GitHub personal access token for private repos')
+  .option('--github-token <token>', 'GitHub personal access token for private repos (primary host)')
   .action(async (opts) => {
     console.log('');
     console.log(chalk.bold('Horus Setup'));
@@ -128,18 +142,58 @@ export const setupCommand = new Command('setup')
     if (opts.yes) {
       // Non-interactive mode — use flags, env vars, then defaults
       const defaults = defaultConfig();
+
+      // Parse vault names and repos from flags
+      const vaultNames: string[] = opts.vaultName
+        ? Array.isArray(opts.vaultName) ? opts.vaultName : [opts.vaultName]
+        : ['default'];
+      const vaultRepos: string[] = opts.vaultRepo
+        ? Array.isArray(opts.vaultRepo) ? opts.vaultRepo : [opts.vaultRepo]
+        : [process.env.VAULT_KNOWLEDGE_REPO_URL ?? ''];
+
+      const vaults: Record<string, VaultConfig> = {};
+      vaultNames.forEach((name, i) => {
+        vaults[name] = {
+          repo: vaultRepos[i] ?? vaultRepos[0] ?? '',
+          default: i === 0,
+        };
+      });
+
+      // Build github_hosts: map each unique hostname from vault repos + anvil repo
+      const primaryToken = opts.githubToken || process.env.GITHUB_TOKEN || '';
+      const anvilRepo = opts.anvilRepo || process.env.ANVIL_REPO_URL || defaults.repos.anvil_notes;
+      const allRepoUrls = [anvilRepo, ...Object.values(vaults).map((v) => v.repo)].filter(Boolean);
+      const seenHosts = new Set<string>();
+      const github_hosts: Record<string, GitHubHost> = {};
+      let hostIndex = 0;
+      for (const url of allRepoUrls) {
+        const hostname = extractHostname(url);
+        if (!seenHosts.has(hostname)) {
+          seenHosts.add(hostname);
+          const hostKey = hostIndex === 0 ? 'default' : hostname;
+          github_hosts[hostKey] = {
+            host: hostname,
+            token: primaryToken,
+          };
+          hostIndex++;
+        }
+      }
+      // Ensure at least one github_host entry
+      if (Object.keys(github_hosts).length === 0) {
+        github_hosts['default'] = { host: 'github.com', token: primaryToken };
+      }
+
       config = {
         ...defaults,
         runtime: runtime.name,
         data_dir: opts.dataDir || DEFAULT_DATA_DIR,
         host_repos_path: opts.reposPath || '',
-        git_host: opts.gitHost || defaults.git_host,
         repos: {
-          anvil_notes: opts.anvilRepo || process.env.ANVIL_REPO_URL || defaults.repos.anvil_notes,
-          vault_knowledge: opts.vaultRepo || process.env.VAULT_KNOWLEDGE_REPO_URL || defaults.repos.vault_knowledge,
+          anvil_notes: anvilRepo,
           forge_registry: opts.forgeRepo || process.env.FORGE_REGISTRY_REPO_URL || defaults.repos.forge_registry,
         },
-        github_token: opts.githubToken || process.env.GITHUB_TOKEN || '',
+        vaults,
+        github_hosts,
       };
     } else {
       // Interactive mode
@@ -160,7 +214,7 @@ export const setupCommand = new Command('setup')
         default: false,
       });
 
-      let ports: { anvil: number; vault_rest: number; vault_mcp: number; forge: number } = { ...DEFAULT_PORTS };
+      let ports: { anvil: number; vault_rest: number; vault_mcp: number; vault_router: number; forge: number } = { ...DEFAULT_PORTS };
 
       if (customize_ports) {
         const anvil = await number({
@@ -168,12 +222,16 @@ export const setupCommand = new Command('setup')
           default: DEFAULT_PORTS.anvil,
         });
         const vault_rest = await number({
-          message: 'Vault REST port:',
+          message: 'Vault REST port (per-vault instances):',
           default: DEFAULT_PORTS.vault_rest,
         });
         const vault_mcp = await number({
           message: 'Vault MCP port:',
           default: DEFAULT_PORTS.vault_mcp,
+        });
+        const vault_router = await number({
+          message: 'Vault Router port:',
+          default: DEFAULT_PORTS.vault_router,
         });
         const forge = await number({
           message: 'Forge port:',
@@ -183,11 +241,12 @@ export const setupCommand = new Command('setup')
           anvil: anvil ?? DEFAULT_PORTS.anvil,
           vault_rest: vault_rest ?? DEFAULT_PORTS.vault_rest,
           vault_mcp: vault_mcp ?? DEFAULT_PORTS.vault_mcp,
+          vault_router: vault_router ?? DEFAULT_PORTS.vault_router,
           forge: forge ?? DEFAULT_PORTS.forge,
         };
       }
 
-      // Git host + Repository URLs
+      // Repository configuration
       console.log('');
       console.log(chalk.bold('Repository Configuration'));
       console.log(chalk.dim('Horus stores notes and knowledge in Git repos you own.'));
@@ -197,13 +256,12 @@ export const setupCommand = new Command('setup')
       console.log(chalk.dim('  SSH URLs (git@github.com:...) will fail at runtime inside Docker/Podman.'));
       console.log('');
 
-      const git_host = await input({
-        message: 'Git server hostname:',
+      const primaryHost = await input({
+        message: 'Primary Git server hostname:',
         default: 'github.com',
       });
 
-      const host = git_host.trim();
-      const example = (repo: string) => chalk.dim(`  e.g., https://${host}/<owner>/${repo}`);
+      const example = (repo: string) => chalk.dim(`  e.g., https://${primaryHost}/<owner>/${repo}`);
 
       console.log('');
 
@@ -212,25 +270,95 @@ export const setupCommand = new Command('setup')
         validate: (v) => v.trim().length > 0 || 'Anvil needs a notes repo to store your data.',
       });
 
-      const vault_knowledge = await input({
-        message: `Vault knowledge-base repo URL:\n${example('knowledge-base')}\n`,
-        validate: (v) => v.trim().length > 0 || 'Vault needs a knowledge-base repo.',
-      });
-
       const forge_registry = await input({
         message: `Forge registry repo URL:\n${example('forge-registry')}\n`,
         validate: (v) => v.trim().length > 0 || 'Forge needs a registry repo.',
       });
 
+      // Vault collection flow
       console.log('');
-      console.log(chalk.bold('Authentication'));
-      console.log(chalk.dim('A personal access token is required for private repositories.'));
+      console.log(chalk.bold('Vault Configuration'));
+      console.log(chalk.dim('Add one or more knowledge-base vaults. Each vault is a separate Git repo.'));
       console.log('');
 
-      const github_token = await password({
-        message: 'GitHub personal access token (leave empty to skip):',
-        mask: '*',
-      });
+      const vaults: Record<string, VaultConfig> = {};
+      let addingVaults = true;
+      let isFirstVault = true;
+
+      while (addingVaults) {
+        const vaultName = await input({
+          message: 'Add vault name (e.g., personal):',
+          validate: (v) => {
+            const trimmed = v.trim();
+            if (!trimmed) return 'Vault name cannot be empty.';
+            if (!/^[a-z0-9-]+$/.test(trimmed)) return 'Vault name must be lowercase alphanumeric with hyphens only.';
+            if (trimmed in vaults) return `Vault "${trimmed}" already added.`;
+            return true;
+          },
+        });
+
+        const vaultRepo = await input({
+          message: `Vault repo URL:\n${example(`${vaultName.trim()}-knowledge`)}\n`,
+          validate: (v) => v.trim().length > 0 || 'Vault repo URL cannot be empty.',
+        });
+
+        let isDefault = isFirstVault;
+        if (!isFirstVault) {
+          isDefault = await confirm({
+            message: `Is "${vaultName.trim()}" the default vault?`,
+            default: false,
+          });
+        }
+
+        // If user marks a new vault as default, unset any previous default
+        if (isDefault) {
+          for (const v of Object.values(vaults)) {
+            v.default = false;
+          }
+        }
+
+        vaults[vaultName.trim()] = {
+          repo: vaultRepo.trim(),
+          default: isDefault || isFirstVault,
+        };
+        isFirstVault = false;
+
+        addingVaults = await confirm({
+          message: 'Add another vault?',
+          default: false,
+        });
+      }
+
+      // Ensure exactly one default
+      const defaultCount = Object.values(vaults).filter((v) => v.default).length;
+      if (defaultCount === 0 && Object.keys(vaults).length > 0) {
+        // Mark first vault as default
+        const firstKey = Object.keys(vaults)[0];
+        vaults[firstKey].default = true;
+      }
+
+      // Authentication: collect tokens per unique hostname
+      console.log('');
+      console.log(chalk.bold('Authentication'));
+      console.log(chalk.dim('A personal access token is required per Git server for private repositories.'));
+      console.log('');
+
+      const allRepoUrls = [anvil_notes.trim(), ...Object.values(vaults).map((v) => v.repo)].filter(Boolean);
+      const uniqueHostnames = [...new Set(allRepoUrls.map(extractHostname))];
+
+      const github_hosts: Record<string, GitHubHost> = {};
+      for (let i = 0; i < uniqueHostnames.length; i++) {
+        const hostname = uniqueHostnames[i];
+        const token = await password({
+          message: `GitHub token for ${chalk.cyan(hostname)} (leave empty to skip):`,
+          mask: '*',
+        });
+        const hostKey = i === 0 ? 'default' : hostname;
+        github_hosts[hostKey] = {
+          host: hostname,
+          token: token.trim(),
+        };
+      }
 
       config = {
         ...defaultConfig(),
@@ -239,13 +367,12 @@ export const setupCommand = new Command('setup')
         host_repos_extra_scan_dirs,
         runtime: runtime.name,
         ports,
-        git_host: git_host.trim(),
         repos: {
           anvil_notes: anvil_notes.trim(),
-          vault_knowledge: vault_knowledge.trim(),
           forge_registry: forge_registry.trim(),
         },
-        github_token: github_token.trim(),
+        vaults,
+        github_hosts,
       };
     }
 
@@ -271,10 +398,10 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 6: Install compose file (Podman gets user override for UID mapping)
+    // Step 6: Install compose file (generated dynamically from config)
     const composeSpinner = ora('Installing docker-compose.yml...').start();
     try {
-      installComposeFile(runtime.name);
+      installComposeFile(config, runtime.name);
       composeSpinner.succeed('Compose file installed to ~/Horus/docker-compose.yml');
     } catch (error) {
       composeSpinner.fail('Failed to install compose file');
@@ -285,11 +412,37 @@ export const setupCommand = new Command('setup')
     // Step 7: Clone repos to data directory using host git credentials
     const dataDir = resolveConfigPath(config.data_dir);
 
-    const reposToClone: Array<{ url: string; dest: string; label: string }> = [
-      { url: config.repos.anvil_notes, dest: join(dataDir, 'notes'), label: 'Anvil notes' },
-      { url: config.repos.vault_knowledge, dest: join(dataDir, 'knowledge-base'), label: 'Vault knowledge-base' },
-      { url: config.repos.forge_registry, dest: join(dataDir, 'registry'), label: 'Forge registry' },
+    // Build list of repos to clone
+    const anvilToken = resolveGitHubHost(config.repos.anvil_notes, config.github_hosts)?.token ?? '';
+    const forgeToken = resolveGitHubHost(config.repos.forge_registry, config.github_hosts)?.token ?? '';
+
+    const reposToClone: Array<{ url: string; dest: string; label: string; token: string }> = [
+      {
+        url: config.repos.anvil_notes,
+        dest: join(dataDir, 'notes'),
+        label: 'Anvil notes',
+        token: anvilToken,
+      },
+      {
+        url: config.repos.forge_registry,
+        dest: join(dataDir, 'registry'),
+        label: 'Forge registry',
+        token: forgeToken,
+      },
     ].filter((r) => r.url);
+
+    // Add each vault repo
+    for (const [name, vault] of Object.entries(config.vaults)) {
+      if (vault.repo) {
+        const vaultToken = resolveGitHubHost(vault.repo, config.github_hosts)?.token ?? '';
+        reposToClone.push({
+          url: vault.repo,
+          dest: join(dataDir, 'vaults', name),
+          label: `Vault: ${name}`,
+          token: vaultToken,
+        });
+      }
+    }
 
     if (reposToClone.length > 0) {
       console.log('');
@@ -306,7 +459,7 @@ export const setupCommand = new Command('setup')
 
         try {
           mkdirSync(repo.dest, { recursive: true });
-          const cloneUrl = injectToken(repo.url, config.github_token);
+          const cloneUrl = injectToken(repo.url, repo.token);
           execSync(`git clone "${cloneUrl}" "${repo.dest}"`, {
             stdio: 'pipe',
             timeout: 60_000,
@@ -321,7 +474,7 @@ export const setupCommand = new Command('setup')
             console.log(chalk.dim(`  ${msg.split('\n')[0]}`));
           }
           console.log(chalk.dim(`  URL: ${repo.url}`));
-          if (!config.github_token) {
+          if (!repo.token) {
             console.log(chalk.dim('  Tip: Re-run setup and provide a GitHub token if the repo is private.'));
           }
           process.exit(1);
@@ -350,7 +503,7 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 9: Poll health checks
+    // Step 10: Poll health checks
     console.log('');
     const healthSpinner = ora('Waiting for services to become healthy...').start();
 
@@ -386,7 +539,7 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 10: Configure AI clients
+    // Step 11: Configure AI clients
     console.log('');
     const detectedClients = detectInstalledClients();
     if (detectedClients.length > 0) {
@@ -401,7 +554,7 @@ export const setupCommand = new Command('setup')
       console.log(chalk.dim(`No AI clients detected. Run ${chalk.cyan('horus connect')} after installing Claude Desktop, Claude Code, or Cursor.`));
     }
 
-    // Step 11: Print success summary
+    // Step 12: Print success summary
     console.log('');
     console.log(chalk.bold.green('Setup complete!'));
     console.log(chalk.dim('──────────────────────────────────────'));
@@ -411,9 +564,19 @@ export const setupCommand = new Command('setup')
     console.log(`  ${chalk.bold('Data:')}       ${config.data_dir}`);
     console.log('');
     console.log(chalk.bold('  Service URLs:'));
-    console.log(`    Anvil:      http://localhost:${config.ports.anvil}`);
-    console.log(`    Vault REST: http://localhost:${config.ports.vault_rest}`);
-    console.log(`    Vault MCP:  http://localhost:${config.ports.vault_mcp}`);
-    console.log(`    Forge:      http://localhost:${config.ports.forge}`);
+    console.log(`    Anvil:        http://localhost:${config.ports.anvil}`);
+    console.log(`    Vault Router: http://localhost:${config.ports.vault_router}`);
+    console.log(`    Vault MCP:    http://localhost:${config.ports.vault_mcp}`);
+    console.log(`    Forge:        http://localhost:${config.ports.forge}`);
     console.log('');
+    console.log(chalk.bold('  Vault instances:'));
+    Object.entries(config.vaults).sort(([a], [b]) => a.localeCompare(b)).forEach(([name, vault], index) => {
+      const port = `800${index + 1}`;
+      const defaultLabel = vault.default ? chalk.dim(' (default)') : '';
+      console.log(`    ${name}${defaultLabel}:  http://localhost:${port}`);
+    });
+    console.log('');
+
+    // Suppress unused variable warning for lastStates
+    void lastStates;
   });
