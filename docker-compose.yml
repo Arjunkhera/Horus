@@ -262,6 +262,47 @@ services:
       start_period: 60s
       retries: 3
 
+
+  # ── Horus UI ─────────────────────────────────────────────────────────────
+  # React + Vite SPA served through an Express proxy on port 8400.
+  # ui-server proxies /api/* to Anvil, Vault-MCP, and Forge;
+  # serves static assets built from @horus/ui-client.
+  horus-ui:
+    build:
+      context: .
+      dockerfile: packages/ui-server/Dockerfile
+    ports:
+      - "${UI_PORT:-8400}:8400"
+    environment:
+      - PORT=8400
+      - ANVIL_URL=http://anvil:8100
+      - VAULT_URL=http://vault-mcp:8300
+      - FORGE_URL=http://forge:8200
+      - NODE_ENV=production
+    depends_on:
+      anvil:
+        condition: service_healthy
+      vault-mcp:
+        condition: service_healthy
+      forge:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 64m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8400/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
 # ── Networks ──────────────────────────────────────────────────────────────────
 networks:
   horus-net:
