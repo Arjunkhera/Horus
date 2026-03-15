@@ -240,7 +240,7 @@ ${vaultRouterDependsOn}
         reservations:
           memory: 64m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8400/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8400/health')"]
       interval: 30s
       timeout: 10s
       start_period: 30s
