@@ -1,19 +1,13 @@
 {
   "name": "@horus/ui-server",
   "version": "0.1.0",
-  "description": "Horus UI — Express backend proxy",
   "type": "module",
-  "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "build": "echo '@horus/ui-server: no build step needed'"
+    "dev": "node --watch src/server.js"
   },
   "dependencies": {
-    "express": "^4.19.0"
-  },
-  "engines": {
-    "node": ">=18"
-  },
-  "license": "MIT"
+    "express": "^4.19.0",
+    "http-proxy-middleware": "^3.0.0"
+  }
 }
