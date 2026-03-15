@@ -1,0 +1,17 @@
+{
+  "name": "@horus/shared",
+  "version": "0.1.0",
+  "description": "Shared types and utilities for Horus UI",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "build": "echo '@horus/shared: no build step needed (source = output)'"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
