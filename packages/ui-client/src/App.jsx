@@ -5,6 +5,7 @@ import { Shell } from './components/Shell/Shell'
 import { Sidebar } from './components/Shell/Sidebar'
 import { ModeSelector } from './components/Navigation/ModeSelector'
 import { Breadcrumbs } from './components/Navigation/Breadcrumbs'
+import { HealthIndicator } from './components/Health/HealthIndicator'
 import { HomeView } from './views/HomeView'
 import { StoriesView } from './views/StoriesView'
 import { KnowledgeView } from './views/KnowledgeView'
@@ -16,10 +17,6 @@ import { PinnedSection } from './components/Dashboards/PinnedSection'
 import { DashboardView } from './components/Dashboards/DashboardView'
 import { useDashboards } from './components/Dashboards/DashboardContext'
 
-function HealthDot() {
-  return <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--status-green)', display: 'inline-block' }} title="Services healthy" />
-}
-
 function AppShell() {
   const { activeDashboardId } = useDashboards()
   return (
@@ -28,7 +25,7 @@ function AppShell() {
       topBar={<>
         <ModeSelector />
         <span style={{ flex: 1, display: 'flex', justifyContent: 'center' }}><Breadcrumbs /></span>
-        <HealthDot />
+        <HealthIndicator />
       </>}
     >
       {activeDashboardId
