@@ -486,7 +486,7 @@ export const setupCommand = new Command('setup')
     console.log('');
     console.log(chalk.bold('Pulling container images...'));
     try {
-      await composeStreaming(runtime, ['pull', '--ignore-pull-failures']);
+      await composeStreaming(runtime, runtime.name === 'podman' ? ['pull'] : ['pull', '--ignore-pull-failures']);
     } catch {
       console.log(chalk.yellow('Some images could not be pulled.'));
       console.log(chalk.dim('Continuing — services will be built from source if build contexts are available.'));
