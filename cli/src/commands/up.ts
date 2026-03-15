@@ -36,7 +36,7 @@ export const upCommand = new Command('up')
     if (opts.pull) {
       const pullSpinner = ora('Pulling latest images...').start();
       try {
-        await composeStreaming(runtime, ['pull', '--ignore-pull-failures']);
+        await composeStreaming(runtime, runtime.name === 'podman' ? ['pull'] : ['pull', '--ignore-pull-failures']);
         pullSpinner.succeed('Images up to date');
       } catch {
         pullSpinner.warn('Could not pull images, using cached');
