@@ -31,7 +31,8 @@ export const DEFAULT_PORTS = {
   anvil: 8100,
   vault_rest: 8000,   // keep for individual vault instances
   vault_mcp: 8300,
-  vault_router: 8400, // new
+  vault_router: 8050, // internal routing layer
+  ui: 8400,          // horus-ui — user-facing web interface
   forge: 8200,
 } as const;
 
@@ -52,6 +53,7 @@ export const SERVICES = [
   'vault-router',  // replaces 'vault'
   'vault-mcp',
   'forge',
+  'horus-ui',
 ] as const;
 
 export type ServiceName = (typeof SERVICES)[number];
@@ -60,9 +62,10 @@ export type ServiceName = (typeof SERVICES)[number];
 export const HEALTH_ENDPOINTS: Record<ServiceName, { port: number; path: string }> = {
   'qmd-daemon': { port: 8181, path: '/health' },
   'anvil': { port: 8100, path: '/health' },
-  'vault-router': { port: 8400, path: '/health' },
+  'vault-router': { port: 8050, path: '/health' },
   'vault-mcp': { port: 8300, path: '/health' },
   'forge': { port: 8200, path: '/health' },
+  'horus-ui': { port: 8400, path: '/api/health' },
 };
 
 // ── Config version ──────────────────────────────────────────────────────────

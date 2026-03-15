@@ -145,6 +145,49 @@ const FORGE_SERVICE = `\
       start_period: 60s
       retries: 3`;
 
+
+const HORUS_UI_SERVICE = `\
+  # ── Horus UI ───────────────────────────────────────────────────────────────
+  # Web interface — React SPA served by Express proxy on port 8400.
+  # Proxies /api/anvil, /api/vault, /api/forge to the respective services.
+  # Stores dashboard configs and preferences in _system/ui/ (not indexed by Anvil).
+  horus-ui:
+    image: ghcr.io/arjunkhera/horus/horus-ui:latest
+    ports:
+      - "\${UI_PORT:-8400}:8400"
+    volumes:
+      - \${HORUS_DATA_PATH}/notes:/data/notes:rw
+    environment:
+      - PORT=8400
+      - HORUS_DATA_PATH=/data/notes
+      - ANVIL_URL=http://anvil:8100
+      - VAULT_URL=http://vault-mcp:8300
+      - FORGE_URL=http://forge:8200
+      - NODE_ENV=production
+    depends_on:
+      anvil:
+        condition: service_healthy
+      vault-mcp:
+        condition: service_healthy
+      forge:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 64m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8400/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3`;
+
 // ── Dynamic compose generation ───────────────────────────────────────────────
 
 /**
@@ -224,7 +267,7 @@ export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman
   vault-router:
     image: ghcr.io/arjunkhera/horus/vault-router:latest
     ports:
-      - "\${VAULT_ROUTER_PORT:-8400}:8400"
+      - "\${VAULT_ROUTER_PORT:-8050}:8400"
     environment:
       - VAULT_ENDPOINTS=${vaultEndpoints}
       - VAULT_DEFAULT=${defaultVaultName}
@@ -300,6 +343,8 @@ ${vaultRouterDependsOn}
     vaultMcpService,
     '',
     FORGE_SERVICE,
+    '',
+    HORUS_UI_SERVICE,
     '',
     '# ── Networks ──────────────────────────────────────────────────────────────────',
     'networks:',
