@@ -33,7 +33,7 @@ RUN git clone --depth 1 https://github.com/tobi/qmd.git /tmp/qmd && \
 # service-to-service calls work while localhost-only is still possible via env var.
 RUN sed -i \
     's/httpServer\.listen(port, "localhost",/httpServer.listen(port, process.env.QMD_BIND_HOST || "0.0.0.0",/' \
-    /usr/local/lib/node_modules/@tobilu/qmd/dist/mcp.js
+    /usr/local/lib/node_modules/@tobilu/qmd/dist/mcp/server.js
 
 RUN mkdir -p /home/qmd/.cache/qmd && chown -R qmd:qmd /home/qmd/.cache
 
