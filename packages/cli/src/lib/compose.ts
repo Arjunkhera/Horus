@@ -182,7 +182,7 @@ const HORUS_UI_SERVICE = `\
         reservations:
           memory: 64m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8400/api/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8400/api/health"]
       interval: 30s
       timeout: 5s
       start_period: 30s
