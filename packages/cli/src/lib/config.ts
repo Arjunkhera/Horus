@@ -43,6 +43,7 @@ export interface Config {
   github_hosts: Record<string, GitHubHost>;
   host_repos_path: string;
   host_repos_extra_scan_dirs: string[];
+  enable_ui: boolean;
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ export function defaultConfig(): Config {
     github_hosts: {},
     host_repos_path: '',
     host_repos_extra_scan_dirs: [],
+    enable_ui: true,
   };
 }
 
@@ -134,6 +136,7 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
     github_hosts: (parsed.github_hosts as Record<string, GitHubHost> | undefined) ?? defaults.github_hosts,
     host_repos_path: (parsed.host_repos_path as string | undefined) ?? defaults.host_repos_path,
     host_repos_extra_scan_dirs: (parsed.host_repos_extra_scan_dirs as string[] | undefined) ?? defaults.host_repos_extra_scan_dirs,
+    enable_ui: (parsed.enable_ui as boolean | undefined) ?? defaults.enable_ui,
   };
 }
 
@@ -315,6 +318,7 @@ export const CONFIG_KEYS = [
   'port.forge',
   'repo.anvil-notes',
   'repo.forge-registry',
+  'enable-ui',
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -346,6 +350,8 @@ export function getConfigValue(config: Config, key: ConfigKey): string {
       return config.repos.anvil_notes;
     case 'repo.forge-registry':
       return config.repos.forge_registry;
+    case 'enable-ui':
+      return String(config.enable_ui);
   }
 }
 
@@ -394,6 +400,12 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
       break;
     case 'repo.forge-registry':
       updated.repos = { ...updated.repos, forge_registry: value };
+      break;
+    case 'enable-ui':
+      if (value !== 'true' && value !== 'false') {
+        throw new Error(`Invalid value for enable-ui: ${value}. Must be "true" or "false".`);
+      }
+      updated.enable_ui = value === 'true';
       break;
   }
 
