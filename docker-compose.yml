@@ -263,6 +263,26 @@ services:
       retries: 3
 
 
+  # ── Typesense ─────────────────────────────────────────────────────────────
+  # Full-text and vector search engine for unified Horus Search.
+  typesense:
+    image: typesense/typesense:27.1
+    ports:
+      - "${TYPESENSE_PORT:-8108}:8108"
+    volumes:
+      - ${HORUS_DATA_PATH:-~/.horus}/typesense-data:/data
+    command: >
+      --data-dir=/data
+      --api-key=${TYPESENSE_API_KEY:-horus-local-key}
+      --enable-cors
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8108/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
   # ── Horus UI ─────────────────────────────────────────────────────────────
   # React + Vite SPA served through an Express proxy on port 8400.
   # ui-server proxies /api/* to Anvil, Vault-MCP, and Forge;

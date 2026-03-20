@@ -34,10 +34,14 @@ export interface Config {
     vault_mcp: number;
     vault_router: number;
     forge: number;
+    typesense: number;
   };
   repos: {
     anvil_notes: string;
     forge_registry: string;
+  };
+  search: {
+    api_key: string;
   };
   vaults: Record<string, VaultConfig>;
   github_hosts: Record<string, GitHubHost>;
@@ -57,6 +61,9 @@ export function defaultConfig(): Config {
     repos: {
       anvil_notes: '',
       forge_registry: '',
+    },
+    search: {
+      api_key: 'horus-local-key',
     },
     vaults: {},
     github_hosts: {},
@@ -127,10 +134,14 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
       vault_mcp: parsedPorts?.vault_mcp ?? defaults.ports.vault_mcp,
       vault_router: parsedPorts?.vault_router ?? defaults.ports.vault_router,
       forge: parsedPorts?.forge ?? defaults.ports.forge,
+      typesense: parsedPorts?.typesense ?? defaults.ports.typesense,
     },
     repos: {
       anvil_notes: (repos?.anvil_notes as string | undefined) ?? defaults.repos.anvil_notes,
       forge_registry: (repos?.forge_registry as string | undefined) ?? defaults.repos.forge_registry,
+    },
+    search: {
+      api_key: ((parsed.search as Record<string, unknown> | undefined)?.api_key as string | undefined) ?? defaults.search.api_key,
     },
     vaults: (parsed.vaults as Record<string, VaultConfig> | undefined) ?? defaults.vaults,
     github_hosts: (parsed.github_hosts as Record<string, GitHubHost> | undefined) ?? defaults.github_hosts,
@@ -282,6 +293,10 @@ export function generateEnv(config: Config): string {
     `VAULT_MCP_PORT=${config.ports.vault_mcp}`,
     `VAULT_ROUTER_PORT=${config.ports.vault_router}`,
     `FORGE_PORT=${config.ports.forge}`,
+    `TYPESENSE_PORT=${config.ports.typesense}`,
+    '',
+    '# Search',
+    `TYPESENSE_API_KEY=${config.search.api_key}`,
     '',
     '# Repository URLs (must be HTTPS — container services do not have SSH keys)',
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
@@ -316,8 +331,10 @@ export const CONFIG_KEYS = [
   'port.vault-mcp',
   'port.vault-router',
   'port.forge',
+  'port.typesense',
   'repo.anvil-notes',
   'repo.forge-registry',
+  'search.api-key',
   'enable-ui',
 ] as const;
 
@@ -346,10 +363,14 @@ export function getConfigValue(config: Config, key: ConfigKey): string {
       return String(config.ports.vault_router);
     case 'port.forge':
       return String(config.ports.forge);
+    case 'port.typesense':
+      return String(config.ports.typesense);
     case 'repo.anvil-notes':
       return config.repos.anvil_notes;
     case 'repo.forge-registry':
       return config.repos.forge_registry;
+    case 'search.api-key':
+      return config.search.api_key;
     case 'enable-ui':
       return String(config.enable_ui);
   }
@@ -395,11 +416,17 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
     case 'port.forge':
       updated.ports = { ...updated.ports, forge: parseInt(value, 10) };
       break;
+    case 'port.typesense':
+      updated.ports = { ...updated.ports, typesense: parseInt(value, 10) };
+      break;
     case 'repo.anvil-notes':
       updated.repos = { ...updated.repos, anvil_notes: value };
       break;
     case 'repo.forge-registry':
       updated.repos = { ...updated.repos, forge_registry: value };
+      break;
+    case 'search.api-key':
+      updated.search = { ...updated.search, api_key: value };
       break;
     case 'enable-ui':
       if (value !== 'true' && value !== 'false') {
