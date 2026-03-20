@@ -1,9 +1,7 @@
-import { Sidebar } from './Sidebar'
-
-export function Shell({ sidebar, topBar, children, chatBar }) {
+export function Shell({ sidebar, topBar, children }) {
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar>{sidebar}</Sidebar>
+      {sidebar}
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Top bar */}
@@ -20,27 +18,15 @@ export function Shell({ sidebar, topBar, children, chatBar }) {
           {topBar}
         </header>
 
-        {/* Center stage */}
-        <main style={{
+        {/* Center stage — chat or route content */}
+        <div style={{
           flex: 1,
-          overflowY: 'auto',
-          padding: '24px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '16px',
+          overflow: 'hidden',
         }}>
           {children}
-        </main>
-
-        {/* Chat bar slot */}
-        {chatBar && (
-          <div style={{
-            borderTop: '1px solid var(--border)',
-            background: 'var(--bg-secondary)',
-          }}>
-            {chatBar}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   )
