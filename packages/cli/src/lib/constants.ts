@@ -34,6 +34,7 @@ export const DEFAULT_PORTS = {
   vault_router: 8050, // internal routing layer
   ui: 8400,          // horus-ui — user-facing web interface
   forge: 8200,
+  typesense: 8108,   // Typesense search engine
 } as const;
 
 // ── Default repository URLs ─────────────────────────────────────────────────
@@ -54,6 +55,7 @@ export const SERVICES = [
   'vault-mcp',
   'forge',
   'horus-ui',
+  'typesense',
 ] as const;
 
 export type ServiceName = (typeof SERVICES)[number];
@@ -66,6 +68,7 @@ export const HEALTH_ENDPOINTS: Record<ServiceName, { port: number; path: string 
   'vault-mcp': { port: 8300, path: '/health' },
   'forge': { port: 8200, path: '/health' },
   'horus-ui': { port: 8400, path: '/api/health' },
+  'typesense': { port: 8108, path: '/health' },
 };
 
 // ── Config version ──────────────────────────────────────────────────────────

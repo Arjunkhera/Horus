@@ -146,6 +146,29 @@ const FORGE_SERVICE = `\
       retries: 3`;
 
 
+const TYPESENSE_SERVICE = `\
+  # ── Typesense ────────────────────────────────────────────────────────────
+  # Full-text and vector search engine for unified Horus Search.
+  typesense:
+    image: typesense/typesense:27.1
+    ports:
+      - "\${TYPESENSE_PORT:-8108}:8108"
+    volumes:
+      - \${HORUS_DATA_PATH}/typesense-data:/data
+    command: >
+      --data-dir=/data
+      --api-key=\${TYPESENSE_API_KEY:-horus-local-key}
+      --enable-cors
+    networks:
+      - horus-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8108/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped`;
+
 const HORUS_UI_SERVICE = `\
   # ── Horus UI ───────────────────────────────────────────────────────────────
   # Web interface — React SPA served by Express proxy on port 8400.
@@ -343,6 +366,8 @@ ${vaultRouterDependsOn}
     vaultMcpService,
     '',
     FORGE_SERVICE,
+    '',
+    TYPESENSE_SERVICE,
     '',
     ...(config.enable_ui !== false ? [HORUS_UI_SERVICE, ''] : []),
     '# ── Networks ──────────────────────────────────────────────────────────────────',
