@@ -306,11 +306,10 @@ sys.exit(1)
 }
 
 # Test 8: POST /check-duplicates
-# SKIPPED: This endpoint uses QMD semantic search which loads a large LLM model.
-# On CPU-only environments (Docker without GPU), this hangs indefinitely and
-# consumes all available memory, breaking other tests. Skip for smoke testing.
+# SKIPPED: This endpoint requires search infrastructure to be fully indexed.
+# Skip for smoke testing as indexing may not be complete.
 test_check_duplicates() {
-    echo "SKIP: check-duplicates — requires QMD semantic LLM (too slow for smoke test on CPU)"
+    echo "SKIP: check-duplicates — requires search index (too slow for smoke test)"
     return 0
 }
 

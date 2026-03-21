@@ -189,7 +189,7 @@ function checkDiskSpace(dataDir: string): CheckResult {
     return {
       status: 'warn',
       label: 'Disk space',
-      message: `Disk space low: only ${freeGBStr}GB available (5GB recommended; QMD models take ~2GB)`,
+      message: `Disk space low: only ${freeGBStr}GB available (5GB recommended)`,
       hint: 'Free up disk space before running Horus',
     };
   } catch {

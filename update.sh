@@ -205,7 +205,7 @@ pull_repo "Forge" "${REPOS_DIR}/Forge"
 REBUILD=""
 
 if $FORCE; then
-  REBUILD="qmd-daemon anvil vault vault-mcp forge"
+  REBUILD="anvil vault vault-mcp forge"
   header "Force mode: rebuilding all services"
 else
   # Horus repo changes
@@ -213,11 +213,7 @@ else
     horus_new=$(get_sha "$SCRIPT_DIR")
 
     if subdir_changed "$SCRIPT_DIR" "docker-compose.yml" "$HORUS_OLD_SHA" "$horus_new"; then
-      REBUILD="qmd-daemon anvil vault vault-mcp forge"
-    fi
-
-    if subdir_changed "$SCRIPT_DIR" "qmd-daemon" "$HORUS_OLD_SHA" "$horus_new"; then
-      list_contains "$REBUILD" "qmd-daemon" || REBUILD="${REBUILD:+$REBUILD }qmd-daemon"
+      REBUILD="anvil vault vault-mcp forge"
     fi
   fi
 
@@ -273,23 +269,19 @@ fi
 cd "$SCRIPT_DIR"
 
 # Rebuild in dependency order:
-#   Layer 0: qmd-daemon
-#   Layer 1: anvil, vault       (depend on qmd-daemon)
+#   Layer 1: anvil, vault       (no upstream dependencies)
 #   Layer 2: vault-mcp          (depends on vault)
 #   Layer 3: forge              (depends on anvil + vault)
 
-LAYER0="" LAYER1="" LAYER2="" LAYER3=""
+LAYER1="" LAYER2="" LAYER3=""
 for svc in $REBUILD; do
   case "$svc" in
-    qmd-daemon) LAYER0="${LAYER0:+$LAYER0 }$svc" ;;
     anvil|vault) LAYER1="${LAYER1:+$LAYER1 }$svc" ;;
     vault-mcp)  LAYER2="${LAYER2:+$LAYER2 }$svc" ;;
     forge)      LAYER3="${LAYER3:+$LAYER3 }$svc" ;;
   esac
 done
 
-# shellcheck disable=SC2086
-[ -n "$LAYER0" ] && rebuild_and_wait $LAYER0
 # shellcheck disable=SC2086
 [ -n "$LAYER1" ] && rebuild_and_wait $LAYER1
 # shellcheck disable=SC2086

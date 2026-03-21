@@ -55,7 +55,7 @@ Horus is made up of three core systems. Each handles a different kind of data an
 - **Repo profiles** -- summaries of codebases, their conventions, and structure
 - **Learnings** -- patterns, gotchas, and insights discovered during development
 
-**How it works:** Vault stores pages as markdown files in a git repository. Each page has structured metadata (scope, tags, category). When you ask Claude a knowledge question, Vault uses semantic search powered by locally-running embedding models to find the most relevant pages. This means Vault understands meaning, not just keywords -- asking "how do we handle authentication" will find pages about auth even if they never use the exact word "authentication."
+**How it works:** Vault stores pages as markdown files in a git repository. Each page has structured metadata (scope, tags, category). When you ask Claude a knowledge question, Vault uses Typesense to search for the most relevant pages. Typesense provides fast, typo-tolerant full-text search across your knowledge base.
 
 **Key tools:** `knowledge_search`, `knowledge_resolve_context`, `knowledge_write_page`, `knowledge_get_page`
 
@@ -89,16 +89,9 @@ Horus is made up of three core systems. Each handles a different kind of data an
 
 ## Supporting Services
 
-### QMD -- Embedding Daemon
+### Typesense -- Search Engine
 
-QMD (Query Model Daemon) is an internal service that powers semantic search across both Anvil and Vault. It:
-
-- Runs GGUF embedding models locally on your machine (no data leaves your computer)
-- Maintains a shared SQLite index that both Anvil and Vault read from
-- Keeps models warm in memory so searches are fast after the initial load
-- Downloads and caches the embedding model (~1-2 GB) on first boot
-
-You never interact with QMD directly. It runs in the background and is used automatically when Anvil or Vault need to perform semantic search.
+Typesense is the full-text and vector search engine that powers search across Horus. It provides fast, typo-tolerant search for both Anvil and Vault without requiring large model downloads or GPU resources.
 
 ### horus-core -- Routing Intelligence
 
@@ -142,8 +135,8 @@ You: "What's pending?"
          | MCP tool call: anvil_search({ query: "pending tasks" })
          v
    +-----------+         +-------------+
-   |   Anvil    | -----> | QMD Daemon  |  semantic search
-   |  (8100)    | <----- |   (8181)    |  over notes index
+   |   Anvil    | -----> | Typesense   |  full-text search
+   |  (8100)    | <----- |   (8108)    |  over notes index
    +-----------+         +-------------+
          |
          | Returns matching notes with status, titles, tags
@@ -185,8 +178,8 @@ You: "You have 3 pending tasks: ..."
 |  |       +-------+-------+-------+--------+                         |
 |  |               |                                                   |
 |  |         +-----+------+                                            |
-|  |         |QMD Daemon  |                                            |
-|  |         |  :8181     |                                            |
+|  |         | Typesense  |                                            |
+|  |         |  :8108     |                                            |
 |  |         +------------+                                            |
 |  +-------------------------------------------------------------------+
 |                                                                   |
@@ -213,7 +206,7 @@ You: "You have 3 pending tasks: ..."
 
 ## Key Principles
 
-1. **Everything is local.** All data stays on your machine. Semantic search runs locally via GGUF models. No data is sent to external servers (except your prompts to Anthropic via your API key).
+1. **Everything is local.** All data stays on your machine. Search runs locally via Typesense. No data is sent to external servers (except your prompts to Anthropic via your API key).
 
 2. **Data is durable.** Notes, knowledge, and workspaces are stored as files on disk and backed by git repositories. Stopping or removing Docker containers does not delete your data.
 

@@ -56,14 +56,14 @@ Horus Setup
       All ports available.
 
 [4/5] Pulling images...
-      Pulling qmd-daemon...     done
       Pulling anvil...          done
       Pulling vault...          done
       Pulling vault-mcp...      done
       Pulling forge...          done
+      Pulling typesense...      done
 
 [5/5] Starting Horus stack...
-      Waiting for QMD daemon...   healthy (12s)
+      Waiting for Typesense...    healthy (3s)
       Waiting for Anvil...        healthy (8s)
       Waiting for Vault REST...   healthy (5s)
       Waiting for Vault MCP...    healthy (3s)
@@ -81,10 +81,10 @@ Setup complete.
 1. **Runtime detection** -- Horus found Docker (or Podman) and verified the Compose plugin is available.
 2. **Data directory** -- Created `~/Horus/data/` with subdirectories for notes, knowledge-base, registry, and workspaces.
 3. **Port configuration** -- Checked that the default ports (8100, 8200, 8300) are available on your machine.
-4. **Image pull** -- Downloaded the five Docker images that make up the Horus stack.
+4. **Image pull** -- Downloaded the Docker images that make up the Horus stack.
 5. **Stack start + health check** -- Started all containers and waited for each service to report healthy.
 
-> **First run note:** The QMD daemon downloads a GGUF embedding model (~1-2 GB) on first boot. This can take several minutes depending on your connection. Subsequent starts reuse the cached model and are much faster.
+> **First run note:** Typesense builds its search index on first boot. This is fast and typically completes in seconds.
 
 ---
 
@@ -103,7 +103,7 @@ Horus Stack Status
 --------------------------------------
 
   Service        Port    Status     Version
-  qmd-daemon     --      healthy    0.4.0
+  typesense      8108    healthy    27.1
   anvil          8100    healthy    1.2.0
   vault-rest     8000    healthy    0.9.1
   vault-mcp      8300    healthy    0.9.1
