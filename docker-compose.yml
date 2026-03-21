@@ -24,7 +24,7 @@ services:
   # Notes system and MCP server. Indexes markdown files from the Notes repo.
   anvil:
     build:
-      context: ../Anvil
+      context: packages/anvil
       dockerfile: Dockerfile
     ports:
       - "${ANVIL_PORT:-8100}:8100"
@@ -64,7 +64,7 @@ services:
   # Knowledge service. Search over the knowledge-base repo.
   vault:
     build:
-      context: ../Vault/knowledge-service
+      context: services/vault
       dockerfile: Dockerfile
     ports:
       - "${VAULT_PORT:-8000}:8000"
@@ -107,7 +107,7 @@ services:
   # Depends on vault (the REST backend) being healthy before starting.
   vault-mcp:
     build:
-      context: ../Vault/knowledge-mcp
+      context: packages/vault-mcp
       dockerfile: Dockerfile
     ports:
       - "${VAULT_MCP_PORT:-8300}:8300"
@@ -143,7 +143,7 @@ services:
   # writes ~/.forge/config.yaml with the Anvil and Vault endpoint URLs.
   forge:
     build:
-      context: ../Forge
+      context: packages/forge
       dockerfile: Dockerfile
     ports:
       - "${FORGE_PORT:-8200}:8200"

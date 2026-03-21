@@ -12,13 +12,31 @@ The canonical release procedure lives in Vault (`shared/procedures/horus-cli-rel
 
 ---
 
+## Monorepo Layout
+
+All services live in this single repo (as of 2026-03-21):
+
+| Path | Service | Language |
+|------|---------|----------|
+| `packages/anvil/` | Anvil MCP server | TypeScript |
+| `packages/forge/` | Forge workspace manager | TypeScript |
+| `packages/vault-mcp/` | Vault MCP adapter | TypeScript |
+| `services/vault/` | Vault knowledge service | Python |
+| `packages/ui-server/` + `packages/ui-client/` | Horus UI | TypeScript |
+| `packages/cli/` | Horus CLI | TypeScript |
+
+The old separate repos (`Desktop/Repositories/Anvil`, `Vault`, `Forge`) are archived and no longer the source of truth.
+
 ## Post-Merge Docker Rebuild
 
-For changes to backend services only (not CLI):
+For changes to backend services (build from monorepo source):
 
 ```bash
-cd /path/to/Horus
+# Dev: build from source
+cd ~/Desktop/Repositories/Horus
 docker compose build <service> && docker compose up -d <service>
 ```
 
-Where `<service>` is one of: `anvil`, `vault`, `forge`.
+Where `<service>` is one of: `anvil`, `vault`, `vault-mcp`, `forge`.
+
+CI builds and pushes images to GHCR automatically on push to `master` (path-filtered per service).
