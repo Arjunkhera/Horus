@@ -34,7 +34,7 @@ Runs an interactive wizard that detects your container runtime, prompts for conf
 3. Creates the data directory with subdirectories for each service
 4. Checks port availability (8100, 8200, 8300)
 5. Pulls the latest Horus Docker images
-6. Starts all five services (QMD daemon, Anvil, Vault REST, Vault MCP, Forge)
+6. Starts all services (Typesense, Anvil, Vault REST, Vault MCP, Forge)
 7. Waits for each service to pass its health check
 
 **Example:**
@@ -64,14 +64,14 @@ Horus Setup
       All ports available.
 
 [5/6] Pulling images...
-      Pulling qmd-daemon...     done
       Pulling anvil...          done
       Pulling vault...          done
       Pulling vault-mcp...      done
       Pulling forge...          done
+      Pulling typesense...      done
 
 [6/6] Starting Horus stack...
-      Waiting for QMD daemon...   healthy (12s)
+      Waiting for Typesense...    healthy (3s)
       Waiting for Anvil...        healthy (8s)
       Waiting for Vault REST...   healthy (5s)
       Waiting for Vault MCP...    healthy (3s)
@@ -101,7 +101,7 @@ horus up
 
 **Description:**
 
-Starts all Docker services in the correct dependency order. If the stack is already running, this is a no-op. Services start as follows: QMD daemon first, then Anvil and Vault REST in parallel, then Vault MCP and Forge once their dependencies are healthy.
+Starts all Docker services in the correct dependency order. If the stack is already running, this is a no-op. Services start as follows: Typesense, Anvil, and Vault REST in parallel, then Vault MCP and Forge once their dependencies are healthy.
 
 **Example:**
 
@@ -109,7 +109,7 @@ Starts all Docker services in the correct dependency order. If the stack is alre
 $ horus up
 
 Starting Horus stack...
-  qmd-daemon    starting...  healthy
+  typesense     starting...  healthy
   anvil         starting...  healthy
   vault         starting...  healthy
   vault-mcp     starting...  healthy
@@ -118,7 +118,7 @@ Starting Horus stack...
 All services running. Startup time: 32s
 ```
 
-> **First boot:** The QMD daemon downloads embedding models (~1-2 GB) on first startup. This can take several minutes. Subsequent starts reuse the cached models and complete in under a minute.
+> **First boot:** Typesense builds its search index on first startup. This is fast and typically completes in seconds.
 
 ---
 
@@ -134,7 +134,7 @@ horus down
 
 **Description:**
 
-Gracefully stops all Docker containers. All data is preserved -- notes, knowledge pages, workspaces, and the QMD model cache persist across restarts. Containers are removed but named volumes are kept.
+Gracefully stops all Docker containers. All data is preserved -- notes, knowledge pages, and workspaces persist across restarts. Containers are removed but named volumes are kept.
 
 **Example:**
 
@@ -146,7 +146,7 @@ Stopping Horus stack...
   vault-mcp     stopped
   vault         stopped
   anvil         stopped
-  qmd-daemon    stopped
+  typesense     stopped
 
 Stack stopped. Data preserved in /Users/you/.horus/data
 ```
@@ -176,7 +176,7 @@ Horus Stack Status
 --------------------------------------
 
   Service        Port    Status     Version
-  qmd-daemon     --      healthy    0.4.0
+  typesense      8108    healthy    27.1
   anvil          8100    healthy    1.2.0
   vault-rest     8000    healthy    0.9.1
   vault-mcp      8300    healthy    0.9.1
@@ -198,7 +198,7 @@ Horus Stack Status
 --------------------------------------
 
   Service        Port    Status      Version
-  qmd-daemon     --      healthy     0.4.0
+  typesense      8108    healthy     27.1
   anvil          8100    healthy     1.2.0
   vault-rest     8000    unhealthy   --
   vault-mcp      8300    stopped     --
@@ -381,7 +381,6 @@ Pulls the latest Docker images for all Horus services, restarts the stack, and v
 $ horus update
 
 Checking for updates...
-  qmd-daemon    0.4.0 -> 0.5.0   (update available)
   anvil         1.2.0 -> 1.2.0   (up to date)
   vault         0.9.1 -> 0.10.0  (update available)
   vault-mcp     0.9.1 -> 0.10.0  (update available)
@@ -427,7 +426,7 @@ Horus Doctor
   Port 8200 (Forge):   available                   pass
   Port 8300 (Vault):   available                   pass
   Docker network:      horus-net exists             pass
-  Service: qmd-daemon: healthy                     pass
+  Service: typesense:  healthy                     pass
   Service: anvil:      healthy                     pass
   Service: vault:      healthy                     pass
   Service: vault-mcp:  healthy                     pass

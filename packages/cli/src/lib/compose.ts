@@ -25,33 +25,7 @@ function applyPodmanUserOverride(compose: string): string {
 
 // ── Static service definitions ───────────────────────────────────────────────
 
-const QMD_DAEMON_SERVICE = `\
-  # ── QMD Daemon ─────────────────────────────────────────────────────────────
-  # Shared QMD MCP HTTP server. Keeps GGUF models warm in memory so Anvil and
-  # Vault pay the model-load cost only once.
-  qmd-daemon:
-    image: ghcr.io/arjunkhera/horus/qmd-daemon:latest
-    environment:
-      - QMD_DAEMON_PORT=8181
-      - HORUS_RUNTIME=\${HORUS_RUNTIME:-docker}
-    volumes:
-      - qmd-daemon-data:/home/qmd/.cache/qmd
-    networks:
-      - horus-net
-    restart: unless-stopped
-    stop_grace_period: 15s
-    deploy:
-      resources:
-        limits:
-          memory: 4g
-        reservations:
-          memory: 512m
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8181/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 600s
-      retries: 3`;
+// NOTE: QMD daemon has been removed — replaced by Typesense for search.
 
 const ANVIL_SERVICE = `\
   # ── Anvil ──────────────────────────────────────────────────────────────────
@@ -62,7 +36,6 @@ const ANVIL_SERVICE = `\
       - "\${ANVIL_PORT:-8100}:8100"
     volumes:
       - \${HORUS_DATA_PATH}/notes:/data/notes:rw
-      - qmd-daemon-data:/home/anvil/.cache/qmd
     environment:
       - HORUS_RUNTIME=\${HORUS_RUNTIME:-docker}
       - ANVIL_TRANSPORT=http
@@ -70,14 +43,9 @@ const ANVIL_SERVICE = `\
       - ANVIL_HOST=0.0.0.0
       - ANVIL_NOTES_PATH=/data/notes
       - ANVIL_REPO_URL=\${ANVIL_REPO_URL:-}
-      - ANVIL_QMD_COLLECTION=\${ANVIL_QMD_COLLECTION:-anvil}
       - ANVIL_SYNC_INTERVAL=\${ANVIL_SYNC_INTERVAL:-300}
       - ANVIL_DEBOUNCE_SECONDS=\${ANVIL_DEBOUNCE_SECONDS:-5}
       - GITHUB_TOKEN=\${GITHUB_TOKEN:-}
-      - QMD_DAEMON_URL=http://qmd-daemon:8181
-    depends_on:
-      qmd-daemon:
-        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -92,7 +60,7 @@ const ANVIL_SERVICE = `\
       test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
       interval: 30s
       timeout: 5s
-      start_period: 600s
+      start_period: 60s
       retries: 3`;
 
 const FORGE_SERVICE = `\
@@ -216,8 +184,8 @@ const HORUS_UI_SERVICE = `\
 /**
  * Generate the full docker-compose YAML content dynamically from config.
  * Creates one vault-{name} service per vault entry, a vault-router that
- * fronts them all, and static services for qmd-daemon, anvil, vault-mcp,
- * and forge.
+ * fronts them all, and static services for anvil, vault-mcp, forge,
+ * and typesense.
  */
 export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman'): string {
   const vaultEntries = Object.entries(config.vaults).sort(([a], [b]) => a.localeCompare(b));
@@ -239,13 +207,11 @@ export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman
     volumes:
       - \${HORUS_DATA_PATH}/vaults/${name}:/data/knowledge-repo:rw
       - vault-${name}-workspace:/data/workspace
-      - qmd-daemon-data:/home/appuser/.cache/qmd
     environment:
       - HORUS_RUNTIME=\${HORUS_RUNTIME:-docker}
       - KNOWLEDGE_REPO_PATH=/data/knowledge-repo
       - WORKSPACE_PATH=/data/workspace
       - VAULT_KNOWLEDGE_REPO_URL=${vault.repo}
-      - QMD_INDEX_NAME=vault-${name}
       - SYNC_INTERVAL=\${VAULT_SYNC_INTERVAL:-300}
       - VAULT_SYNC_INTERVAL=\${VAULT_SYNC_INTERVAL:-300}
       - LOG_LEVEL=\${LOG_LEVEL:-info}
@@ -253,10 +219,6 @@ export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman
       - PORT=8000
       - GITHUB_TOKEN=${token}
       - GITHUB_API_HOST=${apiHost}
-      - QMD_DAEMON_URL=http://qmd-daemon:8181
-    depends_on:
-      qmd-daemon:
-        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -270,7 +232,7 @@ export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      start_period: 600s
+      start_period: 60s
       retries: 3`;
   });
 
@@ -356,8 +318,6 @@ ${vaultRouterDependsOn}
     '',
     'services:',
     '',
-    QMD_DAEMON_SERVICE,
-    '',
     ANVIL_SERVICE,
     '',
     ...vaultServices.map((s) => s + '\n'),
@@ -377,7 +337,6 @@ ${vaultRouterDependsOn}
     '',
     '# ── Volumes ───────────────────────────────────────────────────────────────────',
     'volumes:',
-    '  qmd-daemon-data:',
     vaultVolumeEntries,
   ];
 

@@ -48,8 +48,8 @@ export const DEFAULT_REPOS = {
 export const DEFAULT_DATA_DIR = join(homedir(), 'Horus', 'data');
 
 // ── Service names (as they appear in docker-compose.yml) ────────────────────
+// NOTE: QMD daemon has been removed — replaced by Typesense for search.
 export const SERVICES = [
-  'qmd-daemon',
   'anvil',
   'vault-router',  // replaces 'vault'
   'vault-mcp',
@@ -62,7 +62,6 @@ export type ServiceName = (typeof SERVICES)[number];
 
 // ── Health check endpoints ──────────────────────────────────────────────────
 export const HEALTH_ENDPOINTS: Record<ServiceName, { port: number; path: string }> = {
-  'qmd-daemon': { port: 8181, path: '/health' },
   'anvil': { port: 8100, path: '/health' },
   'vault-router': { port: 8050, path: '/health' },
   'vault-mcp': { port: 8300, path: '/health' },

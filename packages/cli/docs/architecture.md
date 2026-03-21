@@ -35,9 +35,8 @@ Technical overview of the Horus system for users who want to understand how the 
 |  |      +--------+-------+---------+----+                        |
 |  |               |                                               |
 |  |         +-----+-------+                                       |
-|  |         | QMD Daemon  |                                       |
-|  |         | :8181       |                                       |
-|  |         | (internal)  |                                       |
+|  |         | Typesense   |                                       |
+|  |         | :8108       |                                       |
 |  |         +-------------+                                       |
 |  |                                                               |
 |  +---------------------------------------------------------------+
@@ -66,7 +65,7 @@ A request travels through Horus in four stages:
                Calls MCP tool: anvil_search({ query: "pending" })
                      |
 3. Service     Anvil receives the tool call over HTTP
-               Queries the QMD daemon for semantic search
+               Queries Typesense for full-text search
                Reads matching notes from disk
                Returns structured results
                      |
@@ -79,7 +78,7 @@ A request travels through Horus in four stages:
 **Anvil (notes, tasks, projects):**
 
 ```
-Claude --MCP/HTTP--> Anvil (:8100) --search--> QMD Daemon (:8181)
+Claude --MCP/HTTP--> Anvil (:8100) --search--> Typesense (:8108)
                          |
                          +--> reads/writes --> ~/Horus/data/notes/
 ```
@@ -89,7 +88,7 @@ Claude --MCP/HTTP--> Anvil (:8100) --search--> QMD Daemon (:8181)
 ```
 Claude --MCP/HTTP--> Vault MCP (:8300) --REST/HTTP--> Vault REST (:8000)
                                                           |
-                                                          +--> search --> QMD Daemon (:8181)
+                                                          +--> search --> Typesense (:8108)
                                                           +--> reads/writes --> ~/Horus/data/knowledge-base/
 ```
 
@@ -112,7 +111,7 @@ Claude --MCP/HTTP--> Forge (:8200) --reads--> ~/Horus/data/registry/
 | Vault REST | 8000 | 8000 | HTTP (REST) | Internal only (Docker network) |
 | Vault MCP | 8300 | 8300 | HTTP (MCP) | Claude clients |
 | Forge | 8200 | 8200 | HTTP (MCP) | Claude clients |
-| QMD Daemon | 8181 | -- (not exposed) | HTTP | Internal only (Docker network) |
+| Typesense | 8108 | 8108 | HTTP | Internal (Docker network) |
 
 **Claude connects to three endpoints:**
 - `http://localhost:8100` -- Anvil
@@ -121,7 +120,7 @@ Claude --MCP/HTTP--> Forge (:8200) --reads--> ~/Horus/data/registry/
 
 **Internal-only services (not accessible from the host by default):**
 - Vault REST (`:8000`) -- the actual knowledge service; Vault MCP proxies to it
-- QMD Daemon (`:8181`) -- embedding search; accessed by Anvil and Vault over the Docker network
+- Typesense (`:8108`) -- search engine; accessed by Anvil and Vault over the Docker network
 
 > Host ports are configurable via `horus config set port.<service> <port>` or by setting environment variables (`ANVIL_PORT`, `VAULT_MCP_PORT`, `FORGE_PORT`) before starting the stack.
 
@@ -132,19 +131,14 @@ Claude --MCP/HTTP--> Forge (:8200) --reads--> ~/Horus/data/registry/
 Services start in dependency order, enforced by Docker Compose health checks:
 
 ```
-Phase 1:  qmd-daemon starts
-          Waits: downloads GGUF model on first boot (~1-2 GB)
-          Health: curl http://localhost:8181/health
-               |
-Phase 2:  anvil starts          vault (REST) starts
-          Depends on:            Depends on:
-            qmd-daemon healthy     qmd-daemon healthy
-               |                       |
-Phase 3:  (anvil healthy)       vault-mcp starts
+Phase 1:  typesense starts      anvil starts      vault (REST) starts
+          Health: wget            Health: curl      Health: curl
+               |                       |                |
+Phase 2:  (anvil healthy)       vault-mcp starts
                                 Depends on:
                                   vault (REST) healthy
                |                       |
-Phase 4:  forge starts
+Phase 3:  forge starts
           Depends on:
             anvil healthy
             vault (REST) healthy
@@ -154,9 +148,8 @@ Phase 4:  forge starts
 
 | Scenario | Total Time |
 |----------|-----------|
-| First boot (model download) | 3-10 minutes |
-| Cold start (models cached) | 60-90 seconds |
-| Warm restart | 30-60 seconds |
+| Cold start | 30-60 seconds |
+| Warm restart | 15-30 seconds |
 
 ---
 
@@ -180,7 +173,6 @@ These are managed by Docker and store internal caches. They persist across conta
 
 | Volume | Mounted In | Purpose |
 |--------|-----------|---------|
-| `qmd-daemon-data` | QMD Daemon, Anvil, Vault | Shared GGUF model cache (~1-2 GB) and SQLite search index |
 | `vault-workspace` | Vault REST | Staging area for draft knowledge pages before commit |
 
 > **Safe to remove:** Running `docker compose down -v` removes only the named volumes. Your notes, knowledge base, registry, and workspaces live in bind mounts and are never deleted by Docker commands.
@@ -203,8 +195,8 @@ All services communicate over a Docker bridge network named `horus-net`. Service
 
 | From | To | Address Used |
 |------|----|-------------|
-| Anvil | QMD Daemon | `http://qmd-daemon:8181` |
-| Vault REST | QMD Daemon | `http://qmd-daemon:8181` |
+| Anvil | Typesense | `http://typesense:8108` |
+| Vault REST | Typesense | `http://typesense:8108` |
 | Vault MCP | Vault REST | `http://vault:8000` |
 | Forge | Anvil | `http://anvil:8100` |
 | Forge | Vault MCP | `http://vault-mcp:8300` |
@@ -219,22 +211,20 @@ Memory limits are set per service in the Docker Compose configuration:
 
 | Service | Memory Limit | Memory Reservation | Notes |
 |---------|-------------|-------------------|-------|
-| QMD Daemon | 4 GB | 512 MB | Holds GGUF embedding model in memory |
 | Anvil | 512 MB | 256 MB | Node.js MCP server |
-| Vault REST | 512 MB | 256 MB | FastAPI with QMD subprocess calls |
+| Vault REST | 512 MB | 256 MB | FastAPI knowledge service |
 | Vault MCP | 256 MB | 64 MB | Thin Node.js proxy layer |
 | Forge | 512 MB | 128 MB | Node.js MCP server + workspace operations |
-| **Total** | **5.75 GB** | **1.2 GB** | |
+| Typesense | -- | -- | Lightweight search engine |
+| **Total** | **~2 GB** | **~700 MB** | |
 
 **Recommended system requirements:**
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
-| RAM | 8 GB | 16 GB |
-| Disk | 5 GB free | 10 GB free |
+| RAM | 4 GB | 8 GB |
+| Disk | 2 GB free | 5 GB free |
 | CPU | 2 cores | 4 cores |
-
-The QMD daemon is the heaviest service. It loads a GGUF embedding model (~1-2 GB) into memory and keeps it warm for fast search. The first boot also requires network bandwidth to download the model.
 
 ---
 
@@ -273,7 +263,5 @@ Full list of environment variables that control the stack. Set these in `.env` a
 |----------|---------|-------------|
 | `ANVIL_SYNC_INTERVAL` | `300` | Seconds between Anvil git pulls |
 | `ANVIL_DEBOUNCE_SECONDS` | `5` | Debounce interval for Anvil file watching |
-| `ANVIL_QMD_COLLECTION` | `anvil` | QMD collection name for Anvil's search index |
 | `VAULT_SYNC_INTERVAL` | `300` | Seconds between Vault git pulls |
-| `QMD_INDEX_NAME` | `knowledge` | QMD collection name for Vault's search index |
 | `LOG_LEVEL` | `info` | Vault log verbosity (`debug`, `info`, `warning`, `error`) |

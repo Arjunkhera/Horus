@@ -209,8 +209,8 @@ The most common cause is a missing or empty `HORUS_DATA_PATH`, or invalid reposi
 - `ANVIL_REPO_URL` is set to your Notes repo (required)
 - `GITHUB_TOKEN` is set if any repos are private
 
-**Vault is very slow to start**
-Vault builds its QMD semantic search index on first boot — this is normal and can take 1–3 minutes. Subsequent starts reuse the index and are much faster. Watch with `docker-compose logs -f vault`.
+**Vault is slow to start**
+Vault builds its search index on first boot. This typically completes in under a minute. Watch with `docker-compose logs -f vault`.
 
 **Smoke tests failing**
 Check service logs first. Known intentional skips: `check-duplicates` (heavy CPU, skipped by design) and `registry/add` (read-only test fixture).

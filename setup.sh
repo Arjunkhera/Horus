@@ -39,11 +39,9 @@ docker compose up $BUILD_FLAG -d
 success "Stack started"
 
 # ── Step 2: Wait for Anvil to be healthy ─────────────────────────────────────
-# On first run this blocks while QMD downloads embedding models (~2GB).
-# Subsequent runs complete quickly as models are cached in the named volume.
 echo ""
-echo "Waiting for Anvil to be healthy (first run downloads QMD models ~2GB)..."
-TIMEOUT=600
+echo "Waiting for Anvil to be healthy..."
+TIMEOUT=120
 ELAPSED=0
 until docker inspect --format='{{.State.Health.Status}}' "$ANVIL_CONTAINER" 2>/dev/null | grep -q "healthy"; do
   if [[ $ELAPSED -ge $TIMEOUT ]]; then
