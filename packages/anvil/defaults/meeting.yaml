@@ -1,0 +1,31 @@
+id: meeting
+name: Meeting
+description: "Meeting note with attendees and action items"
+icon: "users"
+fields:
+  date:
+    type: date
+    required: false
+  attendees:
+    type: reference_list
+    ref_type: person
+    required: false
+  agenda:
+    type: text
+    required: false
+  action_items:
+    type: text
+    required: false
+template:
+  frontmatter:
+    tags: []
+  body: |
+    ## Attendees
+
+    ## Agenda
+
+    ## Notes
+
+    ## Action Items
+
+    - [ ]
