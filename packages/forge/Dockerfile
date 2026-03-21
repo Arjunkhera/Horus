@@ -2,10 +2,12 @@
 # Installs all dependencies (including dev) and compiles TypeScript.
 FROM node:22-bookworm-slim AS builder
 
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 WORKDIR /build
 
 # Copy root workspace manifests first (layer cache)
-COPY package.json package-lock.json tsconfig.json ./
+COPY package.json tsconfig.json ./
 
 # Copy package manifests for all workspace packages
 COPY packages/core/package.json ./packages/core/
@@ -13,20 +15,23 @@ COPY packages/cli/package.json ./packages/cli/
 COPY packages/mcp-server/package.json ./packages/mcp-server/
 
 # Install all deps (including devDependencies needed for TypeScript build)
-RUN npm ci
+# --no-frozen-lockfile: forge has no standalone pnpm-lock.yaml (monorepo root manages it)
+RUN pnpm install --no-frozen-lockfile
 
 # Copy source files and per-package tsconfigs
 COPY packages/ ./packages/
 
 # Build packages in explicit dependency order: core → mcp-server → cli
-RUN npm run build --workspace=packages/core \
-    && npm run build --workspace=packages/mcp-server \
-    && npm run build --workspace=packages/cli
+RUN pnpm --filter @forge/core build \
+    && pnpm --filter @forge/mcp-server build \
+    && pnpm --filter @forge/cli build
 
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────
 # Lean image with only production deps and compiled JS.
 FROM node:22-bookworm-slim
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # System dependencies: git (repo index scanning), curl (health checks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,16 +46,15 @@ RUN useradd -ms /bin/bash forge
 WORKDIR /app
 
 # Copy root workspace manifests for production install
-COPY package.json package-lock.json ./
+COPY package.json ./
 
-# Copy package manifests (needed for npm workspace resolution)
+# Copy package manifests (needed for pnpm workspace resolution)
 COPY packages/core/package.json ./packages/core/
 COPY packages/cli/package.json ./packages/cli/
 COPY packages/mcp-server/package.json ./packages/mcp-server/
 
 # Install production dependencies only
-# npm workspaces resolves all packages and creates symlinks under node_modules
-RUN npm ci --omit=dev
+RUN pnpm install --prod --no-frozen-lockfile
 
 # Copy compiled output from builder stage
 COPY --from=builder /build/packages/core/dist ./packages/core/dist
