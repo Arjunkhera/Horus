@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useState, useCallback } from 'react'
-import { DashboardProvider } from './components/Dashboards/DashboardContext'
+import { DashboardProvider, useDashboards } from './components/Dashboards/DashboardContext'
 import { Shell } from './components/Shell/Shell'
 import { Sidebar } from './components/Shell/Sidebar'
 import { HealthIndicator } from './components/Health/HealthIndicator'
@@ -40,10 +40,21 @@ function AppShell() {
     setRefreshTrigger(t => t + 1)
   }, [])
 
+  const { addDashboard } = useDashboards()
+
   const handlePin = useCallback((renderViewInput) => {
-    // TODO: wire to dashboard persistence
-    console.log('Pin view:', renderViewInput)
-  }, [])
+    const title = renderViewInput?.title || 'Pinned view'
+    addDashboard(title, {
+      type: 'renderView',
+      primitive: renderViewInput.primitive,
+      title: renderViewInput.title,
+      items: renderViewInput.items,
+      groupBy: renderViewInput.groupBy,
+      columns: renderViewInput.columns,
+      sortBy: renderViewInput.sortBy,
+      sortOrder: renderViewInput.sortOrder,
+    })
+  }, [addDashboard])
 
   return (
     <Shell

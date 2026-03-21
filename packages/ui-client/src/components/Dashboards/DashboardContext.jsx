@@ -25,9 +25,9 @@ export function DashboardProvider({ children }) {
     })
   }, [])
 
-  const addDashboard = useCallback(async (name) => {
+  const addDashboard = useCallback(async (name, artifact = null) => {
     const id = crypto.randomUUID()
-    const entry = { id, name, icon: '◈', color: 'var(--accent)', artifact: null }
+    const entry = { id, name, icon: '◈', color: 'var(--accent)', artifact }
     await save([...dashboards, entry])
     return id
   }, [dashboards, save])

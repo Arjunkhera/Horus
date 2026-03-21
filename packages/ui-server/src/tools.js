@@ -196,7 +196,7 @@ export function createTools({ anvilUrl, vaultUrl, forgeUrl }) {
 
     // ── Render (client-side only — no execute) ──────────────────────────────
 
-    renderView: {
+    renderView: tool({
       description: `Render data as an interactive visual primitive in the chat. Use this after fetching data to display it to the user.
 - "board": Kanban-style columns grouped by a field (best for stories/tasks grouped by status)
 - "table": Sortable columns (best for structured data with many fields)
@@ -217,7 +217,7 @@ Always call this tool after retrieving data to present it visually.`,
         },
         required: ['primitive', 'title', 'items'],
       }),
-      // No execute — this tool is intercepted by the frontend
-    },
+      // No execute — this tool is intercepted by the frontend via onToolCall
+    }),
   }
 }

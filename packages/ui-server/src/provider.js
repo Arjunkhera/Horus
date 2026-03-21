@@ -15,7 +15,7 @@ async function loadApiKey() {
   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
   try {
     const prefs = JSON.parse(await readFile(UI_PREFS, 'utf8'))
-    return prefs?.settings?.anthropicApiKey ?? null
+    return prefs?.llm?.apiKey ?? prefs?.settings?.anthropicApiKey ?? null
   } catch {
     return null
   }
