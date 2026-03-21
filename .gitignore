@@ -1,3 +1,4 @@
 .env
 .horus-build-state
 node_modules
+**/node_modules
