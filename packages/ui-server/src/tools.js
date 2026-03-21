@@ -2,16 +2,49 @@
  * MCP tool definitions for Vercel AI SDK.
  * Read-only tools with execute functions that call backend services.
  * renderView is client-side only (no execute).
+ *
+ * Uses jsonSchema() with inputSchema (not parameters) for AI SDK v6 compatibility.
+ * AI SDK v6 renamed tool.parameters to tool.inputSchema; the old key is silently ignored.
  */
-import { tool } from 'ai'
-import { z } from 'zod'
+import { tool, jsonSchema } from 'ai'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function callMcp(baseUrl, toolName, args) {
+const MCP_HEADERS = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }
+
+// Track MCP sessions per backend (session ID required after initialize)
+const sessions = new Map()
+
+async function ensureInitialized(baseUrl) {
+  if (sessions.has(baseUrl)) return
   const res = await fetch(`${baseUrl}/mcp`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: MCP_HEADERS,
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'horus-ui', version: '0.1.0' },
+      },
+    }),
+  })
+  const sessionId = res.headers.get('mcp-session-id')
+  const json = await res.json()
+  if (json.error) throw new Error(`MCP init failed for ${baseUrl}: ${json.error.message}`)
+  sessions.set(baseUrl, sessionId)
+}
+
+async function callMcp(baseUrl, toolName, args) {
+  await ensureInitialized(baseUrl)
+  const sessionId = sessions.get(baseUrl)
+  const headers = { ...MCP_HEADERS }
+  if (sessionId) headers['mcp-session-id'] = sessionId
+  const res = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers,
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: Date.now(),
@@ -35,45 +68,65 @@ export function createTools({ anvilUrl, vaultUrl, forgeUrl }) {
 
     anvil_search: tool({
       description: 'Search Anvil notes by free-text query and/or structured filters. Returns matching notes with snippets.',
-      parameters: z.object({
-        query: z.string().optional().describe('Free-text search query'),
-        type: z.string().optional().describe('Filter by note type (story, task, journal, note, project, etc.)'),
-        status: z.string().optional().describe('Filter by status (open, in-progress, done, blocked, etc.)'),
-        priority: z.string().optional().describe('Filter by priority (P0-critical, P1-high, P2-medium, P3-low)'),
-        tags: z.array(z.string()).optional().describe('Filter by tags (AND semantics)'),
-        project: z.string().optional().describe('Filter by project note ID'),
-        limit: z.number().optional().describe('Max results (default 20)'),
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Free-text search query' },
+          type: { type: 'string', description: 'Filter by note type (story, task, journal, note, project, etc.)' },
+          status: { type: 'string', description: 'Filter by status (open, in-progress, done, blocked, etc.)' },
+          priority: { type: 'string', description: 'Filter by priority (P0-critical, P1-high, P2-medium, P3-low)' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (AND semantics)' },
+          project: { type: 'string', description: 'Filter by project note ID' },
+          limit: { type: 'number', description: 'Max results (default 20)' },
+        },
       }),
       execute: async (args) => callMcp(anvilUrl, 'anvil_search', args),
     }),
 
     anvil_get_note: tool({
       description: 'Retrieve a specific Anvil note by its UUID. Returns full metadata and body content.',
-      parameters: z.object({
-        noteId: z.string().describe('UUID of the note to retrieve'),
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          noteId: { type: 'string', description: 'UUID of the note to retrieve' },
+        },
+        required: ['noteId'],
       }),
       execute: async (args) => callMcp(anvilUrl, 'anvil_get_note', args),
     }),
 
     anvil_query_view: tool({
       description: 'Query Anvil notes with filtering, sorting, and grouping. Use view "board" with groupBy for kanban views, "table" for tabular data, "list" for simple lists.',
-      parameters: z.object({
-        view: z.enum(['list', 'table', 'board']).describe('View type'),
-        filters: z.object({
-          type: z.string().optional(),
-          status: z.string().optional(),
-          priority: z.string().optional(),
-          tags: z.array(z.string()).optional(),
-          project: z.string().optional(),
-          query: z.string().optional(),
-        }).optional().describe('Filter criteria'),
-        groupBy: z.string().optional().describe('Field to group by (required for board view)'),
-        orderBy: z.object({
-          field: z.string(),
-          direction: z.enum(['asc', 'desc']),
-        }).optional().describe('Sort options'),
-        columns: z.array(z.string()).optional().describe('Columns for table view'),
-        limit: z.number().optional().describe('Max results (default 50)'),
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          view: { type: 'string', enum: ['list', 'table', 'board'], description: 'View type' },
+          filters: {
+            type: 'object',
+            description: 'Filter criteria',
+            properties: {
+              type: { type: 'string' },
+              status: { type: 'string' },
+              priority: { type: 'string' },
+              tags: { type: 'array', items: { type: 'string' } },
+              project: { type: 'string' },
+              query: { type: 'string' },
+            },
+          },
+          groupBy: { type: 'string', description: 'Field to group by (required for board view)' },
+          orderBy: {
+            type: 'object',
+            description: 'Sort options',
+            properties: {
+              field: { type: 'string' },
+              direction: { type: 'string', enum: ['asc', 'desc'] },
+            },
+            required: ['field', 'direction'],
+          },
+          columns: { type: 'array', items: { type: 'string' }, description: 'Columns for table view' },
+          limit: { type: 'number', description: 'Max results (default 50)' },
+        },
+        required: ['view'],
       }),
       execute: async (args) => callMcp(anvilUrl, 'anvil_query_view', args),
     }),
@@ -82,31 +135,47 @@ export function createTools({ anvilUrl, vaultUrl, forgeUrl }) {
 
     knowledge_search: tool({
       description: 'Search the Vault knowledge base using hybrid search. Returns page summaries with relevance scores. Good for finding guides, concepts, learnings, and repo profiles.',
-      parameters: z.object({
-        query: z.string().describe('Search query (natural language or keywords)'),
-        type: z.enum(['repo-profile', 'guide', 'concept', 'procedure', 'keystone', 'learning']).optional().describe('Filter by page type'),
-        scope: z.object({
-          repo: z.string().optional(),
-          program: z.string().optional(),
-        }).optional().describe('Filter by scope'),
-        limit: z.number().optional().describe('Max results (default 10)'),
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query (natural language or keywords)' },
+          type: { type: 'string', enum: ['repo-profile', 'guide', 'concept', 'procedure', 'keystone', 'learning'], description: 'Filter by page type' },
+          scope: {
+            type: 'object',
+            description: 'Filter by scope',
+            properties: {
+              repo: { type: 'string' },
+              program: { type: 'string' },
+            },
+          },
+          limit: { type: 'number', description: 'Max results (default 10)' },
+        },
+        required: ['query'],
       }),
       execute: async (args) => callMcp(vaultUrl, 'knowledge_search', args),
     }),
 
     knowledge_resolve_context: tool({
       description: 'Load all applicable knowledge pages for a repository — repo profile, guides, procedures, conventions. The primary entry point for understanding a codebase.',
-      parameters: z.object({
-        repo: z.string().describe('Repository name (e.g. "anvil", "forge", "vault")'),
-        include_full: z.boolean().optional().describe('If true, return full page content'),
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository name (e.g. "anvil", "forge", "vault")' },
+          include_full: { type: 'boolean', description: 'If true, return full page content' },
+        },
+        required: ['repo'],
       }),
       execute: async (args) => callMcp(vaultUrl, 'knowledge_resolve_context', args),
     }),
 
     knowledge_get_page: tool({
       description: 'Retrieve the full content of a specific Vault knowledge page by UUID.',
-      parameters: z.object({
-        id: z.string().describe('UUID of the knowledge page'),
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'UUID of the knowledge page' },
+        },
+        required: ['id'],
       }),
       execute: async (args) => callMcp(vaultUrl, 'knowledge_get_page', args),
     }),
@@ -115,13 +184,13 @@ export function createTools({ anvilUrl, vaultUrl, forgeUrl }) {
 
     forge_repo_list: tool({
       description: 'List all repositories in the local Forge index.',
-      parameters: z.object({}),
+      inputSchema: jsonSchema({ type: 'object', properties: {} }),
       execute: async () => callMcp(forgeUrl, 'forge_repo_list', {}),
     }),
 
     forge_workspace_list: tool({
       description: 'List all Forge workspaces with their status.',
-      parameters: z.object({}),
+      inputSchema: jsonSchema({ type: 'object', properties: {} }),
       execute: async () => callMcp(forgeUrl, 'forge_workspace_list', {}),
     }),
 
@@ -135,14 +204,18 @@ export function createTools({ anvilUrl, vaultUrl, forgeUrl }) {
 - "cards": Rich cards with tags and body preview (best for notes, knowledge pages)
 
 Always call this tool after retrieving data to present it visually.`,
-      parameters: z.object({
-        primitive: z.enum(['board', 'table', 'list', 'cards']).describe('Which visual primitive to use'),
-        title: z.string().describe('Display title for the rendered view'),
-        items: z.array(z.record(z.any())).describe('Array of data items to render'),
-        groupBy: z.string().optional().describe('Field to group by (for board view)'),
-        columns: z.array(z.string()).optional().describe('Column fields to show (for table view)'),
-        sortBy: z.string().optional().describe('Field to sort by'),
-        sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction'),
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          primitive: { type: 'string', enum: ['board', 'table', 'list', 'cards'], description: 'Which visual primitive to use' },
+          title: { type: 'string', description: 'Display title for the rendered view' },
+          items: { type: 'array', items: { type: 'object' }, description: 'Array of data items to render' },
+          groupBy: { type: 'string', description: 'Field to group by (for board view)' },
+          columns: { type: 'array', items: { type: 'string' }, description: 'Column fields to show (for table view)' },
+          sortBy: { type: 'string', description: 'Field to sort by' },
+          sortOrder: { type: 'string', enum: ['asc', 'desc'], description: 'Sort direction' },
+        },
+        required: ['primitive', 'title', 'items'],
       }),
       // No execute — this tool is intercepted by the frontend
     },

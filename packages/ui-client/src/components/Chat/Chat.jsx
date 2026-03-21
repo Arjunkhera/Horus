@@ -1,6 +1,7 @@
 /**
  * Chat — the primary interaction surface.
  * Uses Vercel AI SDK useChat for streaming + tool orchestration.
+ * Updated for @ai-sdk/react v3: input/setInput/handleSubmit/isLoading removed.
  */
 import { useChat } from '@ai-sdk/react'
 import { useState, useRef, useEffect, useCallback } from 'react'
@@ -10,15 +11,14 @@ export function Chat({ conversationId, onConversationChange, onPin }) {
   const scrollRef = useRef(null)
   const inputRef = useRef(null)
   const [apiKeyMissing, setApiKeyMissing] = useState(false)
+  const [input, setInput] = useState('')
 
   const {
     messages,
-    input,
-    setInput,
-    handleSubmit,
-    isLoading,
+    status,
     error,
     setMessages,
+    sendMessage,
     addToolResult,
   } = useChat({
     api: '/api/chat',
@@ -35,6 +35,8 @@ export function Chat({ conversationId, onConversationChange, onPin }) {
       }
     },
   })
+
+  const isLoading = status === 'submitted' || status === 'streaming'
 
   // Check API key status on mount
   useEffect(() => {
@@ -74,7 +76,8 @@ export function Chat({ conversationId, onConversationChange, onPin }) {
     const lastMsg = messages[messages.length - 1]
     if (lastMsg?.role !== 'assistant') return
 
-    const title = messages.find(m => m.role === 'user')?.content?.slice(0, 50) || 'New conversation'
+    const userMsg = messages.find(m => m.role === 'user')
+    const title = (typeof userMsg?.content === 'string' ? userMsg.content : '').slice(0, 50) || 'New conversation'
     fetch(`/api/conversations/${conversationId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -82,6 +85,14 @@ export function Chat({ conversationId, onConversationChange, onPin }) {
     }).catch(() => {})
     onConversationChange?.()
   }, [messages, isLoading, conversationId, onConversationChange])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const text = input.trim()
+    if (!text || isLoading) return
+    sendMessage({ text })
+    setInput('')
+  }
 
   if (apiKeyMissing) {
     return (
@@ -122,7 +133,7 @@ export function Chat({ conversationId, onConversationChange, onPin }) {
                 background: 'var(--accent)', color: 'white', borderRadius: '12px 12px 2px 12px',
                 padding: '8px 14px', maxWidth: '70%', fontSize: '14px', lineHeight: 1.5,
               }}>
-                {msg.content}
+                {typeof msg.content === 'string' ? msg.content : msg.parts?.find(p => p.type === 'text')?.text || ''}
               </div>
             ) : (
               <div style={{ maxWidth: '90%', width: '100%' }}>
