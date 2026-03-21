@@ -28,10 +28,6 @@ class TestVaultSettingsDefaults:
         settings = VaultSettings()
         assert settings.workspace_path == "/workspace"
 
-    def test_default_qmd_index_name(self):
-        settings = VaultSettings()
-        assert settings.qmd_index_name == "knowledge"
-
     def test_default_sync_interval(self):
         settings = VaultSettings()
         assert settings.sync_interval == 300
@@ -60,11 +56,10 @@ class TestLoadSettingsDefaults:
         """All fields have a source recorded."""
         config_path = tmp_path / "nonexistent.yaml"
         settings, sources = load_settings(config_path=config_path)
-        
+
         expected_fields = [
             "knowledge_repo_path",
             "workspace_path",
-            "qmd_index_name",
             "sync_interval",
             "port",
             "host",
@@ -166,18 +161,16 @@ port: 9999
 host: 127.0.0.1
 knowledge_repo_path: /custom/repo
 workspace_path: /custom/workspace
-qmd_index_name: custom_index
 sync_interval: 600
 log_level: debug
 """)
-        
+
         settings, sources = load_settings(config_path=config)
-        
+
         assert settings.port == 9999
         assert settings.host == '127.0.0.1'
         assert settings.knowledge_repo_path == '/custom/repo'
         assert settings.workspace_path == '/custom/workspace'
-        assert settings.qmd_index_name == 'custom_index'
         assert settings.sync_interval == 600
         assert settings.log_level == 'debug'
 
@@ -365,7 +358,6 @@ class TestLogSources:
         expected_fields = [
             "knowledge_repo_path",
             "workspace_path",
-            "qmd_index_name",
             "sync_interval",
             "port",
             "host",
