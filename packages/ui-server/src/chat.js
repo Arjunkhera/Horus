@@ -2,11 +2,11 @@
  * Chat endpoint — POST /api/chat
  * Uses Vercel AI SDK streamText to orchestrate LLM + tool calls.
  */
-import { streamText } from 'ai'
+import { streamText, convertToModelMessages, stepCountIs } from 'ai'
 import { getProvider } from './provider.js'
 import { createTools } from './tools.js'
 
-const MODEL = process.env.HORUS_CHAT_MODEL ?? 'claude-sonnet-4-5-20250514'
+const MODEL = process.env.HORUS_CHAT_MODEL ?? 'claude-3-haiku-20240307'
 
 const SYSTEM_PROMPT = `You are Horus, a personal developer assistant. You help the user explore and manage their work across three systems:
 
@@ -51,12 +51,13 @@ export function createChatHandler({ anvilUrl, vaultUrl, forgeUrl }) {
     }
 
     try {
+      const modelMessages = await convertToModelMessages(messages)
       const result = streamText({
         model: provider(MODEL),
         system: SYSTEM_PROMPT,
-        messages,
+        messages: modelMessages,
         tools,
-        maxSteps: 10,
+        stopWhen: stepCountIs(10),
       })
 
       return result.pipeUIMessageStreamToResponse(res)
