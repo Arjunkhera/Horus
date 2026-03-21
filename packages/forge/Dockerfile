@@ -7,7 +7,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /build
 
 # Copy root workspace manifests first (layer cache)
-COPY package.json tsconfig.json ./
+COPY package.json tsconfig.json pnpm-workspace.yaml .npmrc ./
 
 # Copy package manifests for all workspace packages
 COPY packages/core/package.json ./packages/core/
@@ -46,7 +46,7 @@ RUN useradd -ms /bin/bash forge
 WORKDIR /app
 
 # Copy root workspace manifests for production install
-COPY package.json ./
+COPY package.json pnpm-workspace.yaml .npmrc ./
 
 # Copy package manifests (needed for pnpm workspace resolution)
 COPY packages/core/package.json ./packages/core/
