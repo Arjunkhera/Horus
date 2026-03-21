@@ -59,7 +59,7 @@ export function createChatHandler({ anvilUrl, vaultUrl, forgeUrl }) {
         maxSteps: 10,
       })
 
-      return result.toDataStreamResponse({ headers: res.getHeaders() })
+      return result.pipeUIMessageStreamToResponse(res)
     } catch (err) {
       console.error('[chat] streamText error:', err)
       return res.status(500).json({ error: 'chat_error', message: err.message })
