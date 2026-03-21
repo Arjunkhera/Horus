@@ -1,0 +1,12 @@
+id: journal
+name: Journal
+description: "Append-only chronological record — thinking logs, decisions, session diaries"
+icon: "journal"
+behaviors:
+  append_only: true
+fields: {}
+template:
+  frontmatter:
+    tags: []
+  body: |
+    ## Entry

@@ -1,0 +1,1 @@
+{"version":3,"file":"claude-md-writer.d.ts","sourceRoot":"","sources":["../../src/compiler/claude-md-writer.ts"],"names":[],"mappings":"AAAA;;;;;;;;;GASG;AAUH;;;;;;;;;;;GAWG;AACH,wBAAgB,oBAAoB,CAClC,eAAe,EAAE,MAAM,GAAG,SAAS,EACnC,QAAQ,EAAE,MAAM,EAChB,cAAc,EAAE,MAAM,GACrB,MAAM,CAyBR;AAED;;;;;;GAMG;AACH,wBAAgB,oBAAoB,CAClC,eAAe,EAAE,MAAM,EACvB,QAAQ,EAAE,MAAM,GACf,MAAM,CAkBR"}

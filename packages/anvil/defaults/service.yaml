@@ -1,0 +1,25 @@
+id: service
+name: Service
+description: "A software service or system"
+icon: "server"
+fields:
+  owner:
+    type: reference
+    ref_type: person
+    required: false
+  repo:
+    type: url
+    required: false
+  dependencies:
+    type: reference_list
+    ref_type: service
+    required: false
+template:
+  frontmatter:
+    tags: []
+  body: |
+    ## Overview
+
+    ## Architecture
+
+    ## Notes

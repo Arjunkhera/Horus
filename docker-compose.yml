@@ -24,7 +24,7 @@ services:
   # Notes system and MCP server. Indexes markdown files from the Notes repo.
   anvil:
     build:
-      context: ../Anvil
+      context: packages/anvil
       dockerfile: Dockerfile
     ports:
       - "${ANVIL_PORT:-8100}:8100"
@@ -64,7 +64,7 @@ services:
   # Knowledge service. Search over the knowledge-base repo.
   vault:
     build:
-      context: ../Vault/knowledge-service
+      context: services/vault
       dockerfile: Dockerfile
     ports:
       - "${VAULT_PORT:-8000}:8000"
@@ -101,13 +101,46 @@ services:
       start_period: 60s
       retries: 3
 
+  # ── Vault Router ───────────────────────────────────────────────────────────
+  # Routes MCP tool calls to N vault instances: fan-out reads, UUID-routed writes.
+  # Single vault in dev → effectively passes through to vault.
+  vault-router:
+    build:
+      context: services/vault-router
+      dockerfile: Dockerfile
+    ports:
+      - "${VAULT_ROUTER_PORT:-8050}:8400"
+    environment:
+      - VAULT_ENDPOINTS=default=http://vault:8000
+      - VAULT_DEFAULT=default
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      vault:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 64m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8400/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
   # ── Vault MCP ──────────────────────────────────────────────────────────────
   # Thin MCP adapter that translates MCP tool calls to Vault REST API calls.
   # Claude Desktop connects to this service (port 8300) via the `url` config.
-  # Depends on vault (the REST backend) being healthy before starting.
+  # Depends on vault-router being healthy before starting.
   vault-mcp:
     build:
-      context: ../Vault/knowledge-mcp
+      context: packages/vault-mcp
       dockerfile: Dockerfile
     ports:
       - "${VAULT_MCP_PORT:-8300}:8300"
@@ -115,10 +148,10 @@ services:
       - VAULT_MCP_HTTP=true
       - VAULT_MCP_PORT=8300
       - VAULT_MCP_HOST=0.0.0.0
-      # Points at the internal Docker network address of the vault service
-      - KNOWLEDGE_SERVICE_URL=http://vault:8000
+      # Points at vault-router (matches production; router passes through to vault in single-vault dev)
+      - KNOWLEDGE_SERVICE_URL=http://vault-router:8400
     depends_on:
-      vault:
+      vault-router:
         condition: service_healthy
     networks:
       - horus-net
@@ -143,7 +176,7 @@ services:
   # writes ~/.forge/config.yaml with the Anvil and Vault endpoint URLs.
   forge:
     build:
-      context: ../Forge
+      context: packages/forge
       dockerfile: Dockerfile
     ports:
       - "${FORGE_PORT:-8200}:8200"

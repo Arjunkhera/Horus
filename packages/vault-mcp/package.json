@@ -1,0 +1,32 @@
+{
+  "name": "@vault/knowledge-mcp",
+  "version": "0.2.0",
+  "description": "MCP thin client for Vault Knowledge Service",
+  "type": "module",
+  "bin": {
+    "knowledge-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "knowledge-service",
+    "vault",
+    "anvil"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

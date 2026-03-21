@@ -1,0 +1,22 @@
+id: person
+name: Person
+description: "Contact or team member"
+icon: "user"
+fields:
+  email:
+    type: string
+    pattern: "^[^@]+@[^@]+\\.[^@]+$"
+    required: false
+  team:
+    type: string
+    required: false
+  role:
+    type: string
+    required: false
+template:
+  frontmatter:
+    tags: []
+  body: |
+    ## About
+
+    ## Notes

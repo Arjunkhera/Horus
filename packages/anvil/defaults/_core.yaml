@@ -1,0 +1,46 @@
+id: _core
+name: Core Fields
+description: "Fields present on every note regardless of type"
+fields:
+  noteId:
+    type: string
+    required: true
+    immutable: true
+    auto: uuid
+  type:
+    type: string
+    required: true
+    description: "Note type identifier"
+  title:
+    type: string
+    required: true
+    min_length: 1
+    max_length: 300
+  created:
+    type: datetime
+    required: true
+    auto: now
+    immutable: true
+  modified:
+    type: datetime
+    required: true
+    auto: now
+  tags:
+    type: tags
+    required: false
+    no_duplicates: true
+  related:
+    type: reference_list
+    required: false
+    no_duplicates: true
+  scope:
+    type: object
+    required: false
+    fields:
+      context:
+        type: enum
+        values: [personal, work]
+      team:
+        type: string
+      service:
+        type: string
