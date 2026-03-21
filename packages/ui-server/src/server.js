@@ -5,6 +5,9 @@ import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
+import { createChatHandler } from './chat.js'
+import { mountConversationRoutes } from './conversations.js'
+import { getApiKeyStatus } from './provider.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -118,6 +121,24 @@ app.get('/api/config/services', async (_req, res) => {
     forge: { url: FORGE_URL },
   }))
 })
+
+// ─── Chat (Phase 2) ──────────────────────────────────────────────────────────
+
+const chatHandler = createChatHandler({
+  anvilUrl: ANVIL_URL,
+  vaultUrl: VAULT_URL,
+  forgeUrl: FORGE_URL,
+})
+
+app.post('/api/chat', chatHandler)
+
+app.get('/api/chat/status', async (_req, res) => {
+  res.json(await getApiKeyStatus())
+})
+
+// ─── Conversations (Phase 2) ─────────────────────────────────────────────────
+
+mountConversationRoutes(app)
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
