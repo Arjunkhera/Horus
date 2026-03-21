@@ -1,5 +1,5 @@
 // Sync daemon — runs as background async tasks inside the MCP server process
-// Handles: git pull loop + filesystem watcher → QMD re-index
+// Handles: git pull loop + filesystem watcher → FTS re-index
 
 import chokidar from 'chokidar';
 import type { SimpleGit } from 'simple-git';
@@ -9,7 +9,6 @@ export interface SyncDaemonOptions {
   notesPath: string;
   gitPullInterval?: number; // seconds, default 300
   debounceMs?: number; // default 5000
-  qmdCollection?: string;
   onReindex?: () => Promise<void>;
 }
 
@@ -24,7 +23,6 @@ export class SyncDaemon {
     this.opts = {
       gitPullInterval: 300,
       debounceMs: 5000,
-      qmdCollection: 'anvil',
       onReindex: async () => {},
       ...opts,
     };

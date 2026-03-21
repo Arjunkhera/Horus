@@ -58,11 +58,8 @@ async function main(): Promise<void> {
     db.upsertType(type);
   }
 
-  // Initialize search engine (QMD semantic if available, FTS fallback)
-  const { engine: searchEngine, mode: searchMode } = await createSearchEngine(db.raw, {
-    qmdCollection: process.env.ANVIL_QMD_COLLECTION,
-    qmdPath: process.env.QMD_PATH,
-  });
+  // Initialize search engine (FTS5 via SQLite)
+  const { engine: searchEngine, mode: searchMode } = await createSearchEngine(db.raw);
   process.stderr.write(JSON.stringify({ level: 'info', message: `Search engine: ${searchMode}`, timestamp: new Date().toISOString() }) + '\n');
 
   // Create tool context

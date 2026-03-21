@@ -12,7 +12,6 @@ if [ "$(id -u)" = "0" ] && [ "${HORUS_RUNTIME:-docker}" != "podman" ]; then
 fi
 
 NOTES_PATH="${ANVIL_NOTES_PATH:-/data/notes}"
-QMD_COLLECTION="${ANVIL_QMD_COLLECTION:-anvil}"
 REPO_URL="${ANVIL_REPO_URL:-}"
 SYNC_INTERVAL="${ANVIL_SYNC_INTERVAL:-300}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
@@ -31,7 +30,6 @@ git config --global --unset-all safe.directory 2>/dev/null || true
 # read-only git objects — skip it entirely.
 if [ "$HORUS_RUNTIME" = "podman" ]; then
   chown -R anvil:anvil /data/notes 2>/dev/null || true
-  chown -R anvil:anvil /home/anvil/.cache/qmd 2>/dev/null || true
   git config --global safe.directory '*'
 fi
 
@@ -140,44 +138,6 @@ if [ ! -f "$NOTES_PATH/.anvil/types/_core.yaml" ]; then
   fi
 fi
 
-# Step 3: Set up QMD collection if QMD is available
-if command -v qmd &>/dev/null; then
-  log "Setting up QMD collection '$QMD_COLLECTION'..."
-
-  # Ensure collection exists (idempotent)
-  qmd collection add "$NOTES_PATH" --name "$QMD_COLLECTION" --mask "**/*.md" 2>/dev/null || {
-    log "QMD collection already exists or setup skipped"
-  }
-
-  # Register path contexts for better search relevance
-  qmd context add "$NOTES_PATH" "Anvil working memory — SDLC notes, tasks, stories, scratch journals" 2>/dev/null || true
-  qmd context add "$NOTES_PATH/projects" "Software project directories with stories, specs, and documentation" 2>/dev/null || true
-  qmd context add "$NOTES_PATH/scratches" "Global scratch journals — design discussions, ideas, research, decisions" 2>/dev/null || true
-
-  # Check if initial index is needed
-  INDEX_COUNT=$(qmd search "." -c "$QMD_COLLECTION" --json -n 1 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
-
-  if [ "$INDEX_COUNT" = "0" ]; then
-    log "Building initial QMD index (this may take a while)..."
-    qmd update -c "$QMD_COLLECTION" 2>&1 | while read line; do
-      echo "{\"level\":\"debug\",\"message\":\"qmd: $line\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
-    done
-    log "Initial index complete"
-
-    # Generate vector embeddings for semantic search.
-    # First run downloads the embedding model (~300MB).
-    log "Generating QMD embeddings (first run downloads model)..."
-    qmd embed -c "$QMD_COLLECTION" 2>&1 | while read line; do
-      echo "{\"level\":\"debug\",\"message\":\"qmd-embed: $line\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
-    done
-    log "Embeddings complete"
-  else
-    log "QMD index exists with $INDEX_COUNT documents, skipping rebuild"
-  fi
-else
-  log "QMD not found — will use FTS5 search fallback"
-fi
-
 # Step 4: Start background git sync daemon with bidirectional sync (pull + commit + push)
 # Only runs when a git repository exists (indicated by .git directory presence).
 if [ -d "$NOTES_PATH/.git" ]; then
@@ -208,10 +168,6 @@ if [ -d "$NOTES_PATH/.git" ]; then
         log "Sync complete: no local changes to commit"
       fi
 
-      # Re-index QMD after sync
-      if command -v qmd &>/dev/null; then
-        qmd update -c "$QMD_COLLECTION" 2>/dev/null || true
-      fi
     done
   ) &
 
