@@ -1,0 +1,943 @@
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { WorkspaceManager } from './workspace/workspace-manager.js';
+import { WorkspaceCreator, type WorkspaceCreateOptions } from './workspace/workspace-creator.js';
+import { WorkspaceLifecycleManager } from './workspace/workspace-lifecycle.js';
+import { WorkspaceMetadataStore } from './workspace/workspace-metadata-store.js';
+import { Registry } from './registry/registry.js';
+import { Resolver } from './resolver/resolver.js';
+import { Compiler } from './compiler/compiler.js';
+import { ClaudeCodeStrategy } from './compiler/claude-code-strategy.js';
+import { CursorStrategy } from './compiler/cursor-strategy.js';
+import { GlobalClaudeCodeStrategy } from './compiler/global-claude-code-strategy.js';
+import { upsertManagedSection, removeManagedSection } from './compiler/claude-md-writer.js';
+import { FilesystemAdapter } from './adapters/filesystem-adapter.js';
+import { CompositeAdapter } from './adapters/composite-adapter.js';
+import { GitAdapter } from './adapters/git-adapter.js';
+import type { DataAdapter } from './adapters/types.js';
+import type {
+  ArtifactRef,
+  ArtifactSummary,
+  ArtifactType,
+  InstallReport,
+  SearchResult,
+  ResolvedArtifact,
+  LockFile,
+  WorkspaceRecord,
+} from './models/index.js';
+import type { GlobalPluginEntry } from './models/global-config.js';
+import type { ForgeConfig, RegistryConfig } from './models/forge-config.js';
+import type { RepoIndex, RepoIndexEntry } from './models/repo-index.js';
+import type { RepoWorkflow, WorkflowStrategy } from './models/repo-workflow.js';
+import { ForgeError } from './adapters/errors.js';
+import { loadGlobalConfig, saveGlobalConfig } from './config/global-config-loader.js';
+import { scan as repoScannerScan } from './repo/repo-scanner.js';
+import { loadRepoIndex, saveRepoIndex } from './repo/repo-index-store.js';
+import { RepoIndexQuery } from './repo/repo-index-query.js';
+import { VaultClient, extractHostingFromUrl } from './vault/vault-client.js';
+import { createReferenceClone, type RepoCloneResult } from './repo/repo-clone.js';
+import { expandPath } from './config/path-utils.js';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Translate a Docker-internal repo localPath to the equivalent host path.
+ * Returns the entry unchanged if host_repos_path is not configured or
+ * the localPath doesn't start with any of the configured scan_paths.
+ */
+export function translateRepoPath(
+  entry: RepoIndexEntry,
+  scanPaths: string[],
+  hostReposPath: string | undefined
+): RepoIndexEntry {
+  if (!hostReposPath) return entry;
+
+  for (const scanPath of scanPaths) {
+    const prefix = scanPath.endsWith('/') ? scanPath : scanPath + '/';
+    if (entry.localPath === scanPath || entry.localPath.startsWith(prefix)) {
+      const relative = entry.localPath.slice(scanPath.length);
+      const hostBase = hostReposPath.endsWith('/') ? hostReposPath.slice(0, -1) : hostReposPath;
+      return { ...entry, localPath: hostBase + relative };
+    }
+  }
+
+  return entry;
+}
+
+export interface InstallOptions {
+  target?: ForgeConfig['target'];
+  conflictStrategy?: 'overwrite' | 'skip' | 'backup';
+  dryRun?: boolean;
+}
+
+/**
+ * Report returned after a global plugin install.
+ */
+export interface GlobalInstallReport {
+  pluginId: string;
+  version: string;
+  filesWritten: string[];
+  claudeMdUpdated: boolean;
+}
+
+/**
+ * Info about a globally installed plugin.
+ */
+export interface GlobalPluginInfo {
+  id: string;
+  version: string;
+  installedAt: string;
+  files: string[];
+}
+
+/**
+ * Main orchestration class for Forge. Wires together Registry, Resolver,
+ * Compiler, and WorkspaceManager. Both the CLI and MCP server call this.
+ *
+ * @example
+ * const forge = new ForgeCore('./my-workspace');
+ * await forge.init('my-workspace');
+ * await forge.add('skill:developer@1.0.0');
+ * const report = await forge.install();
+ */
+export interface ForgeCoreOptions {
+  /** Override the global config path (default: ~/.forge/config.yaml). Useful for testing. */
+  globalConfigPath?: string;
+}
+
+export class ForgeCore {
+  private readonly workspaceManager: WorkspaceManager;
+  private readonly compiler: Compiler;
+  private readonly globalConfigPath: string | undefined;
+  private _metadataStore?: WorkspaceMetadataStore;
+  private _lifecycleManager?: WorkspaceLifecycleManager;
+
+  constructor(
+    private readonly workspaceRoot: string = process.cwd(),
+    options?: ForgeCoreOptions,
+  ) {
+    this.workspaceManager = new WorkspaceManager(workspaceRoot);
+    this.compiler = new Compiler();
+    this.compiler.register(new ClaudeCodeStrategy());
+    this.compiler.register(new CursorStrategy());
+    this.globalConfigPath = options?.globalConfigPath;
+  }
+
+  private async getMetadataStore(): Promise<WorkspaceMetadataStore> {
+    if (!this._metadataStore) {
+      const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+      this._metadataStore = new WorkspaceMetadataStore(globalConfig.workspace.store_path);
+    }
+    return this._metadataStore;
+  }
+
+  private async getLifecycleManager(): Promise<WorkspaceLifecycleManager> {
+    if (!this._lifecycleManager) {
+      const store = await this.getMetadataStore();
+      this._lifecycleManager = new WorkspaceLifecycleManager(undefined, store);
+    }
+    return this._lifecycleManager;
+  }
+
+  /**
+   * Initialize a new Forge workspace.
+   * Creates forge.yaml and forge.lock.
+   */
+  async init(name: string): Promise<void> {
+    await this.workspaceManager.scaffoldWorkspace(name);
+  }
+
+  /**
+   * Search the registry for artifacts matching a query.
+   */
+  async search(query: string, type?: ArtifactType): Promise<SearchResult[]> {
+    const registry = await this.buildRegistry();
+    return registry.search(query, type);
+  }
+
+  /**
+   * Add artifact ref(s) to forge.yaml.
+   * Validates the artifact exists in the registry before adding.
+   */
+  async add(refStrings: string | string[]): Promise<ForgeConfig> {
+    const refs = Array.isArray(refStrings) ? refStrings : [refStrings];
+    const config = await this.workspaceManager.readConfig();
+    const registry = await this.buildRegistry();
+
+    for (const refStr of refs) {
+      const ref = this.parseRef(refStr);
+
+      // Best-effort check: warn if artifact not found in any registry
+      if (config.registries.length > 0) {
+        try {
+          await registry.get(ref);
+        } catch {
+          console.warn(`[ForgeCore] Warning: '${refStr}' not found in any registry. Adding anyway.`);
+        }
+      }
+
+      // Add to config
+      if (ref.type === 'skill') {
+        config.artifacts.skills[ref.id] = ref.version;
+      } else if (ref.type === 'agent') {
+        config.artifacts.agents[ref.id] = ref.version;
+      } else if (ref.type === 'plugin') {
+        config.artifacts.plugins[ref.id] = ref.version;
+      }
+    }
+
+    await this.workspaceManager.writeConfig(config);
+    return config;
+  }
+
+  /**
+   * Run the full install pipeline:
+   * readConfig → resolveAll → emitAll → mergeFiles → writeLock
+   */
+  async install(options: InstallOptions = {}): Promise<InstallReport> {
+    const startTime = Date.now();
+    const config = await this.workspaceManager.readConfig();
+    const lock = await this.workspaceManager.readLock();
+    const registry = await this.buildRegistry();
+    const resolver = new Resolver(registry);
+
+    // Build ref list from config artifacts
+    const refs: ArtifactRef[] = [
+      ...Object.entries(config.artifacts.skills).map(([id, version]) => ({
+        type: 'skill' as const, id, version,
+      })),
+      ...Object.entries(config.artifacts.agents).map(([id, version]) => ({
+        type: 'agent' as const, id, version,
+      })),
+      ...Object.entries(config.artifacts.plugins).map(([id, version]) => ({
+        type: 'plugin' as const, id, version,
+      })),
+    ];
+
+    // Resolve all artifacts
+    resolver.reset();
+    const resolved = await resolver.resolveAll(refs);
+
+    // Compile to file operations
+    const target = options.target ?? config.target;
+    const fileOps = this.compiler.emitAll(resolved, target);
+
+    const report: InstallReport = {
+      installed: resolved.map(r => r.ref),
+      filesWritten: [],
+      conflicts: [],
+      duration: 0,
+    };
+
+    if (!options.dryRun) {
+      // Merge files into workspace
+      const mergeReport = await this.workspaceManager.mergeFiles(
+        fileOps,
+        lock,
+        options.conflictStrategy ?? 'backup',
+      );
+
+      report.filesWritten = mergeReport.written;
+      report.conflicts = mergeReport.conflicts;
+
+      // Update lockfile
+      const newLock: LockFile = {
+        version: '1',
+        lockedAt: new Date().toISOString(),
+        artifacts: {},
+      };
+
+      for (const artifact of resolved) {
+        // Skip workspace-config artifacts — only skill|agent|plugin go in the lock file
+        if (artifact.ref.type === 'workspace-config') {
+          continue;
+        }
+
+        const files = fileOps
+          .filter(op => op.sourceRef.id === artifact.ref.id && op.sourceRef.type === artifact.ref.type)
+          .map(op => op.path);
+
+        const sha = this.workspaceManager.computeSha256(artifact.bundle.content);
+        const lockKey = `${artifact.ref.type}:${artifact.ref.id}`;
+
+        newLock.artifacts[lockKey] = {
+          id: artifact.ref.id,
+          type: artifact.ref.type as 'skill' | 'agent' | 'plugin',
+          version: artifact.bundle.meta.version,
+          registry: 'local',
+          sha256: sha,
+          files,
+          resolvedAt: new Date().toISOString(),
+        };
+      }
+
+      await this.workspaceManager.writeLock(newLock);
+    } else {
+      report.filesWritten = fileOps.map(op => op.path);
+    }
+
+    report.duration = Date.now() - startTime;
+    return report;
+  }
+
+  /**
+   * Remove artifacts from forge.yaml and clean lockfile-tracked files.
+   */
+  async remove(refStrings: string | string[]): Promise<void> {
+    const refs = Array.isArray(refStrings) ? refStrings : [refStrings];
+    const config = await this.workspaceManager.readConfig();
+
+    for (const refStr of refs) {
+      const ref = this.parseRef(refStr);
+      if (ref.type === 'skill') delete config.artifacts.skills[ref.id];
+      else if (ref.type === 'agent') delete config.artifacts.agents[ref.id];
+      else if (ref.type === 'plugin') delete config.artifacts.plugins[ref.id];
+    }
+
+    await this.workspaceManager.writeConfig(config);
+  }
+
+  /**
+   * Resolve a single artifact ref (for forge_resolve MCP tool).
+   */
+  async resolve(refString: string): Promise<ResolvedArtifact> {
+    const ref = this.parseRef(refString);
+    const registry = await this.buildRegistry();
+    const resolver = new Resolver(registry);
+    resolver.reset();
+    return resolver.resolve(ref);
+  }
+
+  /**
+   * List installed (from lock) or available (from registry) artifacts.
+   */
+  async list(scope: 'installed' | 'available' = 'available', type?: ArtifactType): Promise<ArtifactSummary[]> {
+    if (scope === 'installed') {
+      const lock = await this.workspaceManager.readLock();
+      let artifacts = Object.values(lock.artifacts).map(a => ({
+        ref: { type: a.type, id: a.id, version: a.version },
+        name: a.id,
+        description: '',
+        tags: [],
+      }));
+      if (type) {
+        artifacts = artifacts.filter(a => a.ref.type === type);
+      }
+      return artifacts;
+    }
+    const registry = await this.buildRegistry();
+    return registry.list(type);
+  }
+
+  /**
+   * Read the current forge.yaml config.
+   */
+  async getConfig(): Promise<ForgeConfig> {
+    return this.workspaceManager.readConfig();
+  }
+
+  /**
+   * Scan configured directories for git repositories and update the index.
+   */
+  async repoScan(): Promise<RepoIndex> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const { scan_paths, index_path } = globalConfig.repos;
+    
+    if (scan_paths.length === 0) {
+      throw new Error('No scan paths configured. Run: forge config set repos.scan_paths ~/Repositories');
+    }
+    
+    const existing = await loadRepoIndex(index_path);
+    const index = await repoScannerScan(scan_paths, existing ?? undefined);
+    await saveRepoIndex(index, index_path);
+    return index;
+  }
+
+  /**
+   * List repositories from the index, optionally filtered by query.
+   */
+  async repoList(query?: string): Promise<RepoIndexEntry[]> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const { index_path, scan_paths, host_repos_path } = globalConfig.repos;
+
+    let index = await loadRepoIndex(index_path);
+
+    // Auto-scan if no index exists and scan_paths configured
+    if (!index && scan_paths.length > 0) {
+      console.log('[Forge] No repo index found. Running initial scan...');
+      index = await this.repoScan();
+    }
+
+    if (!index) return [];
+
+    const query_obj = new RepoIndexQuery(index.repos);
+    const results = query ? query_obj.search(query) : query_obj.listAll();
+    return results.map(r => translateRepoPath(r, scan_paths, host_repos_path));
+  }
+
+  /**
+   * Resolve a repository by name or remote URL.
+   */
+  async repoResolve(opts: { name?: string; remoteUrl?: string }): Promise<RepoIndexEntry | null> {
+    if (!opts.name && !opts.remoteUrl) {
+      throw new Error('Either name or remoteUrl must be provided');
+    }
+
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const { index_path, scan_paths, host_repos_path } = globalConfig.repos;
+
+    let index = await loadRepoIndex(index_path);
+
+    // Auto-scan if no index exists
+    if (!index && scan_paths.length > 0) {
+      console.log('[Forge] No repo index found. Running initial scan...');
+      index = await this.repoScan();
+    }
+
+    if (!index) return null;
+
+    const q = new RepoIndexQuery(index.repos);
+    let entry: RepoIndexEntry | null = null;
+    if (opts.name) entry = q.findByName(opts.name);
+    else if (opts.remoteUrl) entry = q.findByRemoteUrl(opts.remoteUrl);
+    return entry ? translateRepoPath(entry, scan_paths, host_repos_path) : null;
+  }
+
+  /**
+   * Resolve the git workflow configuration for a repository.
+   *
+   * Resolution order:
+   *   1. Vault repo profile  — shared, team-wide knowledge (hosting + workflow fields)
+   *   2. Auto-detect         — inspect local git remotes (upstream → fork, else direct)
+   *   3. Default fallback    — direct strategy, main branch
+   */
+  async repoWorkflow(repoName: string): Promise<RepoWorkflow> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const vaultEndpoint = globalConfig.mcp_endpoints.vault;
+
+    // --- Tier 1: Vault repo profile ---
+    if (vaultEndpoint) {
+      try {
+        const client = new VaultClient(vaultEndpoint.url);
+        const profile = await client.fetchRepoProfile(repoName);
+        if (profile?.workflow?.strategy) {
+          const strategy = profile.workflow.strategy as WorkflowStrategy;
+          const defaultBranch = profile.workflow['default-branch'] ?? 'main';
+          return {
+            repoName,
+            hosting: {
+              hostname: profile.hosting?.hostname ?? 'github.com',
+              org: profile.hosting?.org ?? '',
+            },
+            workflow: {
+              strategy,
+              defaultBranch,
+              prTarget: profile.workflow['pr-target'] ?? defaultBranch,
+              branchConvention: profile.workflow['branch-convention'],
+            },
+            source: 'vault',
+          };
+        }
+      } catch {
+        // Vault unreachable — fall through to auto-detect
+      }
+    }
+
+    // --- Tier 2: Auto-detect from local git remotes ---
+    const repo = await this.repoResolve({ name: repoName });
+    if (repo) {
+      const strategy = await this._detectWorkflowStrategy(repo.localPath);
+      const hosting = extractHostingFromUrl(repo.remoteUrl);
+      return {
+        repoName,
+        hosting,
+        workflow: {
+          strategy,
+          defaultBranch: repo.defaultBranch,
+          prTarget: repo.defaultBranch,
+        },
+        source: 'auto-detect',
+      };
+    }
+
+    // --- Tier 3: Default fallback ---
+    return {
+      repoName,
+      hosting: { hostname: 'github.com', org: '' },
+      workflow: { strategy: 'direct', defaultBranch: 'main', prTarget: 'main' },
+      source: 'default',
+    };
+  }
+
+  /**
+   * Create an isolated reference clone of a repository.
+   *
+   * Looks up the repo in the local index, creates a reference clone at
+   * destPath (default: <workspaceRoot>/<repoName> when inside a workspace,
+   * or <mountPath>/<repoName> otherwise), optionally creates a feature
+   * branch, and returns paths in host-translated form.
+   */
+  async repoClone(opts: {
+    repoName: string;
+    branchName?: string;
+    destPath?: string;
+    workspacePath?: string;
+  }): Promise<RepoCloneResult> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const { scan_paths, host_repos_path } = globalConfig.repos;
+
+    let repoIndex = await loadRepoIndex(globalConfig.repos.index_path);
+    if (!repoIndex && globalConfig.repos.scan_paths.length > 0) {
+      repoIndex = await this.repoScan();
+    }
+    if (!repoIndex) {
+      throw new ForgeError('REPO_INDEX_NOT_FOUND', 'Repository index not found.', 'Run: forge repo scan');
+    }
+
+    const query = new RepoIndexQuery(repoIndex.repos);
+    const repo = query.findByName(opts.repoName);
+    if (!repo) {
+      throw new ForgeError('REPO_NOT_FOUND', `Repository "${opts.repoName}" not found in local index.`, 'Run: forge repo scan');
+    }
+
+    const mountPath = expandPath(globalConfig.workspace.mount_path);
+    const hostMountPath = globalConfig.workspace.host_workspaces_path ?? mountPath;
+
+    // Resolve workspacePath, translating host path → container path when Forge
+    // runs in Docker. MCP callers pass $FORGE_WORKSPACE_PATH (host-side absolute
+    // path). Without translation, the host path never matches mountPath and the
+    // clone always lands in the workspaces root instead of the workspace folder.
+    let effectiveRoot = path.resolve(opts.workspacePath ?? this.workspaceRoot);
+    if (hostMountPath !== mountPath && effectiveRoot.startsWith(hostMountPath + path.sep)) {
+      effectiveRoot = mountPath + effectiveRoot.slice(hostMountPath.length);
+    }
+
+    const resolvedMount = path.resolve(mountPath);
+    const insideWorkspace = effectiveRoot.startsWith(resolvedMount + path.sep) && effectiveRoot !== resolvedMount;
+    const basePath = insideWorkspace ? effectiveRoot : mountPath;
+    const clonePath = opts.destPath ?? path.join(basePath, opts.repoName);
+
+    const { actualDefaultBranch } = await createReferenceClone({
+      localPath: repo.localPath,
+      remoteUrl: repo.remoteUrl,
+      destPath: clonePath,
+      branchName: opts.branchName,
+      defaultBranch: repo.defaultBranch,
+    });
+
+    // If the clone revealed a different default branch than the index stored, update it.
+    if (actualDefaultBranch !== repo.defaultBranch) {
+      const updatedRepos = repoIndex.repos.map((r) =>
+        r.name === repo.name ? { ...r, defaultBranch: actualDefaultBranch } : r,
+      );
+      await saveRepoIndex({ ...repoIndex, repos: updatedRepos }, globalConfig.repos.index_path);
+    }
+
+    const translatedRepo = translateRepoPath(repo, scan_paths, host_repos_path);
+
+    // Compute host-side clone path for display (Docker path → host path)
+    const cloneRelative = path.relative(mountPath, clonePath);
+    const hostClonePath = path.join(hostMountPath, cloneRelative);
+
+    const origin = repo.remoteUrl ?? translatedRepo.localPath;
+
+    return {
+      repoName: opts.repoName,
+      clonePath,
+      hostClonePath,
+      branch: opts.branchName ?? actualDefaultBranch,
+      origin,
+    };
+  }
+
+  /**
+   * Create a new workspace from a workspace config artifact.
+   * Resolves the workspace config, sets up folders, installs plugins,
+   * creates git worktrees, and registers in metadata store.
+   */
+  async workspaceCreate(options: WorkspaceCreateOptions): Promise<WorkspaceRecord> {
+    const creator = new WorkspaceCreator(this);
+    return creator.create(options);
+  }
+
+  /**
+   * List workspaces, optionally filtered by status.
+   */
+  async workspaceList(filter?: { status?: string }): Promise<WorkspaceRecord[]> {
+    const store = await this.getMetadataStore();
+    const filterObj = filter?.status ? { status: filter.status as any } : undefined;
+    return store.list(filterObj);
+  }
+
+  /**
+   * Find the first workspace linked to a story ID. Returns null if not found.
+   */
+  async workspaceFindByStory(storyId: string): Promise<WorkspaceRecord | null> {
+    const store = await this.getMetadataStore();
+    return store.findByStoryId(storyId);
+  }
+
+  /**
+   * Get status of a workspace.
+   */
+  async workspaceStatus(id: string): Promise<WorkspaceRecord | null> {
+    const store = await this.getMetadataStore();
+    return store.get(id);
+  }
+
+  /**
+   * Pause a workspace.
+   */
+  async workspacePause(id: string): Promise<WorkspaceRecord> {
+    return (await this.getLifecycleManager()).pause(id);
+  }
+
+  /**
+   * Complete a workspace.
+   */
+  async workspaceComplete(id: string): Promise<WorkspaceRecord> {
+    return (await this.getLifecycleManager()).complete(id);
+  }
+
+  /**
+   * Delete a workspace.
+   */
+  async workspaceDelete(id: string, opts?: { force?: boolean }): Promise<void> {
+    return (await this.getLifecycleManager()).delete(id, opts);
+  }
+
+  /**
+   * Archive a workspace.
+   */
+  async workspaceArchive(id: string): Promise<WorkspaceRecord> {
+    return (await this.getLifecycleManager()).archive(id);
+  }
+
+  /**
+   * Clean workspaces based on retention policy.
+   */
+  async workspaceClean(opts?: { dryRun?: boolean }): Promise<{ cleaned: string[]; skipped: string[] }> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const retentionDays = globalConfig.workspace.retention_days;
+    return (await this.getLifecycleManager()).clean(retentionDays, opts);
+  }
+
+  // ─── Global Plugin Management ───
+
+  /**
+   * Install a plugin globally to ~/.claude/.
+   *
+   * 1. Resolves the plugin via the registry
+   * 2. Emits skills to ~/.claude/skills/ using GlobalClaudeCodeStrategy
+   * 3. Reads plugin's resources/rules/global-rules.md
+   * 4. Upserts a managed section in ~/.claude/CLAUDE.md
+   * 5. Tracks installed files in ~/.forge/config.yaml global_plugins
+   */
+  async installGlobal(ref: string): Promise<GlobalInstallReport> {
+    const parsed = this.parseRef(ref);
+    if (parsed.type !== 'plugin') {
+      throw new ForgeError('INVALID_REF', `Global install only supports plugins, got '${parsed.type}'`, 'Use format: plugin:my-plugin@1.0.0');
+    }
+
+    const registry = await this.buildRegistry();
+    const resolver = new Resolver(registry);
+    resolver.reset();
+    const resolved = await resolver.resolve(parsed);
+
+    // Emit skills/agents to ~/.claude/ using global strategy
+    const claudeDir = path.join(os.homedir(), '.claude');
+    const globalStrategy = new GlobalClaudeCodeStrategy(claudeDir);
+    const output = globalStrategy.emit(resolved);
+    const filesWritten: string[] = [];
+
+    for (const op of output.operations) {
+      const dir = path.dirname(op.path);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(op.path, op.content, 'utf-8');
+      filesWritten.push(op.path);
+    }
+
+    // Read plugin's global-rules.md resource file
+    let claudeMdUpdated = false;
+    const adapter = await this.findAdapterWithResource(registry, parsed);
+    if (adapter) {
+      const rulesContent = await adapter.readResourceFile!('plugin', parsed.id, 'resources/rules/global-rules.md');
+      if (rulesContent) {
+        const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
+        let existing: string | undefined;
+        try {
+          existing = await fs.readFile(claudeMdPath, 'utf-8');
+        } catch (err: any) {
+          if (err.code !== 'ENOENT') throw err;
+        }
+
+        const updated = upsertManagedSection(existing, parsed.id, rulesContent);
+        await fs.mkdir(claudeDir, { recursive: true });
+        await fs.writeFile(claudeMdPath, updated, 'utf-8');
+        claudeMdUpdated = true;
+      }
+    }
+
+    // Track in global config
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    globalConfig.global_plugins[parsed.id] = {
+      version: resolved.bundle.meta.version,
+      installed_at: new Date().toISOString(),
+      files: filesWritten,
+    };
+    await saveGlobalConfig(globalConfig, this.globalConfigPath);
+
+    return {
+      pluginId: parsed.id,
+      version: resolved.bundle.meta.version,
+      filesWritten,
+      claudeMdUpdated,
+    };
+  }
+
+  /**
+   * Uninstall a globally installed plugin.
+   *
+   * 1. Reads tracked files from global_plugins
+   * 2. Deletes skill/agent files from ~/.claude/
+   * 3. Removes managed section from ~/.claude/CLAUDE.md
+   * 4. Removes entry from global config
+   */
+  async uninstallGlobal(pluginId: string): Promise<void> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const entry = globalConfig.global_plugins[pluginId];
+
+    if (!entry) {
+      throw new ForgeError('NOT_FOUND', `Plugin '${pluginId}' is not globally installed`, 'Run: forge global list');
+    }
+
+    // Delete tracked files
+    for (const filePath of entry.files) {
+      try {
+        await fs.unlink(filePath);
+        // Try to remove empty parent directories
+        const dir = path.dirname(filePath);
+        try {
+          await fs.rmdir(dir);
+        } catch {
+          // Directory not empty — fine
+        }
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          console.warn(`[ForgeCore] Could not delete ${filePath}: ${err.message}`);
+        }
+      }
+    }
+
+    // Remove managed section from CLAUDE.md
+    const claudeMdPath = path.join(os.homedir(), '.claude', 'CLAUDE.md');
+    try {
+      const existing = await fs.readFile(claudeMdPath, 'utf-8');
+      const updated = removeManagedSection(existing, pluginId);
+      await fs.writeFile(claudeMdPath, updated, 'utf-8');
+    } catch (err: any) {
+      if (err.code !== 'ENOENT') {
+        console.warn(`[ForgeCore] Could not update CLAUDE.md: ${err.message}`);
+      }
+    }
+
+    // Remove from global config
+    delete globalConfig.global_plugins[pluginId];
+    await saveGlobalConfig(globalConfig, this.globalConfigPath);
+  }
+
+  /**
+   * List all globally installed plugins.
+   */
+  async listGlobal(): Promise<GlobalPluginInfo[]> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    return Object.entries(globalConfig.global_plugins).map(([id, entry]) => ({
+      id,
+      version: entry.version,
+      installedAt: entry.installed_at,
+      files: entry.files,
+    }));
+  }
+
+  /**
+   * Find an adapter in the registry that supports readResourceFile for a given artifact.
+   */
+  private async findAdapterWithResource(registry: Registry, ref: ArtifactRef): Promise<DataAdapter | null> {
+    // Build adapters directly to access readResourceFile
+    let config: ForgeConfig | null = null;
+    try {
+      config = await this.workspaceManager.readConfig();
+    } catch {
+      // No workspace config
+    }
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+
+    const registries = config
+      ? [...config.registries, ...globalConfig.registries.filter(r => !config!.registries.some(cr => cr.name === r.name))]
+      : globalConfig.registries;
+
+    for (const reg of registries) {
+      try {
+        const adapter = this.buildAdapter(reg);
+        if (adapter.readResourceFile && await adapter.exists(ref.type, ref.id)) {
+          return adapter;
+        }
+      } catch {
+        // Skip failed adapters
+      }
+    }
+    return null;
+  }
+
+  // Internal helpers
+
+  /**
+   * Detect git workflow strategy from a repo's local remotes.
+   *
+   * - Has an 'upstream' remote → fork strategy (push to origin fork, PR against upstream)
+   * - Otherwise              → direct strategy (push feature branch to shared origin)
+   */
+  private async _detectWorkflowStrategy(localPath: string): Promise<WorkflowStrategy> {
+    try {
+      const { stdout } = await execFileAsync('git', ['remote'], {
+        cwd: localPath,
+        timeout: 3000,
+      });
+      const remotes = stdout.trim().split('\n').map(r => r.trim()).filter(Boolean);
+      if (remotes.includes('upstream')) return 'fork';
+    } catch {
+      // git not available or not a git repo — fall back to direct
+    }
+    return 'direct';
+  }
+
+  private async buildRegistry(): Promise<Registry> {
+    let config: ForgeConfig | null = null;
+    try {
+      config = await this.workspaceManager.readConfig();
+    } catch {
+      // No workspace config — fall through to global config below
+    }
+
+    // Load global config (~/.forge/config.yaml) for fallback registries
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+
+    if (!config) {
+      // No workspace forge.yaml — use global config registries only
+      const adapters: DataAdapter[] = [];
+      for (const reg of globalConfig.registries) {
+        try {
+          adapters.push(this.buildAdapter(reg));
+        } catch (err) {
+          console.warn(`[ForgeCore] Skipping registry '${reg.name}': ${(err as Error).message}`);
+        }
+      }
+      if (adapters.length === 0) {
+        return new Registry(new FilesystemAdapter(path.join(this.workspaceRoot, 'registry')));
+      }
+      const adapter = adapters.length === 1 ? adapters[0] : new CompositeAdapter({ adapters });
+      return new Registry(adapter);
+    }
+
+    // Workspace registries first (higher priority), then global as fallbacks.
+    // Deduplicate by name — workspace overrides global.
+    const workspaceNames = new Set(config.registries.map(r => r.name));
+    const globalFallbacks = globalConfig.registries.filter(r => !workspaceNames.has(r.name));
+    const allRegistries = [...config.registries, ...globalFallbacks];
+
+    if (allRegistries.length === 0) {
+      return new Registry(new FilesystemAdapter(path.join(this.workspaceRoot, 'registry')));
+    }
+
+    // Build an adapter for each configured registry
+    const adapters: DataAdapter[] = [];
+    for (const reg of allRegistries) {
+      try {
+        adapters.push(this.buildAdapter(reg));
+      } catch (err) {
+        console.warn(`[ForgeCore] Skipping registry '${reg.name}': ${(err as Error).message}`);
+      }
+    }
+
+    if (adapters.length === 0) {
+      // All registries failed to construct — fall back to local default
+      return new Registry(new FilesystemAdapter(path.join(this.workspaceRoot, 'registry')));
+    }
+
+    // Single adapter → use directly; multiple → compose with priority ordering
+    const adapter = adapters.length === 1
+      ? adapters[0]
+      : new CompositeAdapter({ adapters });
+
+    return new Registry(adapter);
+  }
+
+  /**
+   * Instantiate the correct DataAdapter for a registry config entry.
+   */
+  private buildAdapter(reg: RegistryConfig): DataAdapter {
+    switch (reg.type) {
+      case 'filesystem': {
+        const registryPath = path.isAbsolute(reg.path)
+          ? reg.path
+          : path.join(this.workspaceRoot, reg.path);
+        return new FilesystemAdapter(registryPath);
+      }
+      case 'git': {
+        return new GitAdapter({
+          url: reg.url,
+          ref: reg.branch,
+          registryPath: reg.path,
+        });
+      }
+      case 'http':
+        throw new ForgeError(
+          'UNSUPPORTED',
+          `HTTP registries are not yet implemented (registry: '${reg.name}')`,
+          'Use a filesystem or git registry instead.',
+        );
+      default:
+        throw new ForgeError(
+          'INVALID_CONFIG',
+          `Unknown registry type in config`,
+          'Supported types: filesystem, git',
+        );
+    }
+  }
+
+  private parseRef(refStr: string): ArtifactRef {
+    // Format: "type:id@version" or "type:id" or "id@version" or "id"
+    let type: ArtifactRef['type'] = 'skill';
+    let id: string;
+    let version = '*';
+
+    let remaining = refStr;
+
+    // Extract type prefix
+    if (remaining.startsWith('skill:')) { type = 'skill'; remaining = remaining.slice(6); }
+    else if (remaining.startsWith('agent:')) { type = 'agent'; remaining = remaining.slice(6); }
+    else if (remaining.startsWith('plugin:')) { type = 'plugin'; remaining = remaining.slice(7); }
+    else if (remaining.startsWith('workspace-config:')) { type = 'workspace-config'; remaining = remaining.slice(17); }
+
+    // Extract version suffix
+    const atIdx = remaining.indexOf('@');
+    if (atIdx !== -1) {
+      id = remaining.slice(0, atIdx);
+      version = remaining.slice(atIdx + 1);
+    } else {
+      id = remaining;
+    }
+
+    if (!id) {
+      throw new ForgeError('INVALID_REF', `Invalid artifact ref: '${refStr}'`, `Use format: skill:my-skill@1.0.0`);
+    }
+
+    return { type, id, version };
+  }
+}
+
+// Re-export Registry for convenience
+export { Registry } from './registry/registry.js';
