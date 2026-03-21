@@ -276,7 +276,7 @@ services:
       --api-key=${TYPESENSE_API_KEY:-horus-local-key}
       --enable-cors
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8108/health"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8108'"]
       interval: 10s
       timeout: 5s
       retries: 3

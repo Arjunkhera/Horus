@@ -162,7 +162,7 @@ const TYPESENSE_SERVICE = `\
     networks:
       - horus-net
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8108/health"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8108'"]
       interval: 10s
       timeout: 5s
       retries: 3
