@@ -1,6 +1,6 @@
 {
   "name": "@arkhera30/cli",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "CLI for managing the Horus AI development stack",
   "type": "module",
   "bin": {
@@ -37,7 +37,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Arjunkhera/Horus.git",
-    "directory": "cli"
+    "directory": "packages/cli"
   },
   "homepage": "https://github.com/Arjunkhera/Horus#readme",
   "bugs": {

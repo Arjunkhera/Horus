@@ -214,7 +214,7 @@ export const setupCommand = new Command('setup')
         default: false,
       });
 
-      let ports: { anvil: number; vault_rest: number; vault_mcp: number; vault_router: number; forge: number } = { ...DEFAULT_PORTS };
+      let ports: { anvil: number; vault_rest: number; vault_mcp: number; vault_router: number; forge: number; typesense: number } = { ...DEFAULT_PORTS };
 
       if (customize_ports) {
         const anvil = await number({
@@ -243,6 +243,7 @@ export const setupCommand = new Command('setup')
           vault_mcp: vault_mcp ?? DEFAULT_PORTS.vault_mcp,
           vault_router: vault_router ?? DEFAULT_PORTS.vault_router,
           forge: forge ?? DEFAULT_PORTS.forge,
+          typesense: DEFAULT_PORTS.typesense,
         };
       }
 
