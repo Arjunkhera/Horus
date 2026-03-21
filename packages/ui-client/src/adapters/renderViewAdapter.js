@@ -49,5 +49,10 @@ export function adaptRenderView(input) {
     count: items.length,
     items,
     shape,
+    // View-level config passthrough for primitives
+    ...(input.groupBy && { groupBy: input.groupBy }),
+    ...(input.columns && { columns: input.columns }),
+    ...(input.sortBy && { sortBy: input.sortBy }),
+    ...(input.sortOrder && { sortOrder: input.sortOrder }),
   }
 }
