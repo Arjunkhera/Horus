@@ -11,20 +11,18 @@ export interface McpServerEntry {
 }
 
 /**
- * Merge the given MCP server entries and permissions into
- * {workspacePath}/.claude/settings.local.json using Claude Code's native
- * HTTP transport. Preserves all existing settings.
+ * Merge the given MCP server entries and permissions into Claude Code settings
+ * for the workspace. Preserves all existing settings.
  *
- * Writes to settings.local.json (machine-specific, gitignored) because it
- * contains localhost URLs that differ per machine.
+ * Writes to two files:
+ * - settings.local.json — MCP server URLs, hooks, and permissions (machine-specific,
+ *   gitignored). Contains localhost URLs that differ per machine.
+ * - settings.json — permissions only (project-level, committed to git). Required
+ *   because Claude Code only reliably suppresses approval prompts when the permission
+ *   rule exists in settings.json; settings.local.json alone is insufficient.
  *
- * Each entry produces a mcpServers record like:
+ * Each mcpServers entry in settings.local.json looks like:
  *   "anvil": { "type": "http", "url": "http://localhost:8100/mcp" }
- *
- * Permissions from `claude_permissions` in ~/.forge/config.yaml are merged
- * into the file so that the local settings don't shadow the user's global
- * ~/.claude/settings.json permissions (Claude Code treats a local
- * settings.local.json as authoritative when it exists).
  */
 export async function updateClaudeMcpServers(
   servers: McpServerEntry[],
@@ -34,61 +32,75 @@ export async function updateClaudeMcpServers(
 ): Promise<void> {
   if (servers.length === 0) return;
 
-  const settingsPath = path.join(workspacePath, '.claude', 'settings.local.json');
+  const claudeDir = path.join(workspacePath, '.claude');
+  await fs.mkdir(claudeDir, { recursive: true });
 
-  // Read existing settings, defaulting to empty object on missing/invalid file.
-  let settings: Record<string, unknown> = {};
+  const configAllow = claudePermissions?.allow ?? ['mcp__*__*'];
+  const configDeny = claudePermissions?.deny ?? [];
+
+  // --- settings.local.json: MCP server URLs + permissions (machine-specific) ---
+  const localSettingsPath = path.join(claudeDir, 'settings.local.json');
+  let localSettings: Record<string, unknown> = {};
   try {
-    const raw = await fs.readFile(settingsPath, 'utf-8');
-    settings = JSON.parse(raw);
+    const raw = await fs.readFile(localSettingsPath, 'utf-8');
+    localSettings = JSON.parse(raw);
   } catch {
     // File absent or unparseable — start fresh.
   }
 
   // Merge: add/overwrite only the servers Forge knows about; leave others intact.
-  const mcpServers = (settings.mcpServers as Record<string, unknown>) ?? {};
+  const mcpServers = (localSettings.mcpServers as Record<string, unknown>) ?? {};
   for (const { name, url } of servers) {
     // Append /mcp to the base URL for the Streamable HTTP endpoint.
     const mcpUrl = url.replace(/\/+$/, '') + '/mcp';
-    mcpServers[name] = {
-      type: 'http',
-      url: mcpUrl,
-    };
+    mcpServers[name] = { type: 'http', url: mcpUrl };
   }
-  settings.mcpServers = mcpServers;
+  localSettings.mcpServers = mcpServers;
 
-  // Merge permissions from claude_permissions config into the local file.
-  // Without this, the mere existence of settings.local.json causes Claude Code to
-  // treat the local permissions as authoritative, shadowing the global wildcard.
-  const configAllow = claudePermissions?.allow ?? ['mcp__*__*'];
-  const configDeny = claudePermissions?.deny ?? [];
-
-  const permissions = (settings.permissions as Record<string, unknown>) ?? {};
-  const allow = Array.isArray(permissions.allow) ? permissions.allow as string[] : [];
+  const localPermissions = (localSettings.permissions as Record<string, unknown>) ?? {};
+  const localAllow = Array.isArray(localPermissions.allow) ? localPermissions.allow as string[] : [];
   for (const entry of configAllow) {
-    if (!allow.includes(entry)) {
-      allow.push(entry);
-    }
+    if (!localAllow.includes(entry)) localAllow.push(entry);
   }
-  permissions.allow = allow;
-
+  localPermissions.allow = localAllow;
   if (configDeny.length > 0) {
-    const deny = Array.isArray(permissions.deny) ? permissions.deny as string[] : [];
+    const localDeny = Array.isArray(localPermissions.deny) ? localPermissions.deny as string[] : [];
     for (const entry of configDeny) {
-      if (!deny.includes(entry)) {
-        deny.push(entry);
-      }
+      if (!localDeny.includes(entry)) localDeny.push(entry);
     }
-    permissions.deny = deny;
+    localPermissions.deny = localDeny;
   }
-  settings.permissions = permissions;
+  localSettings.permissions = localPermissions;
 
-  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
-  await fs.writeFile(
-    settingsPath,
-    JSON.stringify(settings, null, 2) + '\n',
-    'utf-8',
-  );
+  await fs.writeFile(localSettingsPath, JSON.stringify(localSettings, null, 2) + '\n', 'utf-8');
+
+  // --- settings.json: permissions only (project-level, shared) ---
+  // MCP server URLs and hooks are NOT written here — they are machine-specific.
+  const sharedSettingsPath = path.join(claudeDir, 'settings.json');
+  let sharedSettings: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(sharedSettingsPath, 'utf-8');
+    sharedSettings = JSON.parse(raw);
+  } catch {
+    // File absent or unparseable — start fresh.
+  }
+
+  const sharedPermissions = (sharedSettings.permissions as Record<string, unknown>) ?? {};
+  const sharedAllow = Array.isArray(sharedPermissions.allow) ? sharedPermissions.allow as string[] : [];
+  for (const entry of configAllow) {
+    if (!sharedAllow.includes(entry)) sharedAllow.push(entry);
+  }
+  sharedPermissions.allow = sharedAllow;
+  if (configDeny.length > 0) {
+    const sharedDeny = Array.isArray(sharedPermissions.deny) ? sharedPermissions.deny as string[] : [];
+    for (const entry of configDeny) {
+      if (!sharedDeny.includes(entry)) sharedDeny.push(entry);
+    }
+    sharedPermissions.deny = sharedDeny;
+  }
+  sharedSettings.permissions = sharedPermissions;
+
+  await fs.writeFile(sharedSettingsPath, JSON.stringify(sharedSettings, null, 2) + '\n', 'utf-8');
 }
 
 /**

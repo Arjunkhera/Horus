@@ -15,7 +15,7 @@ describe('updateClaudeMcpServers', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates settings.local.json with mcpServers and default mcp__* permission', async () => {
+  it('creates settings.local.json with mcpServers and default mcp__*__* permission', async () => {
     await updateClaudeMcpServers(
       [{ name: 'anvil', url: 'http://localhost:8100' }],
       tmpDir,
@@ -31,7 +31,7 @@ describe('updateClaudeMcpServers', () => {
       type: 'http',
       url: 'http://localhost:8100/mcp',
     });
-    expect(settings.permissions.allow).toContain('mcp__*');
+    expect(settings.permissions.allow).toContain('mcp__*__*');
   });
 
   it('preserves existing mcpServers entries', async () => {
@@ -81,7 +81,7 @@ describe('updateClaudeMcpServers', () => {
     const settings = JSON.parse(raw);
 
     expect(settings.permissions.allow).toContain('Bash(*)');
-    expect(settings.permissions.allow).toContain('mcp__*');
+    expect(settings.permissions.allow).toContain('mcp__*__*');
     expect(settings.permissions.deny).toEqual(['Bash(rm *)']);
   });
 
@@ -91,7 +91,7 @@ describe('updateClaudeMcpServers', () => {
     await fs.writeFile(
       path.join(settingsDir, 'settings.local.json'),
       JSON.stringify({
-        permissions: { allow: ['mcp__*'] },
+        permissions: { allow: ['mcp__*__*'] },
       }),
     );
 
@@ -106,7 +106,7 @@ describe('updateClaudeMcpServers', () => {
     );
     const settings = JSON.parse(raw);
 
-    const count = settings.permissions.allow.filter((x: string) => x === 'mcp__*').length;
+    const count = settings.permissions.allow.filter((x: string) => x === 'mcp__*__*').length;
     expect(count).toBe(1);
   });
 
@@ -137,7 +137,7 @@ describe('updateClaudeMcpServers', () => {
     const settings = JSON.parse(raw);
 
     expect(Object.keys(settings.mcpServers)).toEqual(['anvil', 'vault', 'forge']);
-    expect(settings.permissions.allow).toContain('mcp__*');
+    expect(settings.permissions.allow).toContain('mcp__*__*');
   });
 
   it('applies full claude_permissions from config (allow + deny)', async () => {
@@ -204,7 +204,7 @@ describe('updateClaudeMcpServers', () => {
     expect(settings.permissions.deny).toContain('Bash(rmdir *)');
   });
 
-  it('uses default mcp__* when no claudePermissions provided', async () => {
+  it('uses default mcp__*__* when no claudePermissions provided', async () => {
     await updateClaudeMcpServers(
       [{ name: 'anvil', url: 'http://localhost:8100' }],
       tmpDir,
@@ -218,8 +218,109 @@ describe('updateClaudeMcpServers', () => {
     );
     const settings = JSON.parse(raw);
 
-    expect(settings.permissions.allow).toEqual(['mcp__*']);
+    expect(settings.permissions.allow).toEqual(['mcp__*__*']);
     expect(settings.permissions.deny).toBeUndefined();
+  });
+});
+
+describe('updateClaudeMcpServers — settings.json (project-level shared)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-mcp-shared-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('creates settings.json with permissions block', async () => {
+    await updateClaudeMcpServers(
+      [{ name: 'anvil', url: 'http://localhost:8100' }],
+      tmpDir,
+    );
+
+    const raw = await fs.readFile(
+      path.join(tmpDir, '.claude', 'settings.json'),
+      'utf-8',
+    );
+    const settings = JSON.parse(raw);
+
+    expect(settings.permissions.allow).toContain('mcp__*__*');
+  });
+
+  it('does not write mcpServers or hooks to settings.json', async () => {
+    await updateClaudeMcpServers(
+      [{ name: 'anvil', url: 'http://localhost:8100' }],
+      tmpDir,
+      undefined,
+      {
+        allow: ['mcp__*__*', 'Bash(*)'],
+        deny: ['Bash(rm *)'],
+      },
+    );
+
+    const raw = await fs.readFile(
+      path.join(tmpDir, '.claude', 'settings.json'),
+      'utf-8',
+    );
+    const settings = JSON.parse(raw);
+
+    expect(settings.mcpServers).toBeUndefined();
+    expect(settings.hooks).toBeUndefined();
+    expect(settings.permissions.allow).toEqual(expect.arrayContaining(['mcp__*__*', 'Bash(*)']));
+    expect(settings.permissions.deny).toEqual(['Bash(rm *)']);
+  });
+
+  it('merges into existing settings.json without overwriting other keys', async () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(claudeDir, 'settings.json'),
+      JSON.stringify({ model: 'sonnet', permissions: { allow: ['Read(*)'] } }),
+    );
+
+    await updateClaudeMcpServers(
+      [{ name: 'anvil', url: 'http://localhost:8100' }],
+      tmpDir,
+    );
+
+    const raw = await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf-8');
+    const settings = JSON.parse(raw);
+
+    expect(settings.model).toBe('sonnet');
+    expect(settings.permissions.allow).toContain('Read(*)');
+    expect(settings.permissions.allow).toContain('mcp__*__*');
+  });
+
+  it('does not duplicate permissions in settings.json on repeated calls', async () => {
+    await updateClaudeMcpServers(
+      [{ name: 'anvil', url: 'http://localhost:8100' }],
+      tmpDir,
+    );
+    await updateClaudeMcpServers(
+      [{ name: 'anvil', url: 'http://localhost:8100' }],
+      tmpDir,
+    );
+
+    const raw = await fs.readFile(
+      path.join(tmpDir, '.claude', 'settings.json'),
+      'utf-8',
+    );
+    const settings = JSON.parse(raw);
+
+    const count = settings.permissions.allow.filter((x: string) => x === 'mcp__*__*').length;
+    expect(count).toBe(1);
+  });
+
+  it('skips creating settings.json when server list is empty', async () => {
+    await updateClaudeMcpServers([], tmpDir);
+
+    const exists = await fs.access(path.join(tmpDir, '.claude', 'settings.json'))
+      .then(() => true)
+      .catch(() => false);
+
+    expect(exists).toBe(false);
   });
 });
 
