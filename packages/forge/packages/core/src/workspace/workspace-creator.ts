@@ -269,7 +269,7 @@ export class WorkspaceCreator {
 
         if (!endpoint && serverConfig.required) {
           console.warn(
-            `[Forge] Warning: MCP endpoint '${serverName}' not configured in ~/.forge/config.yaml`,
+            `[Forge] Warning: MCP endpoint '${serverName}' not configured in ~/Horus/data/config/forge.yaml`,
           );
           continue;
         }

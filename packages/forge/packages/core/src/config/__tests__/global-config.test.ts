@@ -82,7 +82,7 @@ describe('Global Config', () => {
         },
         repos: {
           scan_paths: ['~/Repositories', '~/Projects'],
-          index_path: '~/.forge/repos.json',
+          index_path: '~/Horus/data/config/repos.json',
         },
       };
       const config = GlobalConfigSchema.parse(raw);
@@ -107,7 +107,7 @@ describe('Global Config', () => {
       expect(config.workspace.retention_days).toBe(30);
       expect(config.mcp_endpoints).toEqual({});
       expect(config.repos.scan_paths).toEqual([]);
-      expect(config.repos.index_path).toBe('~/.forge/repos.json');
+      expect(config.repos.index_path).toBe('~/Horus/data/config/repos.json');
     });
 
     it('parses empty config with all defaults', () => {
@@ -118,7 +118,7 @@ describe('Global Config', () => {
       expect(config.workspace.retention_days).toBe(30);
       expect(config.mcp_endpoints).toEqual({});
       expect(config.repos.scan_paths).toEqual([]);
-      expect(config.repos.index_path).toBe('~/.forge/repos.json');
+      expect(config.repos.index_path).toBe('~/Horus/data/config/repos.json');
     });
 
     it('allows partial MCP endpoints', () => {
@@ -155,7 +155,7 @@ describe('Global Config', () => {
         },
         repos: {
           scan_paths: ['~/Repos', '~/Projects'],
-          index_path: '~/.forge/repos.json',
+          index_path: '~/Horus/data/config/repos.json',
         },
       }));
 
@@ -178,14 +178,14 @@ describe('Global Config', () => {
         },
         repos: {
           scan_paths: ['~/Repositories'],
-          index_path: '~/.forge/repos.json',
+          index_path: '~/Horus/data/config/repos.json',
         },
       }));
 
       const config = await loadGlobalConfig(configPath);
       expect(config.workspace.mount_path).toBe(path.join(os.homedir(), 'workspaces'));
       expect(config.repos.scan_paths[0]).toBe(path.join(os.homedir(), 'Repositories'));
-      expect(config.repos.index_path).toBe(path.join(os.homedir(), '.forge/repos.json'));
+      expect(config.repos.index_path).toBe(path.join(os.homedir(), 'Horus/data/config/repos.json'));
     });
 
     it('expands filesystem registry paths', async () => {
@@ -239,9 +239,9 @@ describe('Global Config', () => {
         registries: [
           { type: 'filesystem', name: 'local', path: '/some/path' },
         ],
-        workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/.forge/workspaces.json' },
+        workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/Horus/data/config/workspaces.json' },
         mcp_endpoints: {},
-        repos: { scan_paths: [], index_path: '~/.forge/repos.json' },
+        repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
       }, nestedPath);
 
       const config = await loadGlobalConfig(nestedPath);
@@ -254,7 +254,7 @@ describe('Global Config', () => {
         registries: [],
         workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30 },
         mcp_endpoints: {},
-        repos: { scan_paths: ['~/Repos'], index_path: '~/.forge/repos.json' },
+        repos: { scan_paths: ['~/Repos'], index_path: '~/Horus/data/config/repos.json' },
       });
 
       await saveGlobalConfig(configObj, configPath);
@@ -325,9 +325,9 @@ describe('Global Config', () => {
       // Set up initial config
       await saveGlobalConfig({
         registries: [],
-        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 60, store_path: '~/.forge/workspaces.json' },
+        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 60, store_path: '~/Horus/data/config/workspaces.json' },
         mcp_endpoints: {},
-        repos: { scan_paths: [], index_path: '~/.forge/repos.json' },
+        repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
       }, configPath);
 
       // Add a registry
@@ -377,9 +377,9 @@ describe('Global Config', () => {
         registries: [
           { type: 'filesystem', name: 'local', path: '/registry' },
         ],
-        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/.forge/workspaces.json' },
+        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/Horus/data/config/workspaces.json' },
         mcp_endpoints: {},
-        repos: { scan_paths: [], index_path: '~/.forge/repos.json' },
+        repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
       }, configPath);
 
       const config = await removeGlobalRegistry('local', configPath);

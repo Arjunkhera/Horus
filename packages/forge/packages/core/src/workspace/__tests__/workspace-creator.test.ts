@@ -210,19 +210,6 @@ describe('WorkspaceCreator — workspace.env includes FORGE_WORKSPACE_PATH vars'
   });
 
   it('emits FORGE_WORKSPACE_PATH and FORGE_HOST_WORKSPACE_PATH in workspace.env', async () => {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const runGit = promisify(execFile);
-
-    const localRepoDir = path.join(tmpDir, 'repos', 'Anvil');
-    await fs.mkdir(localRepoDir, { recursive: true });
-    await runGit('git', ['init', localRepoDir]);
-    await runGit('git', ['-C', localRepoDir, 'checkout', '-b', 'main']);
-    await fs.writeFile(path.join(localRepoDir, 'README.md'), '# Anvil');
-    await runGit('git', ['-C', localRepoDir, 'add', '.']);
-    await runGit('git', ['-C', localRepoDir, '-c', 'user.name=Test', '-c', 'user.email=t@t.com',
-      'commit', '-m', 'init']);
-
     const mockForge = {
       resolve: vi.fn().mockResolvedValue({
         ref: { version: '1.0.0' },
@@ -250,7 +237,6 @@ describe('WorkspaceCreator — workspace.env includes FORGE_WORKSPACE_PATH vars'
     const creator = new WorkspaceCreator(mockForge as any);
     const record = await creator.create({
       configName: 'sdlc-default',
-      repos: ['Anvil'],
       mountPath,
     });
 
