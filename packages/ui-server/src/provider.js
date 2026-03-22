@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = process.env.HORUS_DATA_PATH ?? join(__dirname, '../../..', '.horus-data')
+const DATA_DIR = process.env.HORUS_DATA_PATH ?? join(__dirname, '../../..', 'data')
 const UI_PREFS = join(DATA_DIR, '_system/ui/preferences.json')
 
 async function loadApiKey() {

@@ -88,7 +88,7 @@ app.use('/api/forge', createProxyMiddleware({ ...proxyOpts(FORGE_URL), pathRewri
 
 // ─── Config (persistence in _system/ui/) ──────────────────────────────────────
 
-const DATA_DIR  = process.env.HORUS_DATA_PATH ?? join(__dirname, '../../..', '.horus-data')
+const DATA_DIR  = process.env.HORUS_DATA_PATH ?? join(__dirname, '../../..', 'data')
 const UI_PREFS  = join(DATA_DIR, '_system/ui/preferences.json')
 const UI_DASH   = join(DATA_DIR, '_system/ui/dashboards.json')
 const SVCCONFIG = join(DATA_DIR, '_system/ui/services.json')

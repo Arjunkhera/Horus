@@ -110,12 +110,12 @@ describe('repoClone path selection', () => {
   it('handles macOS-style paths (native install)', () => {
     const result = resolveClonePath({
       repoName,
-      workspacePath: '/Users/arkhera/Horus/horus-data/workspaces/sdlc-default-ws-ed71cd7b',
+      workspacePath: '/Users/arkhera/Horus/data/workspaces/sdlc-default-ws-ed71cd7b',
       workspaceRoot: '/Users/arkhera',
-      mountPath: '/Users/arkhera/Horus/horus-data/workspaces',
+      mountPath: '/Users/arkhera/Horus/data/workspaces',
     });
     expect(result).toBe(
-      '/Users/arkhera/Horus/horus-data/workspaces/sdlc-default-ws-ed71cd7b/my-repo',
+      '/Users/arkhera/Horus/data/workspaces/sdlc-default-ws-ed71cd7b/my-repo',
     );
   });
 

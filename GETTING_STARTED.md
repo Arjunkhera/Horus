@@ -18,10 +18,10 @@ Create a directory where Horus will store cloned repositories and workspace data
 
 ```bash
 # Create the data directory
-mkdir -p "$HOME/horus-data"
+mkdir -p "$HOME/Horus/data"
 
 # Export the path (or add to ~/.bashrc or ~/.zshrc for persistence)
-export HORUS_DATA_PATH="$HOME/horus-data"
+export HORUS_DATA_PATH="$HOME/Horus/data"
 ```
 
 Then set the required environment variables in `.env` or as exports:
@@ -39,7 +39,7 @@ cp .env.example .env
 Or export them before running `docker-compose`:
 
 ```bash
-export HORUS_DATA_PATH="$HOME/horus-data"
+export HORUS_DATA_PATH="$HOME/Horus/data"
 export ANVIL_REPO_URL="https://github.com/youruser/your-notes-repo"
 export GITHUB_TOKEN="your_token_if_needed"
 ```
