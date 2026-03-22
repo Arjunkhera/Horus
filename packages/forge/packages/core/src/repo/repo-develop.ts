@@ -431,10 +431,10 @@ export async function repoDevelop(
     branchPattern: effectiveWorkflow.branchPattern,
     commitFormat: effectiveWorkflow.commitFormat,
     confirmedAt: ('confirmedAt' in effectiveWorkflow)
-      ? effectiveWorkflow.confirmedAt
+      ? (effectiveWorkflow as RepoIndexWorkflow).confirmedAt
       : new Date().toISOString(),
     confirmedBy: ('confirmedBy' in effectiveWorkflow)
-      ? effectiveWorkflow.confirmedBy
+      ? (effectiveWorkflow as RepoIndexWorkflow).confirmedBy
       : 'user',
   };
   await installEnforcementHooks(sessionPath, workflowForHooks, repoName);
