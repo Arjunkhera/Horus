@@ -8,12 +8,14 @@ import { expandPath } from './path-utils.js';
 
 /**
  * Default location for the global Forge configuration.
+ * Config lives under ~/Horus/data/config/ alongside other Horus data.
+ * Legacy path (~/.forge/config.yaml) is auto-migrated by the entrypoint on first run.
  */
-export const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.forge');
-export const GLOBAL_CONFIG_PATH = path.join(GLOBAL_CONFIG_DIR, 'config.yaml');
+export const GLOBAL_CONFIG_DIR = path.join(os.homedir(), 'Horus', 'data', 'config');
+export const GLOBAL_CONFIG_PATH = path.join(GLOBAL_CONFIG_DIR, 'forge.yaml');
 
 /**
- * Load the global Forge configuration from ~/.forge/config.yaml.
+ * Load the global Forge configuration from ~/Horus/data/config/forge.yaml.
  * Returns an empty config (no registries) if the file doesn't exist.
  * Expands all tilde paths to absolute paths.
  *
@@ -61,8 +63,8 @@ export async function loadGlobalConfig(
 }
 
 /**
- * Save a global config to ~/.forge/config.yaml.
- * Creates the ~/.forge directory if it doesn't exist.
+ * Save a global config to ~/Horus/data/config/forge.yaml.
+ * Creates the config directory if it doesn't exist.
  * Does NOT expand paths — stores them as-is (tilde format is fine).
  *
  * @param config - The global config to write (can be partial, will be validated).

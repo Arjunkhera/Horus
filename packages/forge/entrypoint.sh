@@ -7,7 +7,7 @@ REGISTRY_PATH="${FORGE_REGISTRY_PATH:-/data/registry}"
 WORKSPACES_PATH="${FORGE_WORKSPACES_PATH:-/data/workspaces}"
 ANVIL_URL="${FORGE_ANVIL_URL:-http://anvil:8100}"
 VAULT_URL="${FORGE_VAULT_URL:-http://vault:8000}"
-CONFIG_DIR="${HOME}/.forge"
+CONFIG_DIR="${FORGE_CONFIG_PATH:-/data/config}"
 FORGE_REGISTRY_REPO_URL="${FORGE_REGISTRY_REPO_URL:-}"
 FORGE_SYNC_INTERVAL="${FORGE_SYNC_INTERVAL:-300}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
@@ -52,12 +52,27 @@ shutdown() {
 }
 trap shutdown SIGTERM SIGINT
 
-# Step 1: Ensure config directory exists
+# Step 1: Ensure config directory and new data directories exist
 mkdir -p "${CONFIG_DIR}"
+mkdir -p "${WORKSPACES_PATH}"
+# Create new managed data directories (repos pool, sessions, test environments)
+mkdir -p "$(dirname "${WORKSPACES_PATH}")/repos"
+mkdir -p "$(dirname "${WORKSPACES_PATH}")/sessions"
+mkdir -p "$(dirname "${WORKSPACES_PATH}")/test-env"
 
-# Step 2: Write ~/.forge/config.yaml from environment variables.
+# Step 2: One-time auto-migration from legacy ~/.forge/ if new config doesn't exist yet.
+# Copies repos.json and workspaces.json from the old location to the new config dir.
+LEGACY_FORGE_DIR="${HOME}/.forge"
+if [ -d "${LEGACY_FORGE_DIR}" ] && [ ! -f "${CONFIG_DIR}/forge.yaml" ]; then
+  log "Migrating legacy Forge config from ${LEGACY_FORGE_DIR} to ${CONFIG_DIR}..."
+  [ -f "${LEGACY_FORGE_DIR}/repos.json" ] && cp "${LEGACY_FORGE_DIR}/repos.json" "${CONFIG_DIR}/repos.json" && log "  Migrated repos.json"
+  [ -f "${LEGACY_FORGE_DIR}/workspaces.json" ] && cp "${LEGACY_FORGE_DIR}/workspaces.json" "${CONFIG_DIR}/workspaces.json" && log "  Migrated workspaces.json"
+  log "Migration complete. Old ~/.forge/ directory preserved for safety."
+fi
+
+# Step 3: Write ~/Horus/data/config/forge.yaml from environment variables.
 # This runs every startup so env var overrides always win (CLI > env > config > defaults).
-log "Writing Forge global config to ${CONFIG_DIR}/config.yaml..."
+log "Writing Forge global config to ${CONFIG_DIR}/forge.yaml..."
 
 # Build optional host_endpoints block only when env vars are provided
 HOST_ENDPOINTS_BLOCK=""
@@ -93,7 +108,7 @@ HOST_REPOS_PATH_LINE=""
 [ -n "$FORGE_HOST_REPOS_PATH" ] && HOST_REPOS_PATH_LINE="
   host_repos_path: ${FORGE_HOST_REPOS_PATH}"
 
-cat > "${CONFIG_DIR}/config.yaml" << EOF
+cat > "${CONFIG_DIR}/forge.yaml" << EOF
 registries:
   - type: filesystem
     name: default
@@ -103,7 +118,7 @@ workspace:
   mount_path: ${WORKSPACES_PATH}
   default_config: sdlc-default
   retention_days: 30
-  store_path: ${WORKSPACES_PATH}/workspaces.json${HOST_WORKSPACES_LINE}
+  store_path: ${CONFIG_DIR}/workspaces.json${HOST_WORKSPACES_LINE}
 
 mcp_endpoints:
   anvil:
@@ -118,9 +133,9 @@ repos:
   index_path: ${CONFIG_DIR}/repos.json${HOST_REPOS_PATH_LINE}
 EOF
 
-log "Config written. Registry: ${REGISTRY_PATH}, Anvil: ${ANVIL_URL}, Vault: ${VAULT_URL}"
+log "Config written to ${CONFIG_DIR}/forge.yaml. Registry: ${REGISTRY_PATH}, Anvil: ${ANVIL_URL}, Vault: ${VAULT_URL}"
 
-# Step 3: Clone registry repo if not already present
+# Step 4: Clone registry repo if not already present
 if [ -z "$FORGE_REGISTRY_REPO_URL" ] && [ ! -d "${REGISTRY_PATH}/.git" ]; then
   log_err "FORGE_REGISTRY_REPO_URL is not set and ${REGISTRY_PATH} has no .git directory. Cannot start."
   exit 1
@@ -140,16 +155,14 @@ if [ -n "$FORGE_REGISTRY_REPO_URL" ] && [ ! -d "${REGISTRY_PATH}/.git" ]; then
   log "Registry cloned successfully"
 fi
 
-# Step 4: Verify the registry path exists (volume should be mounted)
+# Step 5: Verify the registry path exists (volume should be mounted)
 if [ ! -d "${REGISTRY_PATH}" ]; then
   log_err "Registry path '${REGISTRY_PATH}' does not exist. Ensure the volume is mounted."
   exit 1
 fi
 
-# Step 5: Ensure workspaces directory exists
-mkdir -p "${WORKSPACES_PATH}"
-
 # Step 6: Start background pull daemon for registry
+# (workspaces dir already created in Step 1)
 if [ -d "${REGISTRY_PATH}/.git" ]; then
   log "Starting registry pull daemon (interval: ${FORGE_SYNC_INTERVAL}s)..."
   (

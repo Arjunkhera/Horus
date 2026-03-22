@@ -104,7 +104,7 @@ export interface GlobalPluginInfo {
  * const report = await forge.install();
  */
 export interface ForgeCoreOptions {
-  /** Override the global config path (default: ~/.forge/config.yaml). Useful for testing. */
+  /** Override the global config path (default: ~/Horus/data/config/forge.yaml). Useful for testing. */
   globalConfigPath?: string;
 }
 
@@ -634,7 +634,7 @@ export class ForgeCore {
    * 2. Emits skills to ~/.claude/skills/ using GlobalClaudeCodeStrategy
    * 3. Reads plugin's resources/rules/global-rules.md
    * 4. Upserts a managed section in ~/.claude/CLAUDE.md
-   * 5. Tracks installed files in ~/.forge/config.yaml global_plugins
+   * 5. Tracks installed files in ~/Horus/data/config/forge.yaml global_plugins
    */
   async installGlobal(ref: string): Promise<GlobalInstallReport> {
     const parsed = this.parseRef(ref);
@@ -822,7 +822,7 @@ export class ForgeCore {
       // No workspace config — fall through to global config below
     }
 
-    // Load global config (~/.forge/config.yaml) for fallback registries
+    // Load global config (~/Horus/data/config/forge.yaml) for fallback registries
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
 
     if (!config) {

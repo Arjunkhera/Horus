@@ -173,7 +173,7 @@ services:
   # ── Forge ──────────────────────────────────────────────────────────────────
   # Workspace manager and package registry MCP server.
   # Waits for Anvil and Vault to be healthy before starting — its entrypoint
-  # writes ~/.forge/config.yaml with the Anvil and Vault endpoint URLs.
+  # writes HORUS_DATA_PATH/config/forge.yaml with the Anvil and Vault endpoint URLs.
   forge:
     build:
       context: packages/forge
@@ -181,10 +181,18 @@ services:
     ports:
       - "${FORGE_PORT:-8200}:8200"
     volumes:
+      # Forge config: repos.json, workspaces.json, forge.yaml — persists across restarts
+      - ${HORUS_DATA_PATH}/config:/data/config:rw
       # Forge Registry — read/write; Forge clones on first boot if empty
       - ${HORUS_DATA_PATH}/registry:/data/registry:rw
       # Workspaces: Forge creates workspace directories here
       - ${HORUS_DATA_PATH}/workspaces:/data/workspaces:rw
+      # Managed clone pool: reference clones created by forge_repo_clone
+      - ${HORUS_DATA_PATH}/repos:/data/horus-repos:rw
+      # Active sessions / worktrees
+      - ${HORUS_DATA_PATH}/sessions:/data/sessions:rw
+      # Test environment slots
+      - ${HORUS_DATA_PATH}/test-env:/data/test-env:rw
       # Local repos — read-only; lets Forge scan host repos for the index
       - ${HOST_REPOS_PATH}:/data/repos:ro
     environment:
@@ -192,10 +200,12 @@ services:
       - FORGE_HOST=0.0.0.0
       - FORGE_REGISTRY_PATH=/data/registry
       - FORGE_WORKSPACES_PATH=/data/workspaces
+      # Config directory: forge.yaml, repos.json, workspaces.json
+      - FORGE_CONFIG_PATH=/data/config
       - FORGE_REGISTRY_REPO_URL=${FORGE_REGISTRY_REPO_URL:-}
       - FORGE_SYNC_INTERVAL=${FORGE_SYNC_INTERVAL:-300}
       # These are the Docker-internal service URLs — Forge writes them into
-      # ~/.forge/config.yaml and into every workspace's MCP config it creates
+      # HORUS_DATA_PATH/config/forge.yaml and into every workspace's MCP config it creates
       - FORGE_ANVIL_URL=http://anvil:8100
       - FORGE_VAULT_URL=http://vault-mcp:8300
       # Host-facing URLs and paths — used when emitting .claude/settings.local.json
