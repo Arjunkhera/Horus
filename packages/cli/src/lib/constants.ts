@@ -48,7 +48,6 @@ export const DEFAULT_REPOS = {
 export const DEFAULT_DATA_DIR = join(homedir(), 'Horus', 'data');
 
 // ── Service names (as they appear in docker-compose.yml) ────────────────────
-// NOTE: QMD daemon has been removed — replaced by Typesense for search.
 export const SERVICES = [
   'anvil',
   'vault-router',  // replaces 'vault'

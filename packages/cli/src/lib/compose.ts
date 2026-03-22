@@ -25,8 +25,6 @@ function applyPodmanUserOverride(compose: string): string {
 
 // ── Static service definitions ───────────────────────────────────────────────
 
-// NOTE: QMD daemon has been removed — replaced by Typesense for search.
-
 const ANVIL_SERVICE = `\
   # ── Anvil ──────────────────────────────────────────────────────────────────
   # Notes system and MCP server. Indexes markdown files from the Notes repo.

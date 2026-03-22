@@ -13,7 +13,6 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Default timeout for upstream vault requests (seconds).
-# Vault's own QMD fallback uses 8s; give the router a bit more headroom.
 UPSTREAM_TIMEOUT = 12.0
 
 
