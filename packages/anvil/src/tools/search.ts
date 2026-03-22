@@ -12,9 +12,9 @@ import { searchFts, queryNotes, combinedSearch, buildQuerySql } from '../index/f
 /**
  * Resolve semantic search results to database note IDs.
  *
- * QMD returns file paths as `noteId` (via normalizeResults). We look them up
+ * Search returns file paths as `noteId` (via normalizeResults). We look them up
  * in `notes.file_path`. Handles both relative paths (stored in DB) and absolute
- * paths (QMD may return absolute) by stripping the vault prefix when needed.
+ * paths by stripping the vault prefix when needed.
  *
  * Results that cannot be resolved are dropped.
  */
@@ -41,7 +41,7 @@ function resolveSemanticNoteIds(
       continue;
     }
 
-    // 2. Try stripping vault prefix (covers absolute paths from QMD)
+    // 2. Try stripping vault prefix (covers absolute paths)
     if (r.noteId.startsWith(vaultPrefix)) {
       const relative = r.noteId.slice(vaultPrefix.length);
       row = db.getOne<{ note_id: string }>(
@@ -54,7 +54,7 @@ function resolveSemanticNoteIds(
       }
     }
 
-    // 3. Try as a UUID directly (in case QMD was somehow given UUIDs as docids)
+    // 3. Try as a UUID directly
     row = db.getOne<{ note_id: string }>(
       'SELECT note_id FROM notes WHERE note_id = ?',
       [r.noteId]

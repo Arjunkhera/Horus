@@ -2,7 +2,7 @@
 FastAPI application entry point for Vault Knowledge Service.
 
 Sets up the REST API with:
-- QMD adapter initialization
+- FTS5 search engine initialization
 - Collection setup (shared + workspace)
 - Schema loader initialization
 - Health and status endpoints
@@ -24,9 +24,7 @@ from fastapi.responses import JSONResponse
 import os
 
 from .config.settings import load_settings
-from .layer1.qmd_adapter import QMDAdapter
 from .layer1.fts_engine import FtsSearchEngine
-from .layer1.fallback_store import FallbackSearchStore
 from .layer2.schema import SchemaLoader
 from .api.routes import router, get_store, get_schema_loader, get_settings
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
@@ -47,7 +45,7 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for FastAPI app.
 
     Handles startup and shutdown:
-    - Startup: Initialize QMD adapter, setup collections, start sync daemon
+    - Startup: Initialize FTS5 search engine, setup collections, start sync daemon
     - Shutdown: Cleanup resources
     """
     # ============================================================================
@@ -61,12 +59,8 @@ async def lifespan(app: FastAPI):
     logger.info("Vault configuration resolved:")
     settings.log_sources(sources)
 
-    # Initialize QMD adapter (primary search engine)
-    logger.info("Initializing QMD adapter...")
-    qmd_adapter = QMDAdapter(index_name=settings.qmd_index_name)
-
-    # Initialize FTS5 fallback engine
-    fts_engine = FtsSearchEngine(
+    # Initialize FTS5 search engine
+    store = FtsSearchEngine(
         db_path=os.path.join(settings.workspace_path, ".vault", "fts5_index.db"),
         collection_paths={
             "shared": settings.knowledge_repo_path,
@@ -74,29 +68,23 @@ async def lifespan(app: FastAPI):
         },
     )
 
-    # Wrap both in a fallback store
-    store = FallbackSearchStore(qmd_adapter, fts_engine)
-
     # Setup collections (idempotent)
-    logger.info("Setting up QMD collections...")
-    try:
-        store.ensure_collections(
-            shared_path=settings.knowledge_repo_path,
-            workspace_path=settings.workspace_path
-        )
-        logger.info("Collections setup complete")
-    except Exception as e:
-        logger.warning("QMD collection setup failed (non-fatal, FTS5 fallback available): %s", e)
+    logger.info("Setting up collections...")
+    store.ensure_collections(
+        shared_path=settings.knowledge_repo_path,
+        workspace_path=settings.workspace_path
+    )
+    logger.info("Collections setup complete")
 
-    # Build initial FTS5 index so fallback is ready immediately
-    logger.info("Building FTS5 fallback index...")
+    # Build initial FTS5 index
+    logger.info("Building FTS5 index...")
     try:
-        fts_engine.reindex()
-        logger.info("FTS5 fallback index ready")
+        store.reindex()
+        logger.info("FTS5 index ready")
     except Exception as e:
         logger.warning("FTS5 index build failed (non-fatal): %s", e)
 
-    # Store fallback store in app state for dependency injection
+    # Store search engine in app state for dependency injection
     app.state.store = store
 
     # Store settings in app state for dependency injection (write-path operations)
@@ -227,8 +215,8 @@ app.include_router(router, prefix="", tags=["knowledge"])
 @app.get("/health")
 async def health_check():
     """
-    Lightweight health check — no QMD subprocess, no I/O.
-    Use GET /status for full QMD index diagnostics.
+    Lightweight health check — no I/O.
+    Use GET /status for full index diagnostics.
     """
     return {"status": "ok", "service": "knowledge-service", "version": "0.1.0"}
 
@@ -236,7 +224,7 @@ async def health_check():
 @app.get("/status")
 async def full_status(request: Request):
     """
-    Full QMD index status (slow — spawns qmd subprocess).
+    Full index status.
     Separated from /health so liveness probes stay fast.
     """
     try:

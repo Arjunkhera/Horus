@@ -27,7 +27,6 @@ class VaultSettings:
 
     knowledge_repo_path: str = "/data/knowledge-repo"
     workspace_path: str = "/workspace"
-    qmd_index_name: str = "knowledge"
     sync_interval: int = 300
     port: int = 8000
     host: str = "0.0.0.0"
@@ -41,7 +40,6 @@ class VaultSettings:
         for field_name in [
             "knowledge_repo_path",
             "workspace_path",
-            "qmd_index_name",
             "sync_interval",
             "port",
             "host",
@@ -77,7 +75,6 @@ def load_settings(
     sources: dict[str, str] = {
         "knowledge_repo_path": "default",
         "workspace_path": "default",
-        "qmd_index_name": "default",
         "sync_interval": "default",
         "port": "default",
         "host": "default",
@@ -106,7 +103,6 @@ def load_settings(
                 field_map: dict[str, type[Any]] = {
                     "knowledge_repo_path": str,
                     "workspace_path": str,
-                    "qmd_index_name": str,
                     "sync_interval": int,
                     "port": int,
                     "host": str,
@@ -148,7 +144,6 @@ def load_settings(
     env_map: dict[str, tuple[str, type[Any]]] = {
         "KNOWLEDGE_REPO_PATH": ("knowledge_repo_path", str),
         "WORKSPACE_PATH": ("workspace_path", str),
-        "QMD_INDEX_NAME": ("qmd_index_name", str),
         "SYNC_INTERVAL": ("sync_interval", int),
         "VAULT_PORT": ("port", int),
         "VAULT_HOST": ("host", str),
