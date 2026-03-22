@@ -40,6 +40,15 @@ export async function loadGlobalConfig(
     if (config.workspace.store_path) {
       config.workspace.store_path = expandPath(config.workspace.store_path);
     }
+    if (config.workspace.sessions_path) {
+      config.workspace.sessions_path = expandPath(config.workspace.sessions_path);
+    }
+    if (config.workspace.managed_repos_path) {
+      config.workspace.managed_repos_path = expandPath(config.workspace.managed_repos_path);
+    }
+    if (config.workspace.sessions_root) {
+      config.workspace.sessions_root = expandPath(config.workspace.sessions_root);
+    }
     if (config.repos.index_path) {
       config.repos.index_path = expandPath(config.repos.index_path);
     }

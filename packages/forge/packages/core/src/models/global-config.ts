@@ -22,6 +22,30 @@ export const WorkspaceSettingsSchema = z.object({
    * survives container restarts (e.g., /data/config/workspaces.json).
    */
   store_path: z.string().default('~/Horus/data/config/workspaces.json'),
+  /**
+   * Path to the code session store file (sessions.json).
+   * Tracks active forge_develop sessions (one per work-item+agent).
+   */
+  sessions_path: z.string().default('~/Horus/data/config/sessions.json'),
+  /**
+   * Root directory for managed repo pool (tier-2 in 3-tier resolution).
+   * When a repo is not found in scan_paths, Forge clones it here as a
+   * bare/reference clone before creating a worktree.
+   * Defaults to ~/Horus/data/repos/.
+   */
+  managed_repos_path: z.string().default('~/Horus/data/repos'),
+  /**
+   * Root directory for code sessions (git worktrees).
+   * Each forge_develop call creates a worktree under this path.
+   * Defaults to ~/Horus/data/sessions/.
+   */
+  sessions_root: z.string().default('~/Horus/data/sessions'),
+  /**
+   * Maximum number of active sessions before forge_develop emits a warning.
+   * Does NOT block session creation — only warns and suggests cleanup.
+   * Defaults to 20.
+   */
+  max_sessions: z.number().int().min(1).default(20),
   host_workspaces_path: z.string().optional(),
 });
 

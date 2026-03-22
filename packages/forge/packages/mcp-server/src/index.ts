@@ -8,7 +8,7 @@ import {
   type CallToolRequest,
   type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ForgeCore, type RepoIndexEntry } from '@forge/core';
+import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions } from '@forge/core';
 import * as http from 'node:http';
 
 const startTime = Date.now();
@@ -144,7 +144,7 @@ const TOOLS = [
   {
     name: 'forge_repo_workflow',
     description:
-      'Resolve the git workflow configuration for a repository. Checks Vault repo profile first (team-wide conventions), then auto-detects from local git remotes, then falls back to defaults. Returns strategy (owner|fork|direct), default branch, PR target, and hosting info.',
+      'Resolve the git workflow configuration for a repository. Resolution order: (1) confirmed workflow in repo index, (2) Vault repo profile, (3) auto-detect from git remotes. When needsConfirmation=true is returned, present autoDetected values to the user, then call again with the confirmed workflow parameter to save. Returns strategy (owner|fork|contributor), default branch, PR target, and hosting info.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -152,39 +152,99 @@ const TOOLS = [
           type: 'string',
           description: 'Repository name to resolve workflow for',
         },
+        workflow: {
+          type: 'object',
+          description: 'Confirmed workflow to save (only pass when user has confirmed the auto-detected values). Omit on first call.',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['owner', 'fork', 'contributor'],
+              description: 'Workflow type: owner=full access, fork=PR from fork, contributor=PR from branch',
+            },
+            upstream: { type: 'string', description: 'Upstream remote URL (fork workflow only)' },
+            fork: { type: 'string', description: 'Fork remote URL (fork workflow only)' },
+            pushTo: { type: 'string', description: 'Remote to push to (usually "origin")' },
+            prTarget: {
+              type: 'object',
+              properties: {
+                repo: { type: 'string', description: 'Target repo slug, e.g. "Org/Repo"' },
+                branch: { type: 'string', description: 'Target branch, e.g. "main"' },
+              },
+              required: ['repo', 'branch'],
+            },
+            branchPattern: { type: 'string', description: 'Branch naming convention, e.g. "{type}/{id}-{slug}"' },
+            commitFormat: { type: 'string', description: 'Commit message format, e.g. "conventional"' },
+            confirmedBy: {
+              type: 'string',
+              enum: ['user', 'auto'],
+              description: '"user" if user explicitly confirmed, "auto" if agent accepted without edits',
+            },
+            remotesSnapshot: {
+              type: 'object',
+              description: 'Current remote name→URL map (pass through from autoDetected.remotesSnapshot)',
+            },
+          },
+          required: ['type', 'pushTo', 'prTarget'],
+        },
       },
       required: ['name'],
     },
   },
   {
-    name: 'forge_repo_clone',
-    description: 'Create an isolated working copy (reference clone) of a repository. The clone gets its own feature branch, independent of the original. Use this to get a safe working directory before making code changes to any repo.',
+    name: 'forge_develop',
+    description:
+      'Start or resume a code session for a work item on a repository. Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/. ' +
+      'Implements 3-tier repo resolution: (1) local repo index, (2) managed pool, (3) error with guidance. ' +
+      'Returns "needs_workflow_confirmation" when the repo has no saved workflow configuration — call again with the workflow parameter to confirm. ' +
+      'If a session already exists for this workItem+repo it is resumed. A second concurrent agent gets a separate slot ("-2" suffix).',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        repoName: {
+        repo: {
           type: 'string',
-          description: 'Repository name from the local index (use forge_repo_list to discover)',
+          description: 'Repository name (from forge_repo_list)',
         },
-        branchName: {
+        workItem: {
           type: 'string',
-          description: 'Feature branch to create in the clone (optional). If omitted, stays on the default branch.',
+          description: 'Work item ID or slug — used to namespace the session path and for resumption',
         },
-        destPath: {
+        branch: {
           type: 'string',
-          description: 'Override destination path for the clone (optional). Defaults to <mountPath>/<repoName>-clone-<id>.',
+          description: 'Feature branch name (optional — auto-generated from workItem if omitted)',
         },
-        workspacePath: {
-          type: 'string',
-          description: 'Workspace directory to clone into. Pass $FORGE_WORKSPACE_PATH from workspace.env (e.g. /data/workspaces/your-workspace-id). Required unless destPath is explicitly provided — omitting both causes the clone to land at the global mount root instead of inside your workspace.',
+        workflow: {
+          type: 'object',
+          description: 'Workflow configuration (required on first call for repos without saved workflow, or to override saved workflow)',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['owner', 'fork', 'contributor'],
+              description: 'owner = push directly to repo; fork = PR from fork; contributor = PR from branch',
+            },
+            upstream: { type: 'string', description: 'Upstream remote URL (fork workflow only)' },
+            fork: { type: 'string', description: 'Fork remote URL (fork workflow only)' },
+            pushTo: { type: 'string', description: 'Remote to push feature branches to (e.g. "origin")' },
+            prTarget: {
+              type: 'object',
+              description: 'Where to target pull requests',
+              properties: {
+                repo: { type: 'string', description: 'Target repo slug, e.g. "MyOrg/MyProject"' },
+                branch: { type: 'string', description: 'Target branch, e.g. "main"' },
+              },
+              required: ['repo', 'branch'],
+            },
+            branchPattern: { type: 'string', description: 'Branch naming pattern, e.g. "{type}/{id}-{slug}"' },
+            commitFormat: { type: 'string', description: 'Commit message format, e.g. "conventional"' },
+          },
+          required: ['type', 'pushTo', 'prTarget'],
         },
       },
-      required: ['repoName'],
+      required: ['repo', 'workItem'],
     },
   },
   {
     name: 'forge_workspace_create',
-    description: 'Create a new workspace from a workspace config. Installs plugins, creates git worktrees, and emits MCP configs and environment variables.',
+    description: 'Create a new workspace from a workspace config. Installs plugins/skills, emits MCP configs and environment variables. Context-only — does not clone repositories. Use forge_develop to create isolated code sessions for implementation work.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -210,7 +270,7 @@ const TOOLS = [
   },
   {
     name: 'forge_workspace_delete',
-    description: 'Delete a workspace by ID. Removes git worktrees and workspace folder from disk.',
+    description: 'Delete a workspace by ID. Removes workspace folder from disk.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -231,46 +291,54 @@ const TOOLS = [
       required: ['id'],
     },
   },
+  {
+    name: 'forge_session_list',
+    description:
+      'List active code sessions (git worktrees created by forge_develop). ' +
+      'Returns all sessions with metadata including sessionPath, repo, workItem, branch, and timestamps. ' +
+      'Optionally filter by repo name or workItem ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Filter to sessions for a specific repository name (optional)',
+        },
+        workItem: {
+          type: 'string',
+          description: 'Filter to sessions for a specific work item ID (optional)',
+        },
+      },
+    },
+  },
+  {
+    name: 'forge_session_cleanup',
+    description:
+      'Clean up stale code sessions (git worktrees). ' +
+      'Runs git worktree remove + prune, removes the session directory, and removes the session record. ' +
+      'Specify at least one of: workItem (clean a specific session), olderThan (clean sessions older than threshold), ' +
+      'or auto (query Anvil for work item status and clean eligible sessions).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        workItem: {
+          type: 'string',
+          description: 'Work item ID — clean all sessions associated with this work item',
+        },
+        olderThan: {
+          type: 'string',
+          description: 'Age threshold — clean sessions older than this value. Format: <number><d|h|m>, e.g. "30d", "12h", "60m"',
+        },
+        auto: {
+          type: 'boolean',
+          description:
+            'Auto-cleanup mode: query Anvil for work item status of each session. ' +
+            'Cleans: done (7+ days ago) and cancelled. Skips: in_progress, in_review, not found.',
+        },
+      },
+    },
+  },
 ];
-
-// ─── Validation helpers ────────────────────────────────────────────────────
-
-/**
- * Validate forge_repo_clone arguments.
- *
- * Returns an error object if the call is invalid, null if valid.
- * Exported so tests can assert on the guard directly without invoking the full
- * MCP transport — this ensures a future refactor cannot accidentally drop the
- * validation without breaking the test suite.
- *
- * The recurring regression: callers omit workspacePath, causing clones to land
- * at the global mount root (/workspaces/<repo>) instead of the workspace
- * folder (/workspaces/<workspace-id>/<repo>). Without this guard the failure
- * is silent — the clone succeeds at the wrong path.
- */
-export function validateRepoCloneArgs(args: {
-  repoName?: string;
-  workspacePath?: string;
-  destPath?: string;
-}): { error: true; code: string; message: string; suggestion: string } | null {
-  if (!args.repoName) {
-    return {
-      error: true,
-      code: 'REPO_NAME_REQUIRED',
-      message: 'repoName is required.',
-      suggestion: 'Provide the repoName parameter.',
-    };
-  }
-  if (!args.workspacePath && !args.destPath) {
-    return {
-      error: true,
-      code: 'WORKSPACE_PATH_REQUIRED',
-      message: 'workspacePath is required when calling forge_repo_clone from a workspace session.',
-      suggestion: 'Pass workspacePath: $FORGE_WORKSPACE_PATH from workspace.env (e.g. /data/workspaces/your-workspace-id). Alternatively, provide an explicit destPath.',
-    };
-  }
-  return null;
-}
 
 // ─── Tool handler ──────────────────────────────────────────────────────────
 
@@ -438,47 +506,110 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_repo_workflow': {
-          const { name } = (args ?? {}) as { name: string };
+          const { name, workflow: confirmedWorkflow } = (args ?? {}) as {
+            name: string;
+            workflow?: (Omit<AutoDetectedWorkflow, 'remotesSnapshot'> & {
+              confirmedBy?: 'user' | 'auto';
+              remotesSnapshot?: Record<string, string>;
+            });
+          };
           if (!name) {
             return {
               content: [{ type: 'text', text: JSON.stringify({ error: true, message: 'name is required' }) }],
               isError: true,
             };
           }
-          const workflow = await forge.repoWorkflow(name);
+
+          // If a confirmed workflow was passed, save it and return the saved result
+          if (confirmedWorkflow) {
+            const saved = await forge.repoWorkflowSave(
+              name,
+              {
+                type: confirmedWorkflow.type,
+                upstream: confirmedWorkflow.upstream,
+                fork: confirmedWorkflow.fork,
+                pushTo: confirmedWorkflow.pushTo,
+                prTarget: confirmedWorkflow.prTarget,
+                branchPattern: confirmedWorkflow.branchPattern,
+                commitFormat: confirmedWorkflow.commitFormat,
+                remotesSnapshot: confirmedWorkflow.remotesSnapshot,
+              },
+              confirmedWorkflow.confirmedBy ?? 'user',
+            );
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  saved: true,
+                  repoName: name,
+                  workflow: saved,
+                  message: `Workflow confirmed and saved for '${name}'.`,
+                }, null, 2),
+              }],
+            };
+          }
+
+          // Otherwise resolve and return (may include needsConfirmation)
+          const result = await forge.repoWorkflow(name);
           return {
             content: [{
               type: 'text',
-              text: JSON.stringify(workflow, null, 2),
+              text: JSON.stringify(result, null, 2),
             }],
           };
         }
 
-        case 'forge_repo_clone': {
-          const { repoName, branchName, destPath, workspacePath } = (args ?? {}) as {
-            repoName: string;
-            branchName?: string;
-            destPath?: string;
-            workspacePath?: string;
+        case 'forge_develop': {
+          const { repo, workItem, branch, workflow } = (args ?? {}) as {
+            repo: string;
+            workItem: string;
+            branch?: string;
+            workflow?: {
+              type: 'owner' | 'fork' | 'contributor';
+              upstream?: string;
+              fork?: string;
+              pushTo: string;
+              prTarget: { repo: string; branch: string };
+              branchPattern?: string;
+              commitFormat?: string;
+            };
           };
-          const validationError = validateRepoCloneArgs({ repoName, workspacePath, destPath });
-          if (validationError) {
+          if (!repo || !workItem) {
             return {
-              content: [{ type: 'text', text: JSON.stringify(validationError) }],
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'MISSING_REQUIRED_FIELDS',
+                message: 'repo and workItem are required.',
+              }) }],
               isError: true,
             };
           }
-          const cloneResult = await forge.repoClone({ repoName, branchName, destPath, workspacePath });
+          const developResult = await forge.repoDevelop({ repo, workItem, branch, workflow });
+          if (developResult.status === 'needs_workflow_confirmation') {
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(developResult, null, 2),
+              }],
+            };
+          }
+          const displayPath = developResult.hostSessionPath ?? developResult.sessionPath;
           return {
             content: [{
               type: 'text',
               text: JSON.stringify({
-                repoName: cloneResult.repoName,
-                clonePath: cloneResult.clonePath,
-                hostClonePath: cloneResult.hostClonePath,
-                branch: cloneResult.branch,
-                origin: cloneResult.origin,
-                message: `Clone created at ${cloneResult.hostClonePath} on branch '${cloneResult.branch}'. Origin remote: ${cloneResult.origin}. Work in this directory — it is isolated from the original repo.`,
+                status: developResult.status,
+                sessionId: developResult.sessionId,
+                sessionPath: displayPath,
+                branch: developResult.branch,
+                baseBranch: developResult.baseBranch,
+                repo: developResult.repo,
+                repoSource: developResult.repoSource,
+                workflow: developResult.workflow,
+                agentSlot: developResult.agentSlot,
+                message: developResult.status === 'resumed'
+                  ? `Session resumed at ${displayPath} on branch '${developResult.branch}'. Work in this directory.`
+                  : `Session created at ${displayPath} on branch '${developResult.branch}' (from ${developResult.baseBranch}). Work in this directory.`,
               }, null, 2),
             }],
           };
@@ -547,6 +678,43 @@ function buildServer(workspaceRoot: string): Server {
             };
           }
           return { content: [{ type: 'text', text: JSON.stringify(record, null, 2) }] };
+        }
+
+        case 'forge_session_list': {
+          const { repo, workItem } = (args ?? {}) as SessionListOptions;
+          const result = await forge.sessionList({ repo, workItem });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            }],
+          };
+        }
+
+        case 'forge_session_cleanup': {
+          const { workItem, olderThan, auto } = (args ?? {}) as SessionCleanupOptions;
+          if (!workItem && !olderThan && !auto) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'MISSING_REQUIRED_FIELDS',
+                message: 'At least one of workItem, olderThan, or auto must be specified.',
+              }) }],
+              isError: true,
+            };
+          }
+          const result = await forge.sessionCleanup({ workItem, olderThan, auto });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                cleaned: result.cleaned,
+                skipped: result.skipped,
+                errors: result.errors,
+                summary: `Cleaned ${result.cleaned.length} session(s), skipped ${result.skipped.length}, ${result.errors.length} warning(s)/error(s).`,
+              }, null, 2),
+            }],
+          };
         }
 
         default:

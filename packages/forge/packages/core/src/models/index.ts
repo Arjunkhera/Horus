@@ -84,11 +84,25 @@ export type {
 
 // Repo Index
 export {
+  RepoIndexWorkflowSchema,
   RepoIndexEntrySchema,
   RepoIndexSchema,
+  type RepoIndexWorkflow,
   type RepoIndexEntry,
   type RepoIndex,
 } from './repo-index.js';
+
+// Session
+export {
+  RepoSourceSchema,
+  SessionWorkflowSchema,
+  SessionRecordSchema,
+  SessionStoreSchema,
+  type RepoSource,
+  type SessionWorkflow,
+  type SessionRecord,
+  type SessionStore,
+} from './session.js';
 
 // Repo Workflow
 export {

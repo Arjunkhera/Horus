@@ -70,7 +70,7 @@ const global_config_js_1 = require("../../models/global-config.js");
                 },
                 repos: {
                     scan_paths: ['~/Repositories', '~/Projects'],
-                    index_path: '~/.forge/repos.json',
+                    index_path: '~/Horus/data/config/repos.json',
                 },
             };
             const config = global_config_js_1.GlobalConfigSchema.parse(raw);
@@ -94,7 +94,7 @@ const global_config_js_1 = require("../../models/global-config.js");
             (0, vitest_1.expect)(config.workspace.retention_days).toBe(30);
             (0, vitest_1.expect)(config.mcp_endpoints).toEqual({});
             (0, vitest_1.expect)(config.repos.scan_paths).toEqual([]);
-            (0, vitest_1.expect)(config.repos.index_path).toBe('~/.forge/repos.json');
+            (0, vitest_1.expect)(config.repos.index_path).toBe('~/Horus/data/config/repos.json');
         });
         (0, vitest_1.it)('parses empty config with all defaults', () => {
             const config = global_config_js_1.GlobalConfigSchema.parse({});
@@ -104,7 +104,7 @@ const global_config_js_1 = require("../../models/global-config.js");
             (0, vitest_1.expect)(config.workspace.retention_days).toBe(30);
             (0, vitest_1.expect)(config.mcp_endpoints).toEqual({});
             (0, vitest_1.expect)(config.repos.scan_paths).toEqual([]);
-            (0, vitest_1.expect)(config.repos.index_path).toBe('~/.forge/repos.json');
+            (0, vitest_1.expect)(config.repos.index_path).toBe('~/Horus/data/config/repos.json');
         });
         (0, vitest_1.it)('allows partial MCP endpoints', () => {
             const raw = {
@@ -138,7 +138,7 @@ const global_config_js_1 = require("../../models/global-config.js");
                 },
                 repos: {
                     scan_paths: ['~/Repos', '~/Projects'],
-                    index_path: '~/.forge/repos.json',
+                    index_path: '~/Horus/data/config/repos.json',
                 },
             }));
             const config = await (0, index_js_1.loadGlobalConfig)(configPath);
@@ -159,13 +159,13 @@ const global_config_js_1 = require("../../models/global-config.js");
                 },
                 repos: {
                     scan_paths: ['~/Repositories'],
-                    index_path: '~/.forge/repos.json',
+                    index_path: '~/Horus/data/config/repos.json',
                 },
             }));
             const config = await (0, index_js_1.loadGlobalConfig)(configPath);
             (0, vitest_1.expect)(config.workspace.mount_path).toBe(path_1.default.join(os_1.default.homedir(), 'workspaces'));
             (0, vitest_1.expect)(config.repos.scan_paths[0]).toBe(path_1.default.join(os_1.default.homedir(), 'Repositories'));
-            (0, vitest_1.expect)(config.repos.index_path).toBe(path_1.default.join(os_1.default.homedir(), '.forge/repos.json'));
+            (0, vitest_1.expect)(config.repos.index_path).toBe(path_1.default.join(os_1.default.homedir(), 'Horus/data/config/repos.json'));
         });
         (0, vitest_1.it)('expands filesystem registry paths', async () => {
             await fs_1.promises.writeFile(configPath, (0, yaml_1.stringify)({
@@ -212,9 +212,9 @@ const global_config_js_1 = require("../../models/global-config.js");
                 registries: [
                     { type: 'filesystem', name: 'local', path: '/some/path' },
                 ],
-                workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/.forge/workspaces.json' },
+                workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions', max_sessions: 20 },
                 mcp_endpoints: {},
-                repos: { scan_paths: [], index_path: '~/.forge/repos.json' },
+                repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
             }, nestedPath);
             const config = await (0, index_js_1.loadGlobalConfig)(nestedPath);
             (0, vitest_1.expect)(config.registries).toHaveLength(1);
@@ -225,7 +225,7 @@ const global_config_js_1 = require("../../models/global-config.js");
                 registries: [],
                 workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30 },
                 mcp_endpoints: {},
-                repos: { scan_paths: ['~/Repos'], index_path: '~/.forge/repos.json' },
+                repos: { scan_paths: ['~/Repos'], index_path: '~/Horus/data/config/repos.json' },
             });
             await (0, index_js_1.saveGlobalConfig)(configObj, configPath);
             const rawYaml = await fs_1.promises.readFile(configPath, 'utf-8');
@@ -279,9 +279,9 @@ const global_config_js_1 = require("../../models/global-config.js");
             // Set up initial config
             await (0, index_js_1.saveGlobalConfig)({
                 registries: [],
-                workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 60, store_path: '~/.forge/workspaces.json' },
+                workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 60, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions', max_sessions: 20 },
                 mcp_endpoints: {},
-                repos: { scan_paths: [], index_path: '~/.forge/repos.json' },
+                repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
             }, configPath);
             // Add a registry
             const config = await (0, index_js_1.addGlobalRegistry)({ type: 'filesystem', name: 'local', path: '/registry' }, configPath);
@@ -313,9 +313,9 @@ const global_config_js_1 = require("../../models/global-config.js");
                 registries: [
                     { type: 'filesystem', name: 'local', path: '/registry' },
                 ],
-                workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/.forge/workspaces.json' },
+                workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions', max_sessions: 20 },
                 mcp_endpoints: {},
-                repos: { scan_paths: [], index_path: '~/.forge/repos.json' },
+                repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
             }, configPath);
             const config = await (0, index_js_1.removeGlobalRegistry)('local', configPath);
             (0, vitest_1.expect)(config.registries).toHaveLength(0);

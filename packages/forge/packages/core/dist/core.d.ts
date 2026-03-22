@@ -4,6 +4,9 @@ import type { ForgeConfig } from './models/forge-config.js';
 import type { RepoIndex, RepoIndexEntry } from './models/repo-index.js';
 import type { RepoWorkflow } from './models/repo-workflow.js';
 import { type RepoCloneResult } from './repo/repo-clone.js';
+import { type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
+import { type SessionListOptions, type SessionListResult } from './session/session-list.js';
+import { type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
 /**
  * Translate a Docker-internal repo localPath to the equivalent host path.
  * Returns the entry unchanged if host_repos_path is not configured or
@@ -44,7 +47,7 @@ export interface GlobalPluginInfo {
  * const report = await forge.install();
  */
 export interface ForgeCoreOptions {
-    /** Override the global config path (default: ~/.forge/config.yaml). Useful for testing. */
+    /** Override the global config path (default: ~/Horus/data/config/forge.yaml). Useful for testing. */
     globalConfigPath?: string;
 }
 export declare class ForgeCore {
@@ -131,6 +134,36 @@ export declare class ForgeCore {
         workspacePath?: string;
     }): Promise<RepoCloneResult>;
     /**
+     * Start or resume a code session for a work item on a repository.
+     *
+     * Implements the 3-tier repo resolution strategy:
+     *   Tier 1 — repo index (user's local scan_paths)
+     *   Tier 2 — managed pool (~/Horus/data/repos/<name>/)
+     *   Tier 3 — not found → error with actionable message
+     *
+     * Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/.
+     * If a session already exists for the same workItem+repo, it is resumed.
+     * A second concurrent agent gets a separate slot with a "-2" suffix.
+     *
+     * Returns `needs_workflow_confirmation` when the repo has no saved workflow
+     * and no `workflow` parameter is provided.
+     */
+    repoDevelop(opts: RepoDevelopOptions): Promise<RepoDevelopResponse>;
+    /**
+     * List active code sessions, optionally filtered by repo and/or workItem.
+     */
+    sessionList(opts?: SessionListOptions): Promise<SessionListResult>;
+    /**
+     * Clean up sessions based on workItem, age threshold, or auto-policy.
+     *
+     * Auto-policy queries Anvil for work item status:
+     *   - done (7+ days ago) → eligible
+     *   - cancelled → eligible immediately
+     *   - in_progress / in_review → skip
+     *   - not found → warn, skip
+     */
+    sessionCleanup(opts: SessionCleanupOptions): Promise<SessionCleanupResult>;
+    /**
      * Create a new workspace from a workspace config artifact.
      * Resolves the workspace config, sets up folders, installs plugins,
      * creates git worktrees, and registers in metadata store.
@@ -184,7 +217,7 @@ export declare class ForgeCore {
      * 2. Emits skills to ~/.claude/skills/ using GlobalClaudeCodeStrategy
      * 3. Reads plugin's resources/rules/global-rules.md
      * 4. Upserts a managed section in ~/.claude/CLAUDE.md
-     * 5. Tracks installed files in ~/.forge/config.yaml global_plugins
+     * 5. Tracks installed files in ~/Horus/data/config/forge.yaml global_plugins
      */
     installGlobal(ref: string): Promise<GlobalInstallReport>;
     /**

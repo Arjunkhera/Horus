@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RepoCloneError = exports.createReferenceClone = exports.normalizeGitUrl = exports.RepoIndexQuery = exports.loadRepoIndex = exports.saveRepoIndex = exports.scan = exports.Registry = exports.ForgeCore = void 0;
+exports.sessionCleanup = exports.sessionList = exports.SessionStoreManager = exports.repoDevelop = exports.RepoCloneError = exports.createReferenceClone = exports.normalizeGitUrl = exports.RepoIndexQuery = exports.loadRepoIndex = exports.saveRepoIndex = exports.scan = exports.Registry = exports.ForgeCore = void 0;
 // Core
 var core_js_1 = require("./core.js");
 Object.defineProperty(exports, "ForgeCore", { enumerable: true, get: function () { return core_js_1.ForgeCore; } });
@@ -45,4 +45,13 @@ Object.defineProperty(exports, "normalizeGitUrl", { enumerable: true, get: funct
 var repo_clone_js_1 = require("./repo/repo-clone.js");
 Object.defineProperty(exports, "createReferenceClone", { enumerable: true, get: function () { return repo_clone_js_1.createReferenceClone; } });
 Object.defineProperty(exports, "RepoCloneError", { enumerable: true, get: function () { return repo_clone_js_1.RepoCloneError; } });
+var repo_develop_js_1 = require("./repo/repo-develop.js");
+Object.defineProperty(exports, "repoDevelop", { enumerable: true, get: function () { return repo_develop_js_1.repoDevelop; } });
+// Session
+var session_store_js_1 = require("./session/session-store.js");
+Object.defineProperty(exports, "SessionStoreManager", { enumerable: true, get: function () { return session_store_js_1.SessionStoreManager; } });
+var session_list_js_1 = require("./session/session-list.js");
+Object.defineProperty(exports, "sessionList", { enumerable: true, get: function () { return session_list_js_1.sessionList; } });
+var session_cleanup_js_1 = require("./session/session-cleanup.js");
+Object.defineProperty(exports, "sessionCleanup", { enumerable: true, get: function () { return session_cleanup_js_1.sessionCleanup; } });
 //# sourceMappingURL=index.js.map
