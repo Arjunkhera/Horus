@@ -8,7 +8,7 @@ import {
   type CallToolRequest,
   type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ForgeCore, type RepoIndexEntry } from '@forge/core';
+import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow } from '@forge/core';
 import * as http from 'node:http';
 
 const startTime = Date.now();
@@ -144,13 +144,47 @@ const TOOLS = [
   {
     name: 'forge_repo_workflow',
     description:
-      'Resolve the git workflow configuration for a repository. Checks Vault repo profile first (team-wide conventions), then auto-detects from local git remotes, then falls back to defaults. Returns strategy (owner|fork|direct), default branch, PR target, and hosting info.',
+      'Resolve the git workflow configuration for a repository. Resolution order: (1) confirmed workflow in repo index, (2) Vault repo profile, (3) auto-detect from git remotes. When needsConfirmation=true is returned, present autoDetected values to the user, then call again with the confirmed workflow parameter to save. Returns strategy (owner|fork|contributor), default branch, PR target, and hosting info.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         name: {
           type: 'string',
           description: 'Repository name to resolve workflow for',
+        },
+        workflow: {
+          type: 'object',
+          description: 'Confirmed workflow to save (only pass when user has confirmed the auto-detected values). Omit on first call.',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['owner', 'fork', 'contributor'],
+              description: 'Workflow type: owner=full access, fork=PR from fork, contributor=PR from branch',
+            },
+            upstream: { type: 'string', description: 'Upstream remote URL (fork workflow only)' },
+            fork: { type: 'string', description: 'Fork remote URL (fork workflow only)' },
+            pushTo: { type: 'string', description: 'Remote to push to (usually "origin")' },
+            prTarget: {
+              type: 'object',
+              properties: {
+                repo: { type: 'string', description: 'Target repo slug, e.g. "Org/Repo"' },
+                branch: { type: 'string', description: 'Target branch, e.g. "main"' },
+              },
+              required: ['repo', 'branch'],
+            },
+            branchPattern: { type: 'string', description: 'Branch naming convention, e.g. "{type}/{id}-{slug}"' },
+            commitFormat: { type: 'string', description: 'Commit message format, e.g. "conventional"' },
+            confirmedBy: {
+              type: 'string',
+              enum: ['user', 'auto'],
+              description: '"user" if user explicitly confirmed, "auto" if agent accepted without edits',
+            },
+            remotesSnapshot: {
+              type: 'object',
+              description: 'Current remote name→URL map (pass through from autoDetected.remotesSnapshot)',
+            },
+          },
+          required: ['type', 'pushTo', 'prTarget'],
         },
       },
       required: ['name'],
@@ -438,18 +472,55 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_repo_workflow': {
-          const { name } = (args ?? {}) as { name: string };
+          const { name, workflow: confirmedWorkflow } = (args ?? {}) as {
+            name: string;
+            workflow?: (Omit<AutoDetectedWorkflow, 'remotesSnapshot'> & {
+              confirmedBy?: 'user' | 'auto';
+              remotesSnapshot?: Record<string, string>;
+            });
+          };
           if (!name) {
             return {
               content: [{ type: 'text', text: JSON.stringify({ error: true, message: 'name is required' }) }],
               isError: true,
             };
           }
-          const workflow = await forge.repoWorkflow(name);
+
+          // If a confirmed workflow was passed, save it and return the saved result
+          if (confirmedWorkflow) {
+            const saved = await forge.repoWorkflowSave(
+              name,
+              {
+                type: confirmedWorkflow.type,
+                upstream: confirmedWorkflow.upstream,
+                fork: confirmedWorkflow.fork,
+                pushTo: confirmedWorkflow.pushTo,
+                prTarget: confirmedWorkflow.prTarget,
+                branchPattern: confirmedWorkflow.branchPattern,
+                commitFormat: confirmedWorkflow.commitFormat,
+                remotesSnapshot: confirmedWorkflow.remotesSnapshot,
+              },
+              confirmedWorkflow.confirmedBy ?? 'user',
+            );
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  saved: true,
+                  repoName: name,
+                  workflow: saved,
+                  message: `Workflow confirmed and saved for '${name}'.`,
+                }, null, 2),
+              }],
+            };
+          }
+
+          // Otherwise resolve and return (may include needsConfirmation)
+          const result = await forge.repoWorkflow(name);
           return {
             content: [{
               type: 'text',
-              text: JSON.stringify(workflow, null, 2),
+              text: JSON.stringify(result, null, 2),
             }],
           };
         }
