@@ -37,6 +37,7 @@ export async function updateClaudeMcpServers(
 
   const configAllow = claudePermissions?.allow ?? ['mcp__*__*'];
   const configDeny = claudePermissions?.deny ?? [];
+  const configDefaultMode = claudePermissions?.defaultMode;
 
   // --- settings.local.json: MCP server URLs + permissions (machine-specific) ---
   const localSettingsPath = path.join(claudeDir, 'settings.local.json');
@@ -70,6 +71,9 @@ export async function updateClaudeMcpServers(
     }
     localPermissions.deny = localDeny;
   }
+  if (configDefaultMode) {
+    localPermissions.defaultMode = configDefaultMode;
+  }
   localSettings.permissions = localPermissions;
 
   await fs.writeFile(localSettingsPath, JSON.stringify(localSettings, null, 2) + '\n', 'utf-8');
@@ -97,6 +101,9 @@ export async function updateClaudeMcpServers(
       if (!sharedDeny.includes(entry)) sharedDeny.push(entry);
     }
     sharedPermissions.deny = sharedDeny;
+  }
+  if (configDefaultMode) {
+    sharedPermissions.defaultMode = configDefaultMode;
   }
   sharedSettings.permissions = sharedPermissions;
 
