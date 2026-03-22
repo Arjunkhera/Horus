@@ -191,32 +191,6 @@ const TOOLS = [
     },
   },
   {
-    name: 'forge_repo_clone',
-    description: 'Create an isolated working copy (reference clone) of a repository. The clone gets its own feature branch, independent of the original. Use this to get a safe working directory before making code changes to any repo.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        repoName: {
-          type: 'string',
-          description: 'Repository name from the local index (use forge_repo_list to discover)',
-        },
-        branchName: {
-          type: 'string',
-          description: 'Feature branch to create in the clone (optional). If omitted, stays on the default branch.',
-        },
-        destPath: {
-          type: 'string',
-          description: 'Override destination path for the clone (optional). Defaults to <mountPath>/<repoName>-clone-<id>.',
-        },
-        workspacePath: {
-          type: 'string',
-          description: 'Workspace directory to clone into. Pass $FORGE_WORKSPACE_PATH from workspace.env (e.g. /data/workspaces/your-workspace-id). Required unless destPath is explicitly provided — omitting both causes the clone to land at the global mount root instead of inside your workspace.',
-        },
-      },
-      required: ['repoName'],
-    },
-  },
-  {
     name: 'forge_develop',
     description:
       'Start or resume a code session for a work item on a repository. Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/. ' +
@@ -270,7 +244,7 @@ const TOOLS = [
   },
   {
     name: 'forge_workspace_create',
-    description: 'Create a new workspace from a workspace config. Installs plugins, creates git worktrees, and emits MCP configs and environment variables.',
+    description: 'Create a new workspace from a workspace config. Installs plugins/skills, emits MCP configs and environment variables. Context-only — does not clone repositories. Use forge_develop to create isolated code sessions for implementation work.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -296,7 +270,7 @@ const TOOLS = [
   },
   {
     name: 'forge_workspace_delete',
-    description: 'Delete a workspace by ID. Removes git worktrees and workspace folder from disk.',
+    description: 'Delete a workspace by ID. Removes workspace folder from disk.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -365,45 +339,6 @@ const TOOLS = [
     },
   },
 ];
-
-// ─── Validation helpers ────────────────────────────────────────────────────
-
-/**
- * Validate forge_repo_clone arguments.
- *
- * Returns an error object if the call is invalid, null if valid.
- * Exported so tests can assert on the guard directly without invoking the full
- * MCP transport — this ensures a future refactor cannot accidentally drop the
- * validation without breaking the test suite.
- *
- * The recurring regression: callers omit workspacePath, causing clones to land
- * at the global mount root (/workspaces/<repo>) instead of the workspace
- * folder (/workspaces/<workspace-id>/<repo>). Without this guard the failure
- * is silent — the clone succeeds at the wrong path.
- */
-export function validateRepoCloneArgs(args: {
-  repoName?: string;
-  workspacePath?: string;
-  destPath?: string;
-}): { error: true; code: string; message: string; suggestion: string } | null {
-  if (!args.repoName) {
-    return {
-      error: true,
-      code: 'REPO_NAME_REQUIRED',
-      message: 'repoName is required.',
-      suggestion: 'Provide the repoName parameter.',
-    };
-  }
-  if (!args.workspacePath && !args.destPath) {
-    return {
-      error: true,
-      code: 'WORKSPACE_PATH_REQUIRED',
-      message: 'workspacePath is required when calling forge_repo_clone from a workspace session.',
-      suggestion: 'Pass workspacePath: $FORGE_WORKSPACE_PATH from workspace.env (e.g. /data/workspaces/your-workspace-id). Alternatively, provide an explicit destPath.',
-    };
-  }
-  return null;
-}
 
 // ─── Tool handler ──────────────────────────────────────────────────────────
 
@@ -620,36 +555,6 @@ function buildServer(workspaceRoot: string): Server {
             content: [{
               type: 'text',
               text: JSON.stringify(result, null, 2),
-            }],
-          };
-        }
-
-        case 'forge_repo_clone': {
-          const { repoName, branchName, destPath, workspacePath } = (args ?? {}) as {
-            repoName: string;
-            branchName?: string;
-            destPath?: string;
-            workspacePath?: string;
-          };
-          const validationError = validateRepoCloneArgs({ repoName, workspacePath, destPath });
-          if (validationError) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify(validationError) }],
-              isError: true,
-            };
-          }
-          const cloneResult = await forge.repoClone({ repoName, branchName, destPath, workspacePath });
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                repoName: cloneResult.repoName,
-                clonePath: cloneResult.clonePath,
-                hostClonePath: cloneResult.hostClonePath,
-                branch: cloneResult.branch,
-                origin: cloneResult.origin,
-                message: `Clone created at ${cloneResult.hostClonePath} on branch '${cloneResult.branch}'. Origin remote: ${cloneResult.origin}. Work in this directory — it is isolated from the original repo.`,
-              }, null, 2),
             }],
           };
         }

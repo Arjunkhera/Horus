@@ -38,11 +38,9 @@ import { scan as repoScannerScan } from './repo/repo-scanner.js';
 import { loadRepoIndex, saveRepoIndex } from './repo/repo-index-store.js';
 import { RepoIndexQuery } from './repo/repo-index-query.js';
 import { VaultClient, extractHostingFromUrl } from './vault/vault-client.js';
-import { createReferenceClone, type RepoCloneResult } from './repo/repo-clone.js';
 import { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
 import { sessionList, type SessionListOptions, type SessionListResult } from './session/session-list.js';
 import { sessionCleanup, type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
-import { expandPath } from './config/path-utils.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -620,87 +618,6 @@ export class ForgeCore {
     await saveRepoIndex({ ...repoIndex, repos: updatedRepos }, indexPath);
 
     return savedWorkflow;
-  }
-
-  /**
-   * Create an isolated reference clone of a repository.
-   *
-   * Looks up the repo in the local index, creates a reference clone at
-   * destPath (default: <workspaceRoot>/<repoName> when inside a workspace,
-   * or <mountPath>/<repoName> otherwise), optionally creates a feature
-   * branch, and returns paths in host-translated form.
-   */
-  async repoClone(opts: {
-    repoName: string;
-    branchName?: string;
-    destPath?: string;
-    workspacePath?: string;
-  }): Promise<RepoCloneResult> {
-    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
-    const { scan_paths, host_repos_path } = globalConfig.repos;
-
-    let repoIndex = await loadRepoIndex(globalConfig.repos.index_path);
-    if (!repoIndex && globalConfig.repos.scan_paths.length > 0) {
-      repoIndex = await this.repoScan();
-    }
-    if (!repoIndex) {
-      throw new ForgeError('REPO_INDEX_NOT_FOUND', 'Repository index not found.', 'Run: forge repo scan');
-    }
-
-    const query = new RepoIndexQuery(repoIndex.repos);
-    const repo = query.findByName(opts.repoName);
-    if (!repo) {
-      throw new ForgeError('REPO_NOT_FOUND', `Repository "${opts.repoName}" not found in local index.`, 'Run: forge repo scan');
-    }
-
-    const mountPath = expandPath(globalConfig.workspace.mount_path);
-    const hostMountPath = globalConfig.workspace.host_workspaces_path ?? mountPath;
-
-    // Resolve workspacePath, translating host path → container path when Forge
-    // runs in Docker. MCP callers pass $FORGE_WORKSPACE_PATH (host-side absolute
-    // path). Without translation, the host path never matches mountPath and the
-    // clone always lands in the workspaces root instead of the workspace folder.
-    let effectiveRoot = path.resolve(opts.workspacePath ?? this.workspaceRoot);
-    if (hostMountPath !== mountPath && effectiveRoot.startsWith(hostMountPath + path.sep)) {
-      effectiveRoot = mountPath + effectiveRoot.slice(hostMountPath.length);
-    }
-
-    const resolvedMount = path.resolve(mountPath);
-    const insideWorkspace = effectiveRoot.startsWith(resolvedMount + path.sep) && effectiveRoot !== resolvedMount;
-    const basePath = insideWorkspace ? effectiveRoot : mountPath;
-    const clonePath = opts.destPath ?? path.join(basePath, opts.repoName);
-
-    const { actualDefaultBranch } = await createReferenceClone({
-      localPath: repo.localPath,
-      remoteUrl: repo.remoteUrl,
-      destPath: clonePath,
-      branchName: opts.branchName,
-      defaultBranch: repo.defaultBranch,
-    });
-
-    // If the clone revealed a different default branch than the index stored, update it.
-    if (actualDefaultBranch !== repo.defaultBranch) {
-      const updatedRepos = repoIndex.repos.map((r) =>
-        r.name === repo.name ? { ...r, defaultBranch: actualDefaultBranch } : r,
-      );
-      await saveRepoIndex({ ...repoIndex, repos: updatedRepos }, globalConfig.repos.index_path);
-    }
-
-    const translatedRepo = translateRepoPath(repo, scan_paths, host_repos_path);
-
-    // Compute host-side clone path for display (Docker path → host path)
-    const cloneRelative = path.relative(mountPath, clonePath);
-    const hostClonePath = path.join(hostMountPath, cloneRelative);
-
-    const origin = repo.remoteUrl ?? translatedRepo.localPath;
-
-    return {
-      repoName: opts.repoName,
-      clonePath,
-      hostClonePath,
-      branch: opts.branchName ?? actualDefaultBranch,
-      origin,
-    };
   }
 
   /**

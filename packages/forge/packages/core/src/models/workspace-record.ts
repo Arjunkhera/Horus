@@ -6,8 +6,6 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatusSchema>;
 export const WorkspaceRepoSchema = z.object({
   name: z.string(),
   localPath: z.string(),
-  branch: z.string(),
-  worktreePath: z.string().nullable(),
 });
 
 export const WorkspaceRecordSchema = z.object({
