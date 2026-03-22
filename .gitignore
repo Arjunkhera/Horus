@@ -7,5 +7,8 @@ node_modules
 # npm lock files (repo uses pnpm)
 package-lock.json
 **/package-lock.json
-# stale pre-monorepo CLI build directory
-cli/
+# stale pre-monorepo CLI build directory (anchored to root)
+/cli/
+# stray directories created by unexpanded tilde paths
+/~/
+**/~/
