@@ -49,8 +49,6 @@ describe('WorkspaceMetadataStore', () => {
           {
             name: 'main-repo',
             localPath: '/home/user/workspaces/test-workspace/main-repo',
-            branch: 'main',
-            worktreePath: null,
           },
         ],
         createdAt: new Date().toISOString(),

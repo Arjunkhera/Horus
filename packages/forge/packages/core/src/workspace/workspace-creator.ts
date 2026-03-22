@@ -2,7 +2,6 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import type { ForgeCore } from '../core.js';
 import { translateRepoPath } from '../core.js';
-import { createReferenceClone } from '../repo/repo-clone.js';
 import type {
   WorkspaceRecord,
   WorkspaceRepo,
@@ -26,7 +25,7 @@ export interface WorkspaceCreateOptions {
   configVersion?: string;       // version constraint (default: '*')
   storyId?: string;
   storyTitle?: string;
-  repos?: string[];             // specific repo names to include
+  repos?: string[];             // specific repo names to include (context only — no cloning)
   mountPath?: string;           // override global workspace.mount_path
 }
 
@@ -103,6 +102,10 @@ function mergeClaudePermissions(
 
 /**
  * Main workspace creator class.
+ *
+ * Creates a context-only workspace: folders, plugins/skills, MCP configs,
+ * environment variables, and CLAUDE.md. Does NOT clone repositories — use
+ * `forge_develop` to create isolated code sessions for implementation work.
  */
 export class WorkspaceCreator {
   constructor(private readonly forge: ForgeCore) {}
@@ -132,7 +135,7 @@ export class WorkspaceCreator {
     const name = `${options.configName}-${slugPart}`;
     const workspacePath = path.join(mountPath, name);
 
-    // Step 4: Resolve repos (if specified)
+    // Step 4: Resolve repos (context only — record localPath for reference, no cloning)
     let resolvedRepos: RepoIndexEntry[] = [];
     if (options.repos && options.repos.length > 0) {
       const repoIndex = await loadRepoIndex(globalConfig.repos.index_path);
@@ -166,49 +169,15 @@ export class WorkspaceCreator {
     }
 
     try {
-      // Step 6: Create reference clones for each repo
+      // Step 6: Build repo context records (host-translated paths, no cloning)
       const { scan_paths, host_repos_path } = globalConfig.repos;
-      const reposWithWorktrees: WorkspaceRepo[] = [];
-      for (const repo of resolvedRepos) {
-        const branchName = generateBranchName(
-          workspaceConfigMeta.git_workflow.branch_pattern,
-          {
-            subtype: 'feature',
-            id: options.storyId ?? id,
-            slug: slugify(options.storyTitle ?? options.configName),
-          },
-        );
-
-        const clonePath = path.join(workspacePath, repo.name);
-        // Translate to host path for storage/display; git ops use original Docker-internal path
+      const repoContexts: WorkspaceRepo[] = resolvedRepos.map(repo => {
         const translatedRepo = translateRepoPath(repo, scan_paths, host_repos_path);
-
-        try {
-          await createReferenceClone({
-            localPath: repo.localPath,   // Docker-internal — accessible from within the container
-            remoteUrl: repo.remoteUrl,
-            destPath: clonePath,
-            branchName,
-            defaultBranch: repo.defaultBranch,
-          });
-
-          reposWithWorktrees.push({
-            name: repo.name,
-            localPath: translatedRepo.localPath,  // host path for record/CLAUDE.md
-            branch: branchName,
-            worktreePath: clonePath,
-          });
-        } catch (err: any) {
-          // Graceful fallback: log warning but continue without clone
-          console.warn(`[Forge] Warning: Could not create reference clone for ${repo.name}: ${err.message}`);
-          reposWithWorktrees.push({
-            name: repo.name,
-            localPath: translatedRepo.localPath,  // host path for record/CLAUDE.md
-            branch: branchName,
-            worktreePath: null,
-          });
-        }
-      }
+        return {
+          name: repo.name,
+          localPath: translatedRepo.localPath,
+        };
+      });
 
       // Step 7: Create workspace forge.yaml and install plugins/skills
       const workspaceForgeConfig = {
@@ -391,7 +360,7 @@ export class WorkspaceCreator {
         'utf-8',
       );
 
-      // Step 10: Emit CLAUDE.md
+      // Step 9a: Emit CLAUDE.md
       const claudeMd = `# Workspace: ${name}
 
 > Created: ${new Date().toISOString().slice(0, 10)} | Config: ${options.configName}
@@ -400,17 +369,20 @@ export class WorkspaceCreator {
 ${options.storyTitle ? `Story: ${options.storyTitle} (${options.storyId})` : 'No story linked'}
 
 ## Repositories
-${reposWithWorktrees.map(r => `- **${r.name}**: ${r.worktreePath ? path.join(hostWorkspacePath, r.name) : r.localPath}`).join('\n') || '(none)'}
+${repoContexts.map(r => `- **${r.name}**: ${r.localPath}`).join('\n') || '(none)'}
 
 ## MCP Servers
 ${Object.keys(workspaceConfigMeta.mcp_servers).map(s => `- ${s}`).join('\n') || '(none configured)'}
 
 ## Environment
 Source \`workspace.env\` for SDLC environment variables.
+
+## Code Isolation
+Use \`forge_develop\` to create isolated code sessions before making changes to any repository.
 `;
       await fs.writeFile(path.join(workspacePath, 'CLAUDE.md'), claudeMd, 'utf-8');
 
-      // Step 10b: Emit .cursorrules (Cursor equivalent of CLAUDE.md)
+      // Step 9b: Emit .cursorrules (Cursor equivalent of CLAUDE.md)
       const cursorRules = `# Workspace: ${name}
 
 > Created: ${new Date().toISOString().slice(0, 10)} | Config: ${options.configName}
@@ -419,7 +391,7 @@ Source \`workspace.env\` for SDLC environment variables.
 ${options.storyTitle ? `Story: ${options.storyTitle} (${options.storyId})` : 'No story linked'}
 
 ## Repositories
-${reposWithWorktrees.map(r => `- **${r.name}**: ${r.worktreePath ? path.join(hostWorkspacePath, r.name) : r.localPath}`).join('\n') || '(none)'}
+${repoContexts.map(r => `- **${r.name}**: ${r.localPath}`).join('\n') || '(none)'}
 
 ## MCP Servers
 ${Object.keys(workspaceConfigMeta.mcp_servers).map(s => `- ${s}`).join('\n') || '(none configured)'}
@@ -427,13 +399,12 @@ ${Object.keys(workspaceConfigMeta.mcp_servers).map(s => `- ${s}`).join('\n') || 
 ## Environment
 Source \`workspace.env\` for SDLC environment variables.
 
-## Limitations
-- Source repository edit guards (PreToolUse hooks) are not available in Cursor.
-  Use \`forge_repo_clone\` MCP tool to get isolated working copies before editing repo files.
+## Code Isolation
+Use \`forge_develop\` to create isolated code sessions before making changes to any repository.
 `;
       await fs.writeFile(path.join(workspacePath, '.cursorrules'), cursorRules, 'utf-8');
 
-      // Step 11: Register workspace in metadata store
+      // Step 10: Register workspace in metadata store
       const metaStore = new WorkspaceMetadataStore(globalConfig.workspace.store_path);
       const record: WorkspaceRecord = {
         id,
@@ -443,7 +414,7 @@ Source \`workspace.env\` for SDLC environment variables.
         storyTitle: options.storyTitle ?? null,
         path: workspacePath,
         status: 'active',
-        repos: reposWithWorktrees,
+        repos: repoContexts,
         createdAt: new Date().toISOString(),
         lastAccessedAt: new Date().toISOString(),
         completedAt: null,
