@@ -187,15 +187,29 @@ class WorkspaceCreator {
             const workspaceManager = new workspace_manager_js_1.WorkspaceManager(workspacePath);
             await workspaceManager.writeConfig(workspaceForgeConfig);
             // Install using a new ForgeCore instance for this workspace
+            let workspaceForge = null;
             try {
-                const workspaceForge = new (await import('../core.js')).ForgeCore(workspacePath);
+                workspaceForge = new (await import('../core.js')).ForgeCore(workspacePath);
                 await workspaceForge.install({
                     target: 'claude-code',
                     conflictStrategy: 'overwrite',
                 });
             }
             catch (err) {
-                console.warn(`[Forge] Warning: Failed to install plugins: ${err.message}`);
+                console.warn(`[Forge] Warning: Failed to install plugins (claude-code): ${err.message}`);
+            }
+            // Install Cursor target in parallel — skills emit to .cursor/rules/*.mdc
+            try {
+                if (!workspaceForge) {
+                    workspaceForge = new (await import('../core.js')).ForgeCore(workspacePath);
+                }
+                await workspaceForge.install({
+                    target: 'cursor',
+                    conflictStrategy: 'overwrite',
+                });
+            }
+            catch (err) {
+                console.warn(`[Forge] Warning: Failed to install plugins (cursor): ${err.message}`);
             }
             // Step 8: Emit MCP configs
             const mcpDir = path_1.default.join(workspacePath, '.claude', 'mcp-servers');
@@ -203,7 +217,7 @@ class WorkspaceCreator {
             for (const [serverName, serverConfig] of Object.entries(workspaceConfigMeta.mcp_servers)) {
                 const endpoint = globalConfig.mcp_endpoints[serverName];
                 if (!endpoint && serverConfig.required) {
-                    console.warn(`[Forge] Warning: MCP endpoint '${serverName}' not configured in ~/.forge/config.yaml`);
+                    console.warn(`[Forge] Warning: MCP endpoint '${serverName}' not configured in ~/Horus/data/config/forge.yaml`);
                     continue;
                 }
                 if (endpoint) {
@@ -242,17 +256,30 @@ class WorkspaceCreator {
             catch (err) {
                 console.warn(`[Forge] Warning: Could not update .claude/settings.local.json: ${err.message}`);
             }
+            // Step 8a-cursor: Register MCP servers in {workspace}/.cursor/mcp.json for Cursor IDE.
+            try {
+                const cursorMcpServers = [];
+                for (const [serverName] of Object.entries(workspaceConfigMeta.mcp_servers)) {
+                    const hostEndpoint = globalConfig.host_endpoints?.[serverName];
+                    const endpoint = globalConfig.mcp_endpoints[serverName];
+                    const url = hostEndpoint ?? endpoint?.url;
+                    if (url) {
+                        cursorMcpServers.push({ name: serverName, url });
+                    }
+                }
+                await (0, mcp_settings_writer_js_1.updateCursorMcpServers)(cursorMcpServers, workspacePath);
+            }
+            catch (err) {
+                console.warn(`[Forge] Warning: Could not write .cursor/mcp.json: ${err.message}`);
+            }
             // Step 8b: Emit PreToolUse hook to block edits to source repos.
-            // Uses host_repos_path (the host-side path to source repositories) which is
-            // machine-specific — set via FORGE_HOST_REPOS_PATH env var in Docker, or
-            // repos.host_repos_path in ~/.forge/config.yaml for native installs.
-            if (host_repos_path) {
-                try {
-                    await (0, mcp_settings_writer_js_1.emitPreToolUseHook)(workspacePath, hostWorkspacePath, host_repos_path);
-                }
-                catch (err) {
-                    console.warn(`[Forge] Warning: Could not emit PreToolUse hook: ${err.message}`);
-                }
+            // Uses a git-based heuristic — no hardcoded paths needed. The guard script
+            // blocks edits to any git repo that isn't inside a Horus workspace directory.
+            try {
+                await (0, mcp_settings_writer_js_1.emitPreToolUseHook)(workspacePath, hostWorkspacePath);
+            }
+            catch (err) {
+                console.warn(`[Forge] Warning: Could not emit PreToolUse hook: ${err.message}`);
             }
             // Step 9: Emit environment variables file
             // Resolve workflow metadata for the first repo (drives PR strategy in scripts)
@@ -308,6 +335,28 @@ ${Object.keys(workspaceConfigMeta.mcp_servers).map(s => `- ${s}`).join('\n') || 
 Source \`workspace.env\` for SDLC environment variables.
 `;
             await fs_1.promises.writeFile(path_1.default.join(workspacePath, 'CLAUDE.md'), claudeMd, 'utf-8');
+            // Step 10b: Emit .cursorrules (Cursor equivalent of CLAUDE.md)
+            const cursorRules = `# Workspace: ${name}
+
+> Created: ${new Date().toISOString().slice(0, 10)} | Config: ${options.configName}
+
+## Context
+${options.storyTitle ? `Story: ${options.storyTitle} (${options.storyId})` : 'No story linked'}
+
+## Repositories
+${reposWithWorktrees.map(r => `- **${r.name}**: ${r.worktreePath ? path_1.default.join(hostWorkspacePath, r.name) : r.localPath}`).join('\n') || '(none)'}
+
+## MCP Servers
+${Object.keys(workspaceConfigMeta.mcp_servers).map(s => `- ${s}`).join('\n') || '(none configured)'}
+
+## Environment
+Source \`workspace.env\` for SDLC environment variables.
+
+## Limitations
+- Source repository edit guards (PreToolUse hooks) are not available in Cursor.
+  Use \`forge_repo_clone\` MCP tool to get isolated working copies before editing repo files.
+`;
+            await fs_1.promises.writeFile(path_1.default.join(workspacePath, '.cursorrules'), cursorRules, 'utf-8');
             // Step 11: Register workspace in metadata store
             const metaStore = new workspace_metadata_store_js_1.WorkspaceMetadataStore(globalConfig.workspace.store_path);
             const record = {

@@ -27,44 +27,44 @@ export declare const RepoWorkflowSchema: z.ZodObject<{
         prTarget: z.ZodString;
         branchConvention: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
+        prTarget: string;
         defaultBranch: string;
         strategy: "owner" | "fork" | "direct";
-        prTarget: string;
         branchConvention?: string | undefined;
     }, {
+        prTarget: string;
         defaultBranch: string;
         strategy: "owner" | "fork" | "direct";
-        prTarget: string;
         branchConvention?: string | undefined;
     }>;
     /** Which resolution tier produced this result. */
     source: z.ZodEnum<["vault", "auto-detect", "default"]>;
 }, "strip", z.ZodTypeAny, {
+    workflow: {
+        prTarget: string;
+        defaultBranch: string;
+        strategy: "owner" | "fork" | "direct";
+        branchConvention?: string | undefined;
+    };
     repoName: string;
     hosting: {
         hostname: string;
         org: string;
     };
-    workflow: {
-        defaultBranch: string;
-        strategy: "owner" | "fork" | "direct";
-        prTarget: string;
-        branchConvention?: string | undefined;
-    };
-    source: "vault" | "auto-detect" | "default";
+    source: "vault" | "default" | "auto-detect";
 }, {
+    workflow: {
+        prTarget: string;
+        defaultBranch: string;
+        strategy: "owner" | "fork" | "direct";
+        branchConvention?: string | undefined;
+    };
     repoName: string;
     hosting: {
         hostname: string;
         org: string;
     };
-    workflow: {
-        defaultBranch: string;
-        strategy: "owner" | "fork" | "direct";
-        prTarget: string;
-        branchConvention?: string | undefined;
-    };
-    source: "vault" | "auto-detect" | "default";
+    source: "vault" | "default" | "auto-detect";
 }>;
 export type RepoWorkflow = z.infer<typeof RepoWorkflowSchema>;
 //# sourceMappingURL=repo-workflow.d.ts.map
