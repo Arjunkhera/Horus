@@ -101,7 +101,7 @@ export type ReposConfig = z.infer<typeof ReposConfigSchema>;
  *   mount_path: ~/workspaces
  *   default_config: sdlc-default
  *   retention_days: 30
- *   host_workspaces_path: /Users/me/horus-data/workspaces  # host-side path (Docker only)
+ *   host_workspaces_path: /Users/me/Horus/data/workspaces  # host-side path (Docker only)
  *
  * mcp_endpoints:
  *   anvil:

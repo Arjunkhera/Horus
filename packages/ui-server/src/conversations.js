@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID, randomBytes } from 'node:crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = process.env.HORUS_DATA_PATH ?? join(__dirname, '../../..', '.horus-data')
+const DATA_DIR = process.env.HORUS_DATA_PATH ?? join(__dirname, '../../..', 'data')
 const CONV_DIR = join(DATA_DIR, '_system/ui/conversations')
 
 async function ensureDir() {
