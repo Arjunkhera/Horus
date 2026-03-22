@@ -8,6 +8,7 @@ import type { SessionRecord, SessionWorkflow, RepoSource } from '../models/sessi
 import type { GlobalConfig } from '../models/global-config.js';
 import { SessionStoreManager } from '../session/session-store.js';
 import { ForgeError } from '../adapters/errors.js';
+import { installEnforcementHooks } from './git-enforcement.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -179,28 +180,7 @@ async function fetchRemotes(repoPath: string): Promise<boolean> {
   }
 }
 
-/**
- * Install placeholder git hooks and enforcement scripts in the worktree.
- * Full implementation is deferred to WI-4.
- */
-async function installPlaceholderHooks(worktreePath: string): Promise<void> {
-  const hooksDir = path.join(worktreePath, '.git', 'hooks');
-  await fs.mkdir(hooksDir, { recursive: true });
-
-  // pre-push hook placeholder
-  const prePush = `#!/bin/sh
-# forge_develop pre-push hook (placeholder — full implementation in WI-4)
-exit 0
-`;
-  // commit-msg hook placeholder
-  const commitMsg = `#!/bin/sh
-# forge_develop commit-msg hook (placeholder — full implementation in WI-4)
-exit 0
-`;
-
-  await fs.writeFile(path.join(hooksDir, 'pre-push'), prePush, { mode: 0o755 });
-  await fs.writeFile(path.join(hooksDir, 'commit-msg'), commitMsg, { mode: 0o755 });
-}
+// installEnforcementHooks is imported from git-enforcement.ts (WI-4)
 
 // ─── Main function ────────────────────────────────────────────────────────────
 
@@ -211,7 +191,7 @@ exit 0
  * 2. Check for existing session → resume if found
  * 3. Verify workflow is confirmed (or accept inline workflow input)
  * 4. git fetch + worktree creation
- * 5. Install placeholder hooks
+ * 5. Install enforcement hooks and scripts
  * 6. Save session record
  */
 export async function repoDevelop(
@@ -421,8 +401,26 @@ export async function repoDevelop(
     }
   }
 
-  // ── Install placeholder hooks ─────────────────────────────────────────────
-  await installPlaceholderHooks(sessionPath);
+  // ── Install enforcement hooks and scripts ─────────────────────────────────
+  // Build a RepoIndexWorkflow-shaped object for the hook installer.
+  // effectiveWorkflow is WorkflowInput | RepoIndexWorkflow; both share the
+  // fields we need (type, pushTo, prTarget, commitFormat).
+  const workflowForHooks: RepoIndexWorkflow = {
+    type: effectiveWorkflow.type,
+    upstream: effectiveWorkflow.upstream,
+    fork: effectiveWorkflow.fork,
+    pushTo: effectiveWorkflow.pushTo,
+    prTarget: effectiveWorkflow.prTarget,
+    branchPattern: effectiveWorkflow.branchPattern,
+    commitFormat: effectiveWorkflow.commitFormat,
+    confirmedAt: ('confirmedAt' in effectiveWorkflow)
+      ? effectiveWorkflow.confirmedAt
+      : new Date().toISOString(),
+    confirmedBy: ('confirmedBy' in effectiveWorkflow)
+      ? effectiveWorkflow.confirmedBy
+      : 'user',
+  };
+  await installEnforcementHooks(sessionPath, workflowForHooks, repoName);
 
   // ── Compute host-side path (Docker path translation) ──────────────────────
   let hostSessionPath: string | undefined;
