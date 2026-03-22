@@ -32,6 +32,8 @@ const repo_index_query_js_1 = require("./repo/repo-index-query.js");
 const vault_client_js_1 = require("./vault/vault-client.js");
 const repo_clone_js_1 = require("./repo/repo-clone.js");
 const repo_develop_js_1 = require("./repo/repo-develop.js");
+const session_list_js_1 = require("./session/session-list.js");
+const session_cleanup_js_1 = require("./session/session-cleanup.js");
 const path_utils_js_1 = require("./config/path-utils.js");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 /**
@@ -466,6 +468,26 @@ class ForgeCore {
             }
         };
         return (0, repo_develop_js_1.repoDevelop)(opts, globalConfig, repoIndex, saveRepoIndexFn);
+    }
+    /**
+     * List active code sessions, optionally filtered by repo and/or workItem.
+     */
+    async sessionList(opts = {}) {
+        const globalConfig = await (0, global_config_loader_js_1.loadGlobalConfig)(this.globalConfigPath);
+        return (0, session_list_js_1.sessionList)(opts, globalConfig);
+    }
+    /**
+     * Clean up sessions based on workItem, age threshold, or auto-policy.
+     *
+     * Auto-policy queries Anvil for work item status:
+     *   - done (7+ days ago) → eligible
+     *   - cancelled → eligible immediately
+     *   - in_progress / in_review → skip
+     *   - not found → warn, skip
+     */
+    async sessionCleanup(opts) {
+        const globalConfig = await (0, global_config_loader_js_1.loadGlobalConfig)(this.globalConfigPath);
+        return (0, session_cleanup_js_1.sessionCleanup)(opts, globalConfig);
     }
     /**
      * Create a new workspace from a workspace config artifact.

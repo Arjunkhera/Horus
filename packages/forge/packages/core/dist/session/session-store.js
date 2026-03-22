@@ -77,6 +77,38 @@ class SessionStoreManager {
         return store.sessions;
     }
     /**
+     * List sessions filtered by optional repo and/or workItem.
+     * Both filters are AND-combined when provided.
+     */
+    async listFiltered(opts) {
+        const store = await this.load();
+        return store.sessions.filter(s => {
+            if (opts.repo && s.repo.toLowerCase() !== opts.repo.toLowerCase())
+                return false;
+            if (opts.workItem && s.workItem !== opts.workItem)
+                return false;
+            return true;
+        });
+    }
+    /**
+     * Update the lastModified timestamp of a session in place.
+     */
+    async touch(sessionId) {
+        const store = await this.load();
+        const idx = store.sessions.findIndex(s => s.sessionId === sessionId);
+        if (idx !== -1) {
+            store.sessions[idx] = { ...store.sessions[idx], lastModified: new Date().toISOString() };
+            await this.save(store);
+        }
+    }
+    /**
+     * Count total sessions across all work items.
+     */
+    async count() {
+        const store = await this.load();
+        return store.sessions.length;
+    }
+    /**
      * Delete a session by sessionId.
      */
     async remove(sessionId) {

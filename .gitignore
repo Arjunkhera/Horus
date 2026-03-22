@@ -9,3 +9,6 @@ package-lock.json
 **/package-lock.json
 # stale pre-monorepo CLI build directory
 cli/
+# stray tilde directories created by tests using unexpanded ~ paths
+~/
+packages/forge/~/

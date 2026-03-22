@@ -42,6 +42,12 @@ exports.WorkspaceSettingsSchema = zod_1.z.object({
      * Defaults to ~/Horus/data/sessions/.
      */
     sessions_root: zod_1.z.string().default('~/Horus/data/sessions'),
+    /**
+     * Maximum number of active sessions before forge_develop emits a warning.
+     * Does NOT block session creation — only warns and suggests cleanup.
+     * Defaults to 20.
+     */
+    max_sessions: zod_1.z.number().int().min(1).default(20),
     host_workspaces_path: zod_1.z.string().optional(),
 });
 /**

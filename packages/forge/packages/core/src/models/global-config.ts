@@ -40,6 +40,12 @@ export const WorkspaceSettingsSchema = z.object({
    * Defaults to ~/Horus/data/sessions/.
    */
   sessions_root: z.string().default('~/Horus/data/sessions'),
+  /**
+   * Maximum number of active sessions before forge_develop emits a warning.
+   * Does NOT block session creation — only warns and suggests cleanup.
+   * Defaults to 20.
+   */
+  max_sessions: z.number().int().min(1).default(20),
   host_workspaces_path: z.string().optional(),
 });
 

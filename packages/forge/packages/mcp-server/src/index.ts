@@ -8,7 +8,7 @@ import {
   type CallToolRequest,
   type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow } from '@forge/core';
+import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions } from '@forge/core';
 import * as http from 'node:http';
 
 const startTime = Date.now();
@@ -315,6 +315,53 @@ const TOOLS = [
         id: { type: 'string', description: 'Workspace ID' },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'forge_session_list',
+    description:
+      'List active code sessions (git worktrees created by forge_develop). ' +
+      'Returns all sessions with metadata including sessionPath, repo, workItem, branch, and timestamps. ' +
+      'Optionally filter by repo name or workItem ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Filter to sessions for a specific repository name (optional)',
+        },
+        workItem: {
+          type: 'string',
+          description: 'Filter to sessions for a specific work item ID (optional)',
+        },
+      },
+    },
+  },
+  {
+    name: 'forge_session_cleanup',
+    description:
+      'Clean up stale code sessions (git worktrees). ' +
+      'Runs git worktree remove + prune, removes the session directory, and removes the session record. ' +
+      'Specify at least one of: workItem (clean a specific session), olderThan (clean sessions older than threshold), ' +
+      'or auto (query Anvil for work item status and clean eligible sessions).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        workItem: {
+          type: 'string',
+          description: 'Work item ID — clean all sessions associated with this work item',
+        },
+        olderThan: {
+          type: 'string',
+          description: 'Age threshold — clean sessions older than this value. Format: <number><d|h|m>, e.g. "30d", "12h", "60m"',
+        },
+        auto: {
+          type: 'boolean',
+          description:
+            'Auto-cleanup mode: query Anvil for work item status of each session. ' +
+            'Cleans: done (7+ days ago) and cancelled. Skips: in_progress, in_review, not found.',
+        },
+      },
     },
   },
 ];
@@ -726,6 +773,43 @@ function buildServer(workspaceRoot: string): Server {
             };
           }
           return { content: [{ type: 'text', text: JSON.stringify(record, null, 2) }] };
+        }
+
+        case 'forge_session_list': {
+          const { repo, workItem } = (args ?? {}) as SessionListOptions;
+          const result = await forge.sessionList({ repo, workItem });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            }],
+          };
+        }
+
+        case 'forge_session_cleanup': {
+          const { workItem, olderThan, auto } = (args ?? {}) as SessionCleanupOptions;
+          if (!workItem && !olderThan && !auto) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'MISSING_REQUIRED_FIELDS',
+                message: 'At least one of workItem, olderThan, or auto must be specified.',
+              }) }],
+              isError: true,
+            };
+          }
+          const result = await forge.sessionCleanup({ workItem, olderThan, auto });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                cleaned: result.cleaned,
+                skipped: result.skipped,
+                errors: result.errors,
+                summary: `Cleaned ${result.cleaned.length} session(s), skipped ${result.skipped.length}, ${result.errors.length} warning(s)/error(s).`,
+              }, null, 2),
+            }],
+          };
         }
 
         default:

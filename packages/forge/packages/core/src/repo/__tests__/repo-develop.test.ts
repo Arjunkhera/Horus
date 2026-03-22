@@ -23,6 +23,7 @@ function makeGlobalConfig(tmpDir: string): GlobalConfig {
       sessions_path: path.join(tmpDir, 'sessions.json'),
       managed_repos_path: path.join(tmpDir, 'repos'),
       sessions_root: path.join(tmpDir, 'sessions'),
+      max_sessions: 20,
     },
     mcp_endpoints: {},
     repos: {

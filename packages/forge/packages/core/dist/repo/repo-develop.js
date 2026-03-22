@@ -200,6 +200,8 @@ async function repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn) {
         // Verify the session directory still exists
         try {
             await fs_1.promises.access(existing.sessionPath);
+            // Update lastModified on resume
+            await sessionStore.touch(existing.sessionId);
             return {
                 status: 'resumed',
                 sessionId: existing.sessionId,
@@ -259,6 +261,15 @@ async function repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn) {
     // ── Determine feature branch name ─────────────────────────────────────────
     const slug = toSlug(workItem);
     const featureBranch = requestedBranch ?? `feature/${slug}`;
+    // ── Max sessions ceiling check (warn only, never block) ──────────────────
+    const maxSessions = globalConfig.workspace.max_sessions ?? 20;
+    const totalSessions = await sessionStore.count();
+    let sessionCeilingWarning;
+    if (totalSessions >= maxSessions) {
+        sessionCeilingWarning =
+            `Session ceiling reached: ${totalSessions}/${maxSessions} active sessions. ` +
+                `Consider running forge_session_cleanup to reclaim stale sessions.`;
+    }
     // ── Compute session path ──────────────────────────────────────────────────
     const sessionCount = await sessionStore.countByWorkItem(workItem, repoName);
     const agentSlot = sessionCount + 1;
@@ -330,6 +341,7 @@ async function repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn) {
     };
     // ── Save session record ───────────────────────────────────────────────────
     const sessionId = generateSessionId();
+    const now = new Date().toISOString();
     const record = {
         sessionId,
         workItem,
@@ -341,7 +353,8 @@ async function repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn) {
         repoSource,
         workflow: sessionWorkflow,
         agentSlot,
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        lastModified: now,
     };
     await sessionStore.add(record);
     return {
@@ -355,6 +368,7 @@ async function repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn) {
         repoSource,
         workflow: sessionWorkflow,
         agentSlot,
+        ...(sessionCeilingWarning ? { warning: sessionCeilingWarning } : {}),
     };
 }
 //# sourceMappingURL=repo-develop.js.map
