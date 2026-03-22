@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -9,6 +9,34 @@ import {
   addGlobalRegistry,
   removeGlobalRegistry,
 } from '../global-config-loader.js';
+
+describe('GLOBAL_CONFIG_DIR constant', () => {
+  it('uses FORGE_CONFIG_PATH env var when set', async () => {
+    const originalEnv = process.env.FORGE_CONFIG_PATH;
+    process.env.FORGE_CONFIG_PATH = '/custom/config/path';
+    vi.resetModules();
+    const { GLOBAL_CONFIG_DIR } = await import('../global-config-loader.js');
+    expect(GLOBAL_CONFIG_DIR).toBe('/custom/config/path');
+    if (originalEnv === undefined) {
+      delete process.env.FORGE_CONFIG_PATH;
+    } else {
+      process.env.FORGE_CONFIG_PATH = originalEnv;
+    }
+    vi.resetModules();
+  });
+
+  it('falls back to os.homedir() path when FORGE_CONFIG_PATH is not set', async () => {
+    const originalEnv = process.env.FORGE_CONFIG_PATH;
+    delete process.env.FORGE_CONFIG_PATH;
+    vi.resetModules();
+    const { GLOBAL_CONFIG_DIR } = await import('../global-config-loader.js');
+    expect(GLOBAL_CONFIG_DIR).toBe(path.join(os.homedir(), 'Horus', 'data', 'config'));
+    if (originalEnv !== undefined) {
+      process.env.FORGE_CONFIG_PATH = originalEnv;
+    }
+    vi.resetModules();
+  });
+});
 
 describe('Global Config Loader', () => {
   let tmpDir: string;
