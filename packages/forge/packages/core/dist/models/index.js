@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RepoWorkflowSchema = exports.WorkflowStrategySchema = exports.RepoIndexSchema = exports.RepoIndexEntrySchema = exports.WorkspaceStoreSchema = exports.WorkspaceRecordSchema = exports.WorkspaceRepoSchema = exports.WorkspaceStatusSchema = exports.LockedArtifactSchema = exports.LockFileSchema = exports.ReposConfigSchema = exports.McpEndpointsSchema = exports.McpEndpointSchema = exports.WorkspaceSettingsSchema = exports.GlobalPluginEntrySchema = exports.GlobalConfigSchema = exports.RegistryConfigSchema = exports.ForgeConfigSchema = exports.WorkspaceConfigMetaSchema = exports.PluginMetaSchema = exports.AgentMetaSchema = exports.SemVerRangeSchema = exports.SemVerSchema = exports.SkillMetaSchema = void 0;
+exports.RepoWorkflowSchema = exports.WorkflowStrategySchema = exports.SessionStoreSchema = exports.SessionRecordSchema = exports.SessionWorkflowSchema = exports.RepoSourceSchema = exports.RepoIndexSchema = exports.RepoIndexEntrySchema = exports.RepoIndexWorkflowSchema = exports.WorkspaceStoreSchema = exports.WorkspaceRecordSchema = exports.WorkspaceRepoSchema = exports.WorkspaceStatusSchema = exports.LockedArtifactSchema = exports.LockFileSchema = exports.ReposConfigSchema = exports.McpEndpointsSchema = exports.McpEndpointSchema = exports.WorkspaceSettingsSchema = exports.GlobalPluginEntrySchema = exports.GlobalConfigSchema = exports.RegistryConfigSchema = exports.ForgeConfigSchema = exports.WorkspaceConfigMetaSchema = exports.PluginMetaSchema = exports.AgentMetaSchema = exports.SemVerRangeSchema = exports.SemVerSchema = exports.SkillMetaSchema = void 0;
 // Skill Meta
 var skill_meta_js_1 = require("./skill-meta.js");
 Object.defineProperty(exports, "SkillMetaSchema", { enumerable: true, get: function () { return skill_meta_js_1.SkillMetaSchema; } });
@@ -39,8 +39,15 @@ Object.defineProperty(exports, "WorkspaceRecordSchema", { enumerable: true, get:
 Object.defineProperty(exports, "WorkspaceStoreSchema", { enumerable: true, get: function () { return workspace_record_js_1.WorkspaceStoreSchema; } });
 // Repo Index
 var repo_index_js_1 = require("./repo-index.js");
+Object.defineProperty(exports, "RepoIndexWorkflowSchema", { enumerable: true, get: function () { return repo_index_js_1.RepoIndexWorkflowSchema; } });
 Object.defineProperty(exports, "RepoIndexEntrySchema", { enumerable: true, get: function () { return repo_index_js_1.RepoIndexEntrySchema; } });
 Object.defineProperty(exports, "RepoIndexSchema", { enumerable: true, get: function () { return repo_index_js_1.RepoIndexSchema; } });
+// Session
+var session_js_1 = require("./session.js");
+Object.defineProperty(exports, "RepoSourceSchema", { enumerable: true, get: function () { return session_js_1.RepoSourceSchema; } });
+Object.defineProperty(exports, "SessionWorkflowSchema", { enumerable: true, get: function () { return session_js_1.SessionWorkflowSchema; } });
+Object.defineProperty(exports, "SessionRecordSchema", { enumerable: true, get: function () { return session_js_1.SessionRecordSchema; } });
+Object.defineProperty(exports, "SessionStoreSchema", { enumerable: true, get: function () { return session_js_1.SessionStoreSchema; } });
 // Repo Workflow
 var repo_workflow_js_1 = require("./repo-workflow.js");
 Object.defineProperty(exports, "WorkflowStrategySchema", { enumerable: true, get: function () { return repo_workflow_js_1.WorkflowStrategySchema; } });

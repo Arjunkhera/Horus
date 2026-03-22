@@ -12,6 +12,9 @@ export interface RepoCloneResult {
     branch: string;
     origin: string;
 }
+export interface CreateReferenceCloneResult {
+    actualDefaultBranch: string;
+}
 export declare class RepoCloneError extends Error {
     readonly suggestion?: string | undefined;
     constructor(message: string, suggestion?: string | undefined);
@@ -25,6 +28,9 @@ export declare class RepoCloneError extends Error {
  *
  * When branchName is provided, creates and checks out that branch.
  * When omitted, the clone stays on the default branch.
+ *
+ * Returns the actual default branch detected from the clone (which may differ
+ * from opts.defaultBranch if the index entry is stale, e.g. 'master' vs 'main').
  */
-export declare function createReferenceClone(opts: RepoCloneOptions): Promise<void>;
+export declare function createReferenceClone(opts: RepoCloneOptions): Promise<CreateReferenceCloneResult>;
 //# sourceMappingURL=repo-clone.d.ts.map

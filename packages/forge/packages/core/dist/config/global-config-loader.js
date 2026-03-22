@@ -16,11 +16,13 @@ const global_config_js_1 = require("../models/global-config.js");
 const path_utils_js_1 = require("./path-utils.js");
 /**
  * Default location for the global Forge configuration.
+ * Config lives under ~/Horus/data/config/ alongside other Horus data.
+ * Legacy path (~/.forge/config.yaml) is auto-migrated by the entrypoint on first run.
  */
-exports.GLOBAL_CONFIG_DIR = path_1.default.join(os_1.default.homedir(), '.forge');
-exports.GLOBAL_CONFIG_PATH = path_1.default.join(exports.GLOBAL_CONFIG_DIR, 'config.yaml');
+exports.GLOBAL_CONFIG_DIR = path_1.default.join(os_1.default.homedir(), 'Horus', 'data', 'config');
+exports.GLOBAL_CONFIG_PATH = path_1.default.join(exports.GLOBAL_CONFIG_DIR, 'forge.yaml');
 /**
- * Load the global Forge configuration from ~/.forge/config.yaml.
+ * Load the global Forge configuration from ~/Horus/data/config/forge.yaml.
  * Returns an empty config (no registries) if the file doesn't exist.
  * Expands all tilde paths to absolute paths.
  *
@@ -37,6 +39,15 @@ async function loadGlobalConfig(configPath = exports.GLOBAL_CONFIG_PATH) {
         }
         if (config.workspace.store_path) {
             config.workspace.store_path = (0, path_utils_js_1.expandPath)(config.workspace.store_path);
+        }
+        if (config.workspace.sessions_path) {
+            config.workspace.sessions_path = (0, path_utils_js_1.expandPath)(config.workspace.sessions_path);
+        }
+        if (config.workspace.managed_repos_path) {
+            config.workspace.managed_repos_path = (0, path_utils_js_1.expandPath)(config.workspace.managed_repos_path);
+        }
+        if (config.workspace.sessions_root) {
+            config.workspace.sessions_root = (0, path_utils_js_1.expandPath)(config.workspace.sessions_root);
         }
         if (config.repos.index_path) {
             config.repos.index_path = (0, path_utils_js_1.expandPath)(config.repos.index_path);
@@ -61,8 +72,8 @@ async function loadGlobalConfig(configPath = exports.GLOBAL_CONFIG_PATH) {
     }
 }
 /**
- * Save a global config to ~/.forge/config.yaml.
- * Creates the ~/.forge directory if it doesn't exist.
+ * Save a global config to ~/Horus/data/config/forge.yaml.
+ * Creates the config directory if it doesn't exist.
  * Does NOT expand paths — stores them as-is (tilde format is fine).
  *
  * @param config - The global config to write (can be partial, will be validated).
