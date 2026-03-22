@@ -413,10 +413,7 @@ workspace
       }
       console.log(`  Repos:       ${record.repos.length}`);
       for (const repo of record.repos) {
-        console.log(`    - ${repo.name} (${repo.branch})`);
-        if (repo.worktreePath) {
-          console.log(`      Worktree: ${repo.worktreePath}`);
-        }
+        console.log(`    - ${repo.name} (${repo.localPath})`);
       }
       console.log();
     } catch (err: any) {
