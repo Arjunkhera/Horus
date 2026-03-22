@@ -4,3 +4,8 @@ node_modules
 **/node_modules
 .DS_Store
 **/.DS_Store
+# npm lock files (repo uses pnpm)
+package-lock.json
+**/package-lock.json
+# stale pre-monorepo CLI build directory
+cli/
