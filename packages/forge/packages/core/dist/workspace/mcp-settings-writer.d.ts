@@ -7,20 +7,18 @@ export interface McpServerEntry {
     url: string;
 }
 /**
- * Merge the given MCP server entries and permissions into
- * {workspacePath}/.claude/settings.local.json using Claude Code's native
- * HTTP transport. Preserves all existing settings.
+ * Merge the given MCP server entries and permissions into Claude Code settings
+ * for the workspace. Preserves all existing settings.
  *
- * Writes to settings.local.json (machine-specific, gitignored) because it
- * contains localhost URLs that differ per machine.
+ * Writes to two files:
+ * - settings.local.json — MCP server URLs, hooks, and permissions (machine-specific,
+ *   gitignored). Contains localhost URLs that differ per machine.
+ * - settings.json — permissions only (project-level, committed to git). Required
+ *   because Claude Code only reliably suppresses approval prompts when the permission
+ *   rule exists in settings.json; settings.local.json alone is insufficient.
  *
- * Each entry produces a mcpServers record like:
+ * Each mcpServers entry in settings.local.json looks like:
  *   "anvil": { "type": "http", "url": "http://localhost:8100/mcp" }
- *
- * Permissions from `claude_permissions` in ~/.forge/config.yaml are merged
- * into the file so that the local settings don't shadow the user's global
- * ~/.claude/settings.json permissions (Claude Code treats a local
- * settings.local.json as authoritative when it exists).
  */
 export declare function updateClaudeMcpServers(servers: McpServerEntry[], workspacePath: string, _hostWorkspacePath?: string, claudePermissions?: ClaudePermissions): Promise<void>;
 /**

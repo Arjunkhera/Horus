@@ -7,6 +7,7 @@ export { GlobalConfigSchema, GlobalPluginEntrySchema, WorkspaceSettingsSchema, M
 export { LockFileSchema, LockedArtifactSchema, type LockFile, type LockedArtifact, } from './lock-file.js';
 export { WorkspaceStatusSchema, WorkspaceRepoSchema, WorkspaceRecordSchema, WorkspaceStoreSchema, type WorkspaceStatus, type WorkspaceRepo, type WorkspaceRecord, type WorkspaceStore, } from './workspace-record.js';
 export type { ArtifactType, ArtifactRef, ArtifactMeta, ArtifactBundle, SearchResult, ResolvedArtifact, FileOperation, InstallReport, ConflictRecord, ConflictStrategy, MergeReport, ArtifactSummary, } from './shared-types.js';
-export { RepoIndexEntrySchema, RepoIndexSchema, type RepoIndexEntry, type RepoIndex, } from './repo-index.js';
+export { RepoIndexWorkflowSchema, RepoIndexEntrySchema, RepoIndexSchema, type RepoIndexWorkflow, type RepoIndexEntry, type RepoIndex, } from './repo-index.js';
+export { RepoSourceSchema, SessionWorkflowSchema, SessionRecordSchema, SessionStoreSchema, type RepoSource, type SessionWorkflow, type SessionRecord, type SessionStore, } from './session.js';
 export { WorkflowStrategySchema, RepoWorkflowSchema, type WorkflowStrategy, type RepoWorkflow, } from './repo-workflow.js';
 //# sourceMappingURL=index.d.ts.map

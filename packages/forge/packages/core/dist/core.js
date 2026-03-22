@@ -18,6 +18,7 @@ const registry_js_1 = require("./registry/registry.js");
 const resolver_js_1 = require("./resolver/resolver.js");
 const compiler_js_1 = require("./compiler/compiler.js");
 const claude_code_strategy_js_1 = require("./compiler/claude-code-strategy.js");
+const cursor_strategy_js_1 = require("./compiler/cursor-strategy.js");
 const global_claude_code_strategy_js_1 = require("./compiler/global-claude-code-strategy.js");
 const claude_md_writer_js_1 = require("./compiler/claude-md-writer.js");
 const filesystem_adapter_js_1 = require("./adapters/filesystem-adapter.js");
@@ -30,6 +31,7 @@ const repo_index_store_js_1 = require("./repo/repo-index-store.js");
 const repo_index_query_js_1 = require("./repo/repo-index-query.js");
 const vault_client_js_1 = require("./vault/vault-client.js");
 const repo_clone_js_1 = require("./repo/repo-clone.js");
+const repo_develop_js_1 = require("./repo/repo-develop.js");
 const path_utils_js_1 = require("./config/path-utils.js");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 /**
@@ -62,6 +64,7 @@ class ForgeCore {
         this.workspaceManager = new workspace_manager_js_1.WorkspaceManager(workspaceRoot);
         this.compiler = new compiler_js_1.Compiler();
         this.compiler.register(new claude_code_strategy_js_1.ClaudeCodeStrategy());
+        this.compiler.register(new cursor_strategy_js_1.CursorStrategy());
         this.globalConfigPath = options?.globalConfigPath;
     }
     async getMetadataStore() {
@@ -395,22 +398,33 @@ class ForgeCore {
             throw new errors_js_1.ForgeError('REPO_NOT_FOUND', `Repository "${opts.repoName}" not found in local index.`, 'Run: forge repo scan');
         }
         const mountPath = (0, path_utils_js_1.expandPath)(globalConfig.workspace.mount_path);
-        // Use explicit workspacePath if provided (MCP callers), else fall back to workspaceRoot
-        const effectiveRoot = opts.workspacePath ? path_1.default.resolve(opts.workspacePath) : path_1.default.resolve(this.workspaceRoot);
+        const hostMountPath = globalConfig.workspace.host_workspaces_path ?? mountPath;
+        // Resolve workspacePath, translating host path → container path when Forge
+        // runs in Docker. MCP callers pass $FORGE_WORKSPACE_PATH (host-side absolute
+        // path). Without translation, the host path never matches mountPath and the
+        // clone always lands in the workspaces root instead of the workspace folder.
+        let effectiveRoot = path_1.default.resolve(opts.workspacePath ?? this.workspaceRoot);
+        if (hostMountPath !== mountPath && effectiveRoot.startsWith(hostMountPath + path_1.default.sep)) {
+            effectiveRoot = mountPath + effectiveRoot.slice(hostMountPath.length);
+        }
         const resolvedMount = path_1.default.resolve(mountPath);
         const insideWorkspace = effectiveRoot.startsWith(resolvedMount + path_1.default.sep) && effectiveRoot !== resolvedMount;
         const basePath = insideWorkspace ? effectiveRoot : mountPath;
         const clonePath = opts.destPath ?? path_1.default.join(basePath, opts.repoName);
-        await (0, repo_clone_js_1.createReferenceClone)({
+        const { actualDefaultBranch } = await (0, repo_clone_js_1.createReferenceClone)({
             localPath: repo.localPath,
             remoteUrl: repo.remoteUrl,
             destPath: clonePath,
             branchName: opts.branchName,
             defaultBranch: repo.defaultBranch,
         });
+        // If the clone revealed a different default branch than the index stored, update it.
+        if (actualDefaultBranch !== repo.defaultBranch) {
+            const updatedRepos = repoIndex.repos.map((r) => r.name === repo.name ? { ...r, defaultBranch: actualDefaultBranch } : r);
+            await (0, repo_index_store_js_1.saveRepoIndex)({ ...repoIndex, repos: updatedRepos }, globalConfig.repos.index_path);
+        }
         const translatedRepo = translateRepoPath(repo, scan_paths, host_repos_path);
         // Compute host-side clone path for display (Docker path → host path)
-        const hostMountPath = globalConfig.workspace.host_workspaces_path ?? mountPath;
         const cloneRelative = path_1.default.relative(mountPath, clonePath);
         const hostClonePath = path_1.default.join(hostMountPath, cloneRelative);
         const origin = repo.remoteUrl ?? translatedRepo.localPath;
@@ -418,9 +432,40 @@ class ForgeCore {
             repoName: opts.repoName,
             clonePath,
             hostClonePath,
-            branch: opts.branchName ?? repo.defaultBranch,
+            branch: opts.branchName ?? actualDefaultBranch,
             origin,
         };
+    }
+    /**
+     * Start or resume a code session for a work item on a repository.
+     *
+     * Implements the 3-tier repo resolution strategy:
+     *   Tier 1 — repo index (user's local scan_paths)
+     *   Tier 2 — managed pool (~/Horus/data/repos/<name>/)
+     *   Tier 3 — not found → error with actionable message
+     *
+     * Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/.
+     * If a session already exists for the same workItem+repo, it is resumed.
+     * A second concurrent agent gets a separate slot with a "-2" suffix.
+     *
+     * Returns `needs_workflow_confirmation` when the repo has no saved workflow
+     * and no `workflow` parameter is provided.
+     */
+    async repoDevelop(opts) {
+        const globalConfig = await (0, global_config_loader_js_1.loadGlobalConfig)(this.globalConfigPath);
+        let repoIndex = await (0, repo_index_store_js_1.loadRepoIndex)(globalConfig.repos.index_path);
+        // Auto-scan if no index exists
+        if (!repoIndex && globalConfig.repos.scan_paths.length > 0) {
+            repoIndex = await this.repoScan();
+        }
+        // Provide a saveRepoIndex callback so repoDevelop can persist workflow saves
+        const saveRepoIndexFn = async (repos) => {
+            const currentIndex = await (0, repo_index_store_js_1.loadRepoIndex)(globalConfig.repos.index_path);
+            if (currentIndex) {
+                await (0, repo_index_store_js_1.saveRepoIndex)({ ...currentIndex, repos }, globalConfig.repos.index_path);
+            }
+        };
+        return (0, repo_develop_js_1.repoDevelop)(opts, globalConfig, repoIndex, saveRepoIndexFn);
     }
     /**
      * Create a new workspace from a workspace config artifact.
@@ -493,7 +538,7 @@ class ForgeCore {
      * 2. Emits skills to ~/.claude/skills/ using GlobalClaudeCodeStrategy
      * 3. Reads plugin's resources/rules/global-rules.md
      * 4. Upserts a managed section in ~/.claude/CLAUDE.md
-     * 5. Tracks installed files in ~/.forge/config.yaml global_plugins
+     * 5. Tracks installed files in ~/Horus/data/config/forge.yaml global_plugins
      */
     async installGlobal(ref) {
         const parsed = this.parseRef(ref);
@@ -671,7 +716,7 @@ class ForgeCore {
         catch {
             // No workspace config — fall through to global config below
         }
-        // Load global config (~/.forge/config.yaml) for fallback registries
+        // Load global config (~/Horus/data/config/forge.yaml) for fallback registries
         const globalConfig = await (0, global_config_loader_js_1.loadGlobalConfig)(this.globalConfigPath);
         if (!config) {
             // No workspace forge.yaml — use global config registries only
