@@ -84,8 +84,10 @@ export type {
 
 // Repo Index
 export {
+  RepoIndexWorkflowSchema,
   RepoIndexEntrySchema,
   RepoIndexSchema,
+  type RepoIndexWorkflow,
   type RepoIndexEntry,
   type RepoIndex,
 } from './repo-index.js';

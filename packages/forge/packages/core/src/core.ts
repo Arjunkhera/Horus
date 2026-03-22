@@ -30,7 +30,7 @@ import type {
 } from './models/index.js';
 import type { GlobalPluginEntry } from './models/global-config.js';
 import type { ForgeConfig, RegistryConfig } from './models/forge-config.js';
-import type { RepoIndex, RepoIndexEntry } from './models/repo-index.js';
+import type { RepoIndex, RepoIndexEntry, RepoIndexWorkflow } from './models/repo-index.js';
 import type { RepoWorkflow, WorkflowStrategy } from './models/repo-workflow.js';
 import { ForgeError } from './adapters/errors.js';
 import { loadGlobalConfig, saveGlobalConfig } from './config/global-config-loader.js';
@@ -91,6 +91,42 @@ export interface GlobalPluginInfo {
   version: string;
   installedAt: string;
   files: string[];
+}
+
+/**
+ * Auto-detected workflow values returned when user confirmation is needed.
+ */
+export interface AutoDetectedWorkflow {
+  type: 'owner' | 'fork' | 'contributor';
+  upstream?: string;
+  fork?: string;
+  pushTo: string;
+  prTarget: { repo: string; branch: string };
+  branchPattern?: string;
+  commitFormat?: string;
+  remotesSnapshot?: Record<string, string>;
+}
+
+/**
+ * Result returned by `repoWorkflow()`.
+ *
+ * When `needsConfirmation` is true, the agent should present `autoDetected`
+ * values to the user for confirmation, then call `repoWorkflowSave()`.
+ *
+ * When `source` is 'index', the workflow was previously confirmed and saved.
+ * A `stalenessWarning` may be present if remotes changed since confirmation.
+ */
+export interface RepoWorkflowResult extends RepoWorkflow {
+  /** True when workflow has not been confirmed and user should verify */
+  needsConfirmation?: boolean;
+  /** Auto-detected values to present to the user for confirmation */
+  autoDetected?: AutoDetectedWorkflow;
+  /** ISO timestamp when workflow was last confirmed (index source only) */
+  confirmedAt?: string;
+  /** Who confirmed the workflow (index source only) */
+  confirmedBy?: 'user' | 'auto';
+  /** Warning if remotes have changed since confirmation (index source only) */
+  stalenessWarning?: string;
 }
 
 /**
@@ -410,12 +446,49 @@ export class ForgeCore {
    * Resolve the git workflow configuration for a repository.
    *
    * Resolution order:
+   *   0. Repo index confirmed workflow — previously saved to repos.json
    *   1. Vault repo profile  — shared, team-wide knowledge (hosting + workflow fields)
-   *   2. Auto-detect         — inspect local git remotes (upstream → fork, else direct)
+   *   2. Auto-detect         — inspect local git remotes (upstream → fork/contributor, else owner)
    *   3. Default fallback    — direct strategy, main branch
+   *
+   * When no confirmed workflow exists in the index and Vault has no profile,
+   * returns a result with `needsConfirmation: true` and `autoDetected` values
+   * so the caller (agent) can present them to the user for confirmation.
+   * Once confirmed, call `repoWorkflowSave()` to persist the workflow.
    */
-  async repoWorkflow(repoName: string): Promise<RepoWorkflow> {
+  async repoWorkflow(repoName: string): Promise<RepoWorkflowResult> {
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const indexPath = globalConfig.repos.index_path;
+
+    // --- Tier 0: Confirmed workflow in repo index ---
+    const repoIndex = await loadRepoIndex(indexPath);
+    if (repoIndex) {
+      const q = new RepoIndexQuery(repoIndex.repos);
+      const entry = q.findByName(repoName);
+      if (entry?.workflow) {
+        // Check for staleness: compare current remotes to the snapshot at confirmation time
+        const stalenessWarning = await this._checkWorkflowStaleness(
+          entry.localPath,
+          entry.workflow,
+        );
+        const hosting = extractHostingFromUrl(entry.remoteUrl);
+        return {
+          repoName,
+          hosting,
+          workflow: {
+            strategy: entry.workflow.type as WorkflowStrategy,
+            defaultBranch: entry.defaultBranch,
+            prTarget: entry.workflow.prTarget.branch,
+            branchConvention: entry.workflow.branchPattern,
+          },
+          source: 'index',
+          confirmedAt: entry.workflow.confirmedAt,
+          confirmedBy: entry.workflow.confirmedBy,
+          stalenessWarning: stalenessWarning ?? undefined,
+        };
+      }
+    }
+
     const vaultEndpoint = globalConfig.mcp_endpoints.vault;
 
     // --- Tier 1: Vault repo profile ---
@@ -449,17 +522,29 @@ export class ForgeCore {
     // --- Tier 2: Auto-detect from local git remotes ---
     const repo = await this.repoResolve({ name: repoName });
     if (repo) {
-      const strategy = await this._detectWorkflowStrategy(repo.localPath);
+      const detected = await this._detectWorkflowFull(repo.localPath, repo.remoteUrl);
       const hosting = extractHostingFromUrl(repo.remoteUrl);
       return {
         repoName,
         hosting,
         workflow: {
-          strategy,
+          strategy: detected.type as WorkflowStrategy,
           defaultBranch: repo.defaultBranch,
           prTarget: repo.defaultBranch,
         },
         source: 'auto-detect',
+        needsConfirmation: true,
+        autoDetected: {
+          type: detected.type,
+          upstream: detected.upstream,
+          fork: detected.fork,
+          pushTo: detected.pushTo,
+          prTarget: {
+            repo: hosting.org ? `${hosting.org}/${repoName}` : repoName,
+            branch: repo.defaultBranch,
+          },
+          remotesSnapshot: detected.remotesSnapshot,
+        },
       };
     }
 
@@ -469,7 +554,69 @@ export class ForgeCore {
       hosting: { hostname: 'github.com', org: '' },
       workflow: { strategy: 'direct', defaultBranch: 'main', prTarget: 'main' },
       source: 'default',
+      needsConfirmation: true,
+      autoDetected: {
+        type: 'owner',
+        pushTo: 'origin',
+        prTarget: { repo: repoName, branch: 'main' },
+      },
     };
+  }
+
+  /**
+   * Save confirmed workflow metadata for a repository to the repo index.
+   *
+   * Called after the user confirms (or accepts) the auto-detected workflow
+   * values returned by `repoWorkflow()` with `needsConfirmation: true`.
+   *
+   * @param repoName - Repository name in the index
+   * @param workflow - Confirmed workflow values (agent passes user-confirmed or auto-detected)
+   * @param confirmedBy - "user" if user explicitly confirmed, "auto" if accepted without edits
+   */
+  async repoWorkflowSave(
+    repoName: string,
+    workflow: Omit<RepoIndexWorkflow, 'confirmedAt' | 'confirmedBy'>,
+    confirmedBy: 'user' | 'auto' = 'user',
+  ): Promise<RepoIndexWorkflow> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const indexPath = globalConfig.repos.index_path;
+
+    let repoIndex = await loadRepoIndex(indexPath);
+    if (!repoIndex) {
+      if (globalConfig.repos.scan_paths.length > 0) {
+        repoIndex = await this.repoScan();
+      } else {
+        throw new ForgeError(
+          'REPO_INDEX_NOT_FOUND',
+          'Repository index not found.',
+          'Run: forge repo scan',
+        );
+      }
+    }
+
+    const q = new RepoIndexQuery(repoIndex.repos);
+    const entry = q.findByName(repoName);
+    if (!entry) {
+      throw new ForgeError(
+        'REPO_NOT_FOUND',
+        `Repository "${repoName}" not found in index.`,
+        'Run: forge repo scan',
+      );
+    }
+
+    const confirmedAt = new Date().toISOString();
+    const savedWorkflow: RepoIndexWorkflow = {
+      ...workflow,
+      confirmedAt,
+      confirmedBy,
+    };
+
+    const updatedRepos = repoIndex.repos.map(r =>
+      r.name === repoName ? { ...r, workflow: savedWorkflow } : r,
+    );
+    await saveRepoIndex({ ...repoIndex, repos: updatedRepos }, indexPath);
+
+    return savedWorkflow;
   }
 
   /**
@@ -795,23 +942,118 @@ export class ForgeCore {
   // Internal helpers
 
   /**
-   * Detect git workflow strategy from a repo's local remotes.
+   * Fetch all remotes and their fetch URLs from a local git repository.
+   * Returns a map of { remoteName → fetchUrl }.
+   * Returns empty map on any error.
+   */
+  private async _listRemotes(localPath: string): Promise<Record<string, string>> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['remote', '-v'],
+        { cwd: localPath, timeout: 3000 },
+      );
+      const result: Record<string, string> = {};
+      for (const line of stdout.trim().split('\n')) {
+        // Each line: "remoteName\turl (fetch)" or "remoteName\turl (push)"
+        const fetchMatch = line.match(/^(\S+)\s+(\S+)\s+\(fetch\)$/);
+        if (fetchMatch) {
+          result[fetchMatch[1]] = fetchMatch[2];
+        }
+      }
+      return result;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Full workflow detection from a repo's local remotes.
    *
-   * - Has an 'upstream' remote → fork strategy (push to origin fork, PR against upstream)
-   * - Otherwise              → direct strategy (push feature branch to shared origin)
+   * Strategy:
+   *   - Has 'upstream' remote  → fork  (origin = personal fork, upstream = canonical)
+   *   - No 'upstream'          → owner (sole maintainer, push directly to origin)
+   *
+   * Note: "contributor" (external collaborator, no fork, only branch) is rare
+   * in local git setups. We detect it when origin URL does not match the
+   * authenticated user's account, but since we can't check that without a
+   * GitHub API call, we default to "owner" for the auto-detect path.
+   * Users can correct this during confirmation.
+   */
+  private async _detectWorkflowFull(
+    localPath: string,
+    remoteUrl: string | null,
+  ): Promise<{
+    type: 'owner' | 'fork' | 'contributor';
+    upstream?: string;
+    fork?: string;
+    pushTo: string;
+    remotesSnapshot: Record<string, string>;
+  }> {
+    const remotes = await this._listRemotes(localPath);
+
+    if (remotes['upstream']) {
+      // Fork workflow: origin is the user's fork, upstream is the canonical repo
+      return {
+        type: 'fork',
+        upstream: remotes['upstream'],
+        fork: remotes['origin'],
+        pushTo: 'origin',
+        remotesSnapshot: remotes,
+      };
+    }
+
+    // Default: owner workflow (user has full commit access to origin)
+    return {
+      type: 'owner',
+      pushTo: 'origin',
+      remotesSnapshot: remotes,
+    };
+  }
+
+  /**
+   * Check whether the workflow metadata may be stale by comparing the current
+   * remote URLs to the snapshot taken at confirmation time.
+   *
+   * Returns a warning string if remotes have changed, null if unchanged.
+   * On any git error, returns null (fail silently).
+   */
+  private async _checkWorkflowStaleness(
+    localPath: string,
+    workflow: RepoIndexWorkflow,
+  ): Promise<string | null> {
+    if (!workflow.remotesSnapshot) return null;
+
+    const currentRemotes = await this._listRemotes(localPath);
+    const snapshot = workflow.remotesSnapshot;
+
+    // Check for any additions, removals, or URL changes
+    const snapshotKeys = Object.keys(snapshot);
+    const currentKeys = Object.keys(currentRemotes);
+
+    const added = currentKeys.filter(k => !snapshot[k]);
+    const removed = snapshotKeys.filter(k => !currentRemotes[k]);
+    const changed = snapshotKeys.filter(
+      k => currentRemotes[k] && currentRemotes[k] !== snapshot[k],
+    );
+
+    if (added.length > 0 || removed.length > 0 || changed.length > 0) {
+      const parts: string[] = [];
+      if (added.length > 0) parts.push(`added: ${added.join(', ')}`);
+      if (removed.length > 0) parts.push(`removed: ${removed.join(', ')}`);
+      if (changed.length > 0) parts.push(`changed: ${changed.join(', ')}`);
+      return `Workflow may be stale — remotes have changed since confirmation (${parts.join('; ')}). Consider re-confirming via forge_repo_workflow.`;
+    }
+
+    return null;
+  }
+
+  /**
+   * @deprecated Use _detectWorkflowFull instead.
+   * Kept for backward compatibility with any callers that only need the strategy string.
    */
   private async _detectWorkflowStrategy(localPath: string): Promise<WorkflowStrategy> {
-    try {
-      const { stdout } = await execFileAsync('git', ['remote'], {
-        cwd: localPath,
-        timeout: 3000,
-      });
-      const remotes = stdout.trim().split('\n').map(r => r.trim()).filter(Boolean);
-      if (remotes.includes('upstream')) return 'fork';
-    } catch {
-      // git not available or not a git repo — fall back to direct
-    }
-    return 'direct';
+    const detected = await this._detectWorkflowFull(localPath, null);
+    return detected.type as WorkflowStrategy;
   }
 
   private async buildRegistry(): Promise<Registry> {
