@@ -10,8 +10,12 @@ import { expandPath } from './path-utils.js';
  * Default location for the global Forge configuration.
  * Config lives under ~/Horus/data/config/ alongside other Horus data.
  * Legacy path (~/.forge/config.yaml) is auto-migrated by the entrypoint on first run.
+ *
+ * In Docker, FORGE_CONFIG_PATH is exported by the entrypoint so the container path
+ * (/data/config) takes precedence over the host-style os.homedir() path.
  */
-export const GLOBAL_CONFIG_DIR = path.join(os.homedir(), 'Horus', 'data', 'config');
+export const GLOBAL_CONFIG_DIR = process.env.FORGE_CONFIG_PATH
+  ?? path.join(os.homedir(), 'Horus', 'data', 'config');
 export const GLOBAL_CONFIG_PATH = path.join(GLOBAL_CONFIG_DIR, 'forge.yaml');
 
 /**
