@@ -9,7 +9,6 @@ import {
   generateBranchName,
   type WorkspaceCreateOptions,
 } from '../workspace-creator.js';
-import { createReferenceClone } from '../../repo/repo-clone.js';
 
 describe('workspace-creator helpers', () => {
   describe('slugify()', () => {
@@ -128,7 +127,7 @@ describe('WorkspaceCreator (unit tests with mocks)', () => {
   });
 });
 
-describe('WorkspaceCreator — CLAUDE.md uses worktreePath when clone succeeds', () => {
+describe('WorkspaceCreator — CLAUDE.md is context-only (no clone paths)', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
@@ -139,21 +138,7 @@ describe('WorkspaceCreator — CLAUDE.md uses worktreePath when clone succeeds',
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('CLAUDE.md path for a repo points inside the workspace, not at the source repo', async () => {
-    // Build a minimal local git repo so createReferenceClone can succeed
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const runGit = promisify(execFile);
-
-    const localRepoDir = path.join(tmpDir, 'repos', 'Anvil');
-    await fs.mkdir(localRepoDir, { recursive: true });
-    await runGit('git', ['init', localRepoDir]);
-    await runGit('git', ['-C', localRepoDir, 'checkout', '-b', 'main']);
-    await fs.writeFile(path.join(localRepoDir, 'README.md'), '# Anvil');
-    await runGit('git', ['-C', localRepoDir, 'add', '.']);
-    await runGit('git', ['-C', localRepoDir, '-c', 'user.name=Test', '-c', 'user.email=t@t.com',
-      'commit', '-m', 'init']);
-
+  it('CLAUDE.md references forge_develop for code isolation (no repos specified)', async () => {
     const mockForge = {
       resolve: vi.fn().mockResolvedValue({
         ref: { version: '1.0.0' },
@@ -177,24 +162,23 @@ describe('WorkspaceCreator — CLAUDE.md uses worktreePath when clone succeeds',
       repoWorkflow: vi.fn().mockRejectedValue(new Error('no workflow')),
     };
 
-    // Use loadGlobalConfig's actual path resolution but with a custom mount path
-    // by passing mountPath override so the workspace goes into tmpDir
     const creator = new WorkspaceCreator(mockForge as any);
     const record = await creator.create({
       configName: 'sdlc-default',
-      repos: ['Anvil'],
       storyTitle: 'test story',
       mountPath: path.join(tmpDir, 'workspaces'),
     });
 
     const claudeMdContent = await fs.readFile(path.join(record.path, 'CLAUDE.md'), 'utf-8');
 
-    // The CLAUDE.md should reference the workspace clone, not the source repo
-    // Fix 4: when worktreePath is set, path = hostWorkspacePath/repoName
-    // The workspace clone dir is <workspacePath>/Anvil
-    expect(claudeMdContent).not.toContain(localRepoDir);
-    // Path ends with workspaceName/Anvil
-    expect(claudeMdContent).toContain(`${record.name}/Anvil`);
+    // Should show "(none)" for repos when none are linked
+    expect(claudeMdContent).toContain('(none)');
+    // Should NOT have any worktree/clone path reference
+    expect(claudeMdContent).not.toContain('worktreePath');
+    // Should mention forge_develop for code isolation
+    expect(claudeMdContent).toContain('forge_develop');
+    // Should NOT reference forge_repo_clone
+    expect(claudeMdContent).not.toContain('forge_repo_clone');
   });
 });
 
@@ -253,115 +237,90 @@ describe('WorkspaceCreator — workspace.env includes FORGE_WORKSPACE_PATH vars'
   });
 });
 
-describe('reference clone integration', () => {
+describe('WorkspaceCreator — no git clones created during workspace creation', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-refclone-'));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-noclone-'));
   });
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('clones a local repo and creates the feature branch', async () => {
-    // Set up a bare local repo to act as the "remote"
-    const remoteDir = path.join(tmpDir, 'remote.git');
-    const localDir = path.join(tmpDir, 'local');
-    const cloneDir = path.join(tmpDir, 'ws', 'myrepo');
+  it('workspace folder contains no git clones after creation', async () => {
+    const mockForge = {
+      resolve: vi.fn().mockResolvedValue({
+        ref: { version: '1.0.0' },
+        bundle: {
+          meta: {
+            skills: [],
+            plugins: [],
+            mcp_servers: {},
+            git_workflow: {
+              branch_pattern: 'feature/{id}',
+              base_branch: 'main',
+              commit_format: 'conventional',
+              stash_before_checkout: false,
+              pr_template: false,
+              signed_commits: false,
+            },
+          },
+        },
+      }),
+      install: vi.fn().mockResolvedValue(undefined),
+      repoWorkflow: vi.fn().mockRejectedValue(new Error('no workflow')),
+    };
 
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const runGit = promisify(execFile);
+    const mountPath = path.join(tmpDir, 'workspaces');
+    const creator = new WorkspaceCreator(mockForge as any);
+    const record = await creator.create({
+      configName: 'sdlc-default',
+      mountPath,
+    });
 
-    // Create a minimal git repo with one commit
-    await runGit('git', ['init', '--bare', remoteDir]);
-    await runGit('git', ['clone', remoteDir, localDir]);
-    await fs.writeFile(path.join(localDir, 'README.md'), '# test');
-    await runGit('git', ['-C', localDir, 'add', '.']);
-    await runGit('git', ['-C', localDir, '-c', 'user.name=Test', '-c', 'user.email=t@t.com',
-      'commit', '-m', 'init']);
-    await runGit('git', ['-C', localDir, 'push', 'origin', 'HEAD:main']);
+    // Verify the workspace was created
+    const stat = await fs.stat(record.path);
+    expect(stat.isDirectory()).toBe(true);
 
-    // Create workspace destination parent
-    await fs.mkdir(path.join(tmpDir, 'ws'), { recursive: true });
-
-    // Simulate what createReferenceClone does:
-    // git clone --reference <localDir> <remoteDir> <cloneDir>
-    await runGit('git', ['clone', '--reference', localDir, remoteDir, cloneDir]);
-
-    // Verify clone exists and has the README
-    const readme = await fs.readFile(path.join(cloneDir, 'README.md'), 'utf-8');
-    expect(readme).toBe('# test');
-
-    // Create a feature branch
-    await runGit('git', ['-C', cloneDir, 'checkout', '-b', 'feature/test-branch', 'origin/main']);
-
-    const { stdout } = await runGit('git', ['-C', cloneDir, 'branch', '--show-current']);
-    expect(stdout.trim()).toBe('feature/test-branch');
+    // Verify repos array has no worktreePath field
+    for (const repo of record.repos) {
+      expect(Object.keys(repo)).not.toContain('worktreePath');
+    }
   });
 
-  it('falls back to local clone when remote URL is unreachable', async () => {
-    const localDir = path.join(tmpDir, 'local');
-    const cloneDir = path.join(tmpDir, 'ws', 'myrepo');
+  it('workspace creation completes without git operations', async () => {
+    const mockForge = {
+      resolve: vi.fn().mockResolvedValue({
+        ref: { version: '1.0.0' },
+        bundle: {
+          meta: {
+            skills: [],
+            plugins: [],
+            mcp_servers: {},
+            git_workflow: {
+              branch_pattern: 'feature/{id}',
+              base_branch: 'main',
+              commit_format: 'conventional',
+              stash_before_checkout: false,
+              pr_template: false,
+              signed_commits: false,
+            },
+          },
+        },
+      }),
+      install: vi.fn().mockResolvedValue(undefined),
+      repoWorkflow: vi.fn().mockRejectedValue(new Error('no workflow')),
+    };
 
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const runGit = promisify(execFile);
+    const mountPath = path.join(tmpDir, 'workspaces');
+    const start = Date.now();
+    const creator = new WorkspaceCreator(mockForge as any);
+    await creator.create({ configName: 'sdlc-default', mountPath });
+    const elapsed = Date.now() - start;
 
-    // Create a real local git repo with one commit
-    await runGit('git', ['init', localDir]);
-    await runGit('git', ['-C', localDir, 'checkout', '-b', 'main']);
-    await fs.writeFile(path.join(localDir, 'README.md'), '# local');
-    await runGit('git', ['-C', localDir, 'add', '.']);
-    await runGit('git', ['-C', localDir, '-c', 'user.name=Test', '-c', 'user.email=t@t.com',
-      'commit', '-m', 'init']);
-
-    await fs.mkdir(path.join(tmpDir, 'ws'), { recursive: true });
-
-    // Use a bogus/unreachable remote URL
-    await expect(createReferenceClone({
-      localPath: localDir,
-      remoteUrl: 'git@bogus.invalid:x/y.git',
-      destPath: cloneDir,
-      branchName: 'feature/test-fallback',
-      defaultBranch: 'main',
-    })).resolves.toMatchObject({ actualDefaultBranch: 'main' });
-
-    // Verify the clone exists and is on the feature branch
-    const { stdout: branch } = await runGit('git', ['-C', cloneDir, 'branch', '--show-current']);
-    expect(branch.trim()).toBe('feature/test-fallback');
-
-    const readme = await fs.readFile(path.join(cloneDir, 'README.md'), 'utf-8');
-    expect(readme).toBe('# local');
-  });
-
-  it('reference clone is independent — changes do not affect local repo', async () => {
-    const remoteDir = path.join(tmpDir, 'remote.git');
-    const localDir = path.join(tmpDir, 'local');
-    const cloneDir = path.join(tmpDir, 'ws', 'myrepo');
-
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const runGit = promisify(execFile);
-
-    await runGit('git', ['init', '--bare', remoteDir]);
-    await runGit('git', ['clone', remoteDir, localDir]);
-    await fs.writeFile(path.join(localDir, 'README.md'), '# original');
-    await runGit('git', ['-C', localDir, 'add', '.']);
-    await runGit('git', ['-C', localDir, '-c', 'user.name=Test', '-c', 'user.email=t@t.com',
-      'commit', '-m', 'init']);
-    await runGit('git', ['-C', localDir, 'push', 'origin', 'HEAD:main']);
-
-    await fs.mkdir(path.join(tmpDir, 'ws'), { recursive: true });
-    await runGit('git', ['clone', '--reference', localDir, remoteDir, cloneDir]);
-    await runGit('git', ['-C', cloneDir, 'checkout', '-b', 'feature/branch', 'origin/main']);
-
-    // Modify file in clone — local repo must be unaffected
-    await fs.writeFile(path.join(cloneDir, 'README.md'), '# modified in workspace');
-
-    const localReadme = await fs.readFile(path.join(localDir, 'README.md'), 'utf-8');
-    expect(localReadme).toBe('# original');
+    // With no git operations, creation should be fast (well under 10 seconds)
+    // Using a generous threshold to avoid flakiness in CI
+    expect(elapsed).toBeLessThan(10000);
   });
 });
-

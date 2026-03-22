@@ -1,11 +1,6 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { promises as fs } from 'fs';
-import path from 'path';
 import { WorkspaceMetadataStore } from './workspace-metadata-store.js';
 import type { WorkspaceRecord, WorkspaceStatus } from '../models/workspace-record.js';
-
-const execFileAsync = promisify(execFile);
 
 // Valid state transitions
 const VALID_TRANSITIONS: Record<WorkspaceStatus, WorkspaceStatus[]> = {
@@ -54,49 +49,15 @@ export class WorkspaceLifecycleManager {
 
   /**
    * Delete a workspace record and remove its files from disk.
-   * Optionally checks for uncommitted changes unless force=true.
+   *
+   * Workspaces are context-only — they contain no git clones or worktrees.
+   * The workspace folder is simply removed from disk. Use `forge_develop`
+   * sessions (tracked separately) to manage isolated code sessions.
    */
   async delete(id: string, opts?: { force?: boolean }): Promise<void> {
     const record = await this.store.get(id);
     if (!record) {
       throw new Error(`Workspace '${id}' not found`);
-    }
-
-    // Check for uncommitted changes unless force is set
-    if (opts?.force !== true) {
-      const hasUncommitted = await this.hasUncommittedChanges(record);
-      if (hasUncommitted) {
-        throw new Error('Workspace has uncommitted changes. Use --force to delete anyway.');
-      }
-    }
-
-    // Remove git worktrees
-    for (const repo of record.repos) {
-      if (repo.worktreePath) {
-        try {
-          await execFileAsync('git', ['worktree', 'remove', repo.worktreePath], {
-            cwd: repo.localPath,
-            timeout: 10000,
-          });
-        } catch {
-          // Try with --force if normal remove fails
-          try {
-            await execFileAsync('git', ['worktree', 'remove', '--force', repo.worktreePath], {
-              cwd: repo.localPath,
-              timeout: 10000,
-            });
-          } catch (err) {
-            console.warn(`[Forge] Warning: Could not remove worktree at ${repo.worktreePath}: ${err}`);
-          }
-        }
-
-        // Prune stale worktrees
-        try {
-          await execFileAsync('git', ['worktree', 'prune'], { cwd: repo.localPath });
-        } catch {
-          /* ignore */
-        }
-      }
     }
 
     // Remove workspace folder from disk
@@ -144,29 +105,6 @@ export class WorkspaceLifecycleManager {
     }
 
     return { cleaned, skipped };
-  }
-
-  /**
-   * Check if a workspace has uncommitted changes in any of its git worktrees.
-   */
-  private async hasUncommittedChanges(record: WorkspaceRecord): Promise<boolean> {
-    for (const repo of record.repos) {
-      if (repo.worktreePath) {
-        try {
-          const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
-            cwd: repo.worktreePath,
-            timeout: 5000,
-          });
-          if (stdout.trim().length > 0) {
-            return true;
-          }
-        } catch {
-          // Assume uncommitted if we can't check
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   /**
