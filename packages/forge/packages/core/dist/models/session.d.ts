@@ -103,6 +103,12 @@ export declare const SessionRecordSchema: z.ZodObject<{
     agentSlot: z.ZodDefault<z.ZodNumber>;
     /** ISO timestamp when the session was created */
     createdAt: z.ZodString;
+    /**
+     * ISO timestamp of the last significant activity in this session
+     * (updated on resume; used by cleanup age threshold).
+     * Defaults to createdAt when not present (backward-compatible).
+     */
+    lastModified: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     branch: string;
     createdAt: string;
@@ -122,6 +128,7 @@ export declare const SessionRecordSchema: z.ZodObject<{
     repoSource: "user" | "managed" | "cloned";
     agentSlot: number;
     hostSessionPath?: string | undefined;
+    lastModified?: string | undefined;
 }, {
     branch: string;
     createdAt: string;
@@ -141,6 +148,7 @@ export declare const SessionRecordSchema: z.ZodObject<{
     repoSource: "user" | "managed" | "cloned";
     hostSessionPath?: string | undefined;
     agentSlot?: number | undefined;
+    lastModified?: string | undefined;
 }>;
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
 /**
@@ -201,6 +209,12 @@ export declare const SessionStoreSchema: z.ZodObject<{
         agentSlot: z.ZodDefault<z.ZodNumber>;
         /** ISO timestamp when the session was created */
         createdAt: z.ZodString;
+        /**
+         * ISO timestamp of the last significant activity in this session
+         * (updated on resume; used by cleanup age threshold).
+         * Defaults to createdAt when not present (backward-compatible).
+         */
+        lastModified: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         branch: string;
         createdAt: string;
@@ -220,6 +234,7 @@ export declare const SessionStoreSchema: z.ZodObject<{
         repoSource: "user" | "managed" | "cloned";
         agentSlot: number;
         hostSessionPath?: string | undefined;
+        lastModified?: string | undefined;
     }, {
         branch: string;
         createdAt: string;
@@ -239,6 +254,7 @@ export declare const SessionStoreSchema: z.ZodObject<{
         repoSource: "user" | "managed" | "cloned";
         hostSessionPath?: string | undefined;
         agentSlot?: number | undefined;
+        lastModified?: string | undefined;
     }>, "many">;
 }, "strip", z.ZodTypeAny, {
     version: "1";
@@ -261,6 +277,7 @@ export declare const SessionStoreSchema: z.ZodObject<{
         repoSource: "user" | "managed" | "cloned";
         agentSlot: number;
         hostSessionPath?: string | undefined;
+        lastModified?: string | undefined;
     }[];
 }, {
     version: "1";
@@ -283,6 +300,7 @@ export declare const SessionStoreSchema: z.ZodObject<{
         repoSource: "user" | "managed" | "cloned";
         hostSessionPath?: string | undefined;
         agentSlot?: number | undefined;
+        lastModified?: string | undefined;
     }[];
 }>;
 export type SessionStore = z.infer<typeof SessionStoreSchema>;

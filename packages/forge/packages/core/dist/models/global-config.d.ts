@@ -38,6 +38,12 @@ export declare const WorkspaceSettingsSchema: z.ZodObject<{
      * Defaults to ~/Horus/data/sessions/.
      */
     sessions_root: z.ZodDefault<z.ZodString>;
+    /**
+     * Maximum number of active sessions before forge_develop emits a warning.
+     * Does NOT block session creation — only warns and suggests cleanup.
+     * Defaults to 20.
+     */
+    max_sessions: z.ZodDefault<z.ZodNumber>;
     host_workspaces_path: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     mount_path: string;
@@ -47,6 +53,7 @@ export declare const WorkspaceSettingsSchema: z.ZodObject<{
     sessions_path: string;
     managed_repos_path: string;
     sessions_root: string;
+    max_sessions: number;
     host_workspaces_path?: string | undefined;
 }, {
     mount_path?: string | undefined;
@@ -56,6 +63,7 @@ export declare const WorkspaceSettingsSchema: z.ZodObject<{
     sessions_path?: string | undefined;
     managed_repos_path?: string | undefined;
     sessions_root?: string | undefined;
+    max_sessions?: number | undefined;
     host_workspaces_path?: string | undefined;
 }>;
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
@@ -337,6 +345,12 @@ export declare const GlobalConfigSchema: z.ZodObject<{
          * Defaults to ~/Horus/data/sessions/.
          */
         sessions_root: z.ZodDefault<z.ZodString>;
+        /**
+         * Maximum number of active sessions before forge_develop emits a warning.
+         * Does NOT block session creation — only warns and suggests cleanup.
+         * Defaults to 20.
+         */
+        max_sessions: z.ZodDefault<z.ZodNumber>;
         host_workspaces_path: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         mount_path: string;
@@ -346,6 +360,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         sessions_path: string;
         managed_repos_path: string;
         sessions_root: string;
+        max_sessions: number;
         host_workspaces_path?: string | undefined;
     }, {
         mount_path?: string | undefined;
@@ -355,6 +370,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         sessions_path?: string | undefined;
         managed_repos_path?: string | undefined;
         sessions_root?: string | undefined;
+        max_sessions?: number | undefined;
         host_workspaces_path?: string | undefined;
     }>>;
     mcp_endpoints: z.ZodDefault<z.ZodObject<{
@@ -499,6 +515,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         sessions_path: string;
         managed_repos_path: string;
         sessions_root: string;
+        max_sessions: number;
         host_workspaces_path?: string | undefined;
     };
     mcp_endpoints: {
@@ -560,6 +577,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         sessions_path?: string | undefined;
         managed_repos_path?: string | undefined;
         sessions_root?: string | undefined;
+        max_sessions?: number | undefined;
         host_workspaces_path?: string | undefined;
     } | undefined;
     mcp_endpoints?: {

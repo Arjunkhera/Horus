@@ -36,6 +36,22 @@ export declare class SessionStoreManager {
      */
     list(): Promise<SessionRecord[]>;
     /**
+     * List sessions filtered by optional repo and/or workItem.
+     * Both filters are AND-combined when provided.
+     */
+    listFiltered(opts: {
+        repo?: string;
+        workItem?: string;
+    }): Promise<SessionRecord[]>;
+    /**
+     * Update the lastModified timestamp of a session in place.
+     */
+    touch(sessionId: string): Promise<void>;
+    /**
+     * Count total sessions across all work items.
+     */
+    count(): Promise<number>;
+    /**
      * Delete a session by sessionId.
      */
     remove(sessionId: string): Promise<void>;

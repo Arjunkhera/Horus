@@ -40,6 +40,8 @@ import { RepoIndexQuery } from './repo/repo-index-query.js';
 import { VaultClient, extractHostingFromUrl } from './vault/vault-client.js';
 import { createReferenceClone, type RepoCloneResult } from './repo/repo-clone.js';
 import { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
+import { sessionList, type SessionListOptions, type SessionListResult } from './session/session-list.js';
+import { sessionCleanup, type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
 import { expandPath } from './config/path-utils.js';
 
 const execFileAsync = promisify(execFile);
@@ -734,6 +736,28 @@ export class ForgeCore {
     };
 
     return repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn);
+  }
+
+  /**
+   * List active code sessions, optionally filtered by repo and/or workItem.
+   */
+  async sessionList(opts: SessionListOptions = {}): Promise<SessionListResult> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    return sessionList(opts, globalConfig);
+  }
+
+  /**
+   * Clean up sessions based on workItem, age threshold, or auto-policy.
+   *
+   * Auto-policy queries Anvil for work item status:
+   *   - done (7+ days ago) → eligible
+   *   - cancelled → eligible immediately
+   *   - in_progress / in_review → skip
+   *   - not found → warn, skip
+   */
+  async sessionCleanup(opts: SessionCleanupOptions): Promise<SessionCleanupResult> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    return sessionCleanup(opts, globalConfig);
   }
 
   /**

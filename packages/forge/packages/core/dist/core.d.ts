@@ -5,6 +5,8 @@ import type { RepoIndex, RepoIndexEntry } from './models/repo-index.js';
 import type { RepoWorkflow } from './models/repo-workflow.js';
 import { type RepoCloneResult } from './repo/repo-clone.js';
 import { type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
+import { type SessionListOptions, type SessionListResult } from './session/session-list.js';
+import { type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
 /**
  * Translate a Docker-internal repo localPath to the equivalent host path.
  * Returns the entry unchanged if host_repos_path is not configured or
@@ -147,6 +149,20 @@ export declare class ForgeCore {
      * and no `workflow` parameter is provided.
      */
     repoDevelop(opts: RepoDevelopOptions): Promise<RepoDevelopResponse>;
+    /**
+     * List active code sessions, optionally filtered by repo and/or workItem.
+     */
+    sessionList(opts?: SessionListOptions): Promise<SessionListResult>;
+    /**
+     * Clean up sessions based on workItem, age threshold, or auto-policy.
+     *
+     * Auto-policy queries Anvil for work item status:
+     *   - done (7+ days ago) → eligible
+     *   - cancelled → eligible immediately
+     *   - in_progress / in_review → skip
+     *   - not found → warn, skip
+     */
+    sessionCleanup(opts: SessionCleanupOptions): Promise<SessionCleanupResult>;
     /**
      * Create a new workspace from a workspace config artifact.
      * Resolves the workspace config, sets up folders, installs plugins,
