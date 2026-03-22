@@ -34,12 +34,16 @@ export const upCommand = new Command('up')
     }
 
     if (opts.pull) {
-      const pullSpinner = ora('Pulling latest images...').start();
+      console.log('');
+      console.log(chalk.bold('Pulling latest images...'));
       try {
-        await composeStreaming(runtime, runtime.name === 'podman' ? ['pull'] : ['pull', '--ignore-pull-failures']);
-        pullSpinner.succeed('Images up to date');
+        await composeStreaming(runtime, ['pull']);
+        console.log('');
+        console.log(chalk.green('✓ Pull complete'));
       } catch {
-        pullSpinner.warn('Could not pull images, using cached');
+        console.log('');
+        console.log(chalk.yellow('⚠  Warning: failed to pull one or more images — using cached versions.'));
+        console.log(chalk.dim('   Run `docker compose pull` to see which services failed.'));
       }
     }
 
