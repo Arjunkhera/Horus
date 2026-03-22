@@ -137,6 +137,7 @@ export type GlobalPluginEntry = z.infer<typeof GlobalPluginEntrySchema>;
 export const ClaudePermissionsSchema = z.object({
   allow: z.array(z.string()).default(['mcp__*__*']),
   deny: z.array(z.string()).default([]),
+  defaultMode: z.enum(['default', 'allowedTools', 'autoEdit', 'bypassPermissions', 'plan']).optional(),
 });
 
 export type ClaudePermissions = z.infer<typeof ClaudePermissionsSchema>;
