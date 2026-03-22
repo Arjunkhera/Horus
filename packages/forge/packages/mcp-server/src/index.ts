@@ -183,6 +183,58 @@ const TOOLS = [
     },
   },
   {
+    name: 'forge_develop',
+    description:
+      'Start or resume a code session for a work item on a repository. Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/. ' +
+      'Implements 3-tier repo resolution: (1) local repo index, (2) managed pool, (3) error with guidance. ' +
+      'Returns "needs_workflow_confirmation" when the repo has no saved workflow configuration — call again with the workflow parameter to confirm. ' +
+      'If a session already exists for this workItem+repo it is resumed. A second concurrent agent gets a separate slot ("-2" suffix).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Repository name (from forge_repo_list)',
+        },
+        workItem: {
+          type: 'string',
+          description: 'Work item ID or slug — used to namespace the session path and for resumption',
+        },
+        branch: {
+          type: 'string',
+          description: 'Feature branch name (optional — auto-generated from workItem if omitted)',
+        },
+        workflow: {
+          type: 'object',
+          description: 'Workflow configuration (required on first call for repos without saved workflow, or to override saved workflow)',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['owner', 'fork', 'contributor'],
+              description: 'owner = push directly to repo; fork = PR from fork; contributor = PR from branch',
+            },
+            upstream: { type: 'string', description: 'Upstream remote URL (fork workflow only)' },
+            fork: { type: 'string', description: 'Fork remote URL (fork workflow only)' },
+            pushTo: { type: 'string', description: 'Remote to push feature branches to (e.g. "origin")' },
+            prTarget: {
+              type: 'object',
+              description: 'Where to target pull requests',
+              properties: {
+                repo: { type: 'string', description: 'Target repo slug, e.g. "MyOrg/MyProject"' },
+                branch: { type: 'string', description: 'Target branch, e.g. "main"' },
+              },
+              required: ['repo', 'branch'],
+            },
+            branchPattern: { type: 'string', description: 'Branch naming pattern, e.g. "{type}/{id}-{slug}"' },
+            commitFormat: { type: 'string', description: 'Commit message format, e.g. "conventional"' },
+          },
+          required: ['type', 'pushTo', 'prTarget'],
+        },
+      },
+      required: ['repo', 'workItem'],
+    },
+  },
+  {
     name: 'forge_workspace_create',
     description: 'Create a new workspace from a workspace config. Installs plugins, creates git worktrees, and emits MCP configs and environment variables.',
     inputSchema: {
@@ -479,6 +531,62 @@ function buildServer(workspaceRoot: string): Server {
                 branch: cloneResult.branch,
                 origin: cloneResult.origin,
                 message: `Clone created at ${cloneResult.hostClonePath} on branch '${cloneResult.branch}'. Origin remote: ${cloneResult.origin}. Work in this directory — it is isolated from the original repo.`,
+              }, null, 2),
+            }],
+          };
+        }
+
+        case 'forge_develop': {
+          const { repo, workItem, branch, workflow } = (args ?? {}) as {
+            repo: string;
+            workItem: string;
+            branch?: string;
+            workflow?: {
+              type: 'owner' | 'fork' | 'contributor';
+              upstream?: string;
+              fork?: string;
+              pushTo: string;
+              prTarget: { repo: string; branch: string };
+              branchPattern?: string;
+              commitFormat?: string;
+            };
+          };
+          if (!repo || !workItem) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'MISSING_REQUIRED_FIELDS',
+                message: 'repo and workItem are required.',
+              }) }],
+              isError: true,
+            };
+          }
+          const developResult = await forge.repoDevelop({ repo, workItem, branch, workflow });
+          if (developResult.status === 'needs_workflow_confirmation') {
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(developResult, null, 2),
+              }],
+            };
+          }
+          const displayPath = developResult.hostSessionPath ?? developResult.sessionPath;
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                status: developResult.status,
+                sessionId: developResult.sessionId,
+                sessionPath: displayPath,
+                branch: developResult.branch,
+                baseBranch: developResult.baseBranch,
+                repo: developResult.repo,
+                repoSource: developResult.repoSource,
+                workflow: developResult.workflow,
+                agentSlot: developResult.agentSlot,
+                message: developResult.status === 'resumed'
+                  ? `Session resumed at ${displayPath} on branch '${developResult.branch}'. Work in this directory.`
+                  : `Session created at ${displayPath} on branch '${developResult.branch}' (from ${developResult.baseBranch}). Work in this directory.`,
               }, null, 2),
             }],
           };

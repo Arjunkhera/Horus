@@ -39,6 +39,7 @@ import { loadRepoIndex, saveRepoIndex } from './repo/repo-index-store.js';
 import { RepoIndexQuery } from './repo/repo-index-query.js';
 import { VaultClient, extractHostingFromUrl } from './vault/vault-client.js';
 import { createReferenceClone, type RepoCloneResult } from './repo/repo-clone.js';
+import { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
 import { expandPath } from './config/path-utils.js';
 
 const execFileAsync = promisify(execFile);
@@ -551,6 +552,41 @@ export class ForgeCore {
       branch: opts.branchName ?? actualDefaultBranch,
       origin,
     };
+  }
+
+  /**
+   * Start or resume a code session for a work item on a repository.
+   *
+   * Implements the 3-tier repo resolution strategy:
+   *   Tier 1 — repo index (user's local scan_paths)
+   *   Tier 2 — managed pool (~/Horus/data/repos/<name>/)
+   *   Tier 3 — not found → error with actionable message
+   *
+   * Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/.
+   * If a session already exists for the same workItem+repo, it is resumed.
+   * A second concurrent agent gets a separate slot with a "-2" suffix.
+   *
+   * Returns `needs_workflow_confirmation` when the repo has no saved workflow
+   * and no `workflow` parameter is provided.
+   */
+  async repoDevelop(opts: RepoDevelopOptions): Promise<RepoDevelopResponse> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    let repoIndex = await loadRepoIndex(globalConfig.repos.index_path);
+
+    // Auto-scan if no index exists
+    if (!repoIndex && globalConfig.repos.scan_paths.length > 0) {
+      repoIndex = await this.repoScan();
+    }
+
+    // Provide a saveRepoIndex callback so repoDevelop can persist workflow saves
+    const saveRepoIndexFn = async (repos: RepoIndexEntry[]): Promise<void> => {
+      const currentIndex = await loadRepoIndex(globalConfig.repos.index_path);
+      if (currentIndex) {
+        await saveRepoIndex({ ...currentIndex, repos }, globalConfig.repos.index_path);
+      }
+    };
+
+    return repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn);
   }
 
   /**
