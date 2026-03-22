@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const WorkflowStrategySchema = z.enum(['owner', 'fork', 'direct']);
+export const WorkflowStrategySchema = z.enum(['owner', 'fork', 'contributor', 'direct']);
 export type WorkflowStrategy = z.infer<typeof WorkflowStrategySchema>;
 
 /**
@@ -24,7 +24,7 @@ export const RepoWorkflowSchema = z.object({
     branchConvention: z.string().optional(),
   }),
   /** Which resolution tier produced this result. */
-  source: z.enum(['vault', 'auto-detect', 'default']),
+  source: z.enum(['index', 'vault', 'auto-detect', 'default']),
 });
 
 export type RepoWorkflow = z.infer<typeof RepoWorkflowSchema>;
