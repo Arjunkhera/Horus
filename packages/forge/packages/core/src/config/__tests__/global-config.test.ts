@@ -239,7 +239,7 @@ describe('Global Config', () => {
         registries: [
           { type: 'filesystem', name: 'local', path: '/some/path' },
         ],
-        workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/Horus/data/config/workspaces.json' },
+        workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions' },
         mcp_endpoints: {},
         repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
       }, nestedPath);
@@ -325,7 +325,7 @@ describe('Global Config', () => {
       // Set up initial config
       await saveGlobalConfig({
         registries: [],
-        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 60, store_path: '~/Horus/data/config/workspaces.json' },
+        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 60, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions' },
         mcp_endpoints: {},
         repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
       }, configPath);
@@ -377,7 +377,7 @@ describe('Global Config', () => {
         registries: [
           { type: 'filesystem', name: 'local', path: '/registry' },
         ],
-        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/Horus/data/config/workspaces.json' },
+        workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions' },
         mcp_endpoints: {},
         repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
       }, configPath);

@@ -7,7 +7,7 @@ import { z } from 'zod';
  * RepoIndexWorkflow represents what the user has confirmed and saved
  * to repos.json, so it can be used without re-running detection.
  *
- * confirmedBy: "user" = explicitly confirmed via forge_repo_workflow confirmation flow
+ * confirmedBy: "user" = explicitly confirmed via forge_develop workflow confirmation flow
  * confirmedBy: "auto" = saved after auto-detection without explicit user confirmation
  */
 export const RepoIndexWorkflowSchema = z.object({

@@ -179,17 +179,6 @@ const repo_clone_js_1 = require("../../repo/repo-clone.js");
         await fs_1.promises.rm(tmpDir, { recursive: true, force: true });
     });
     (0, vitest_1.it)('emits FORGE_WORKSPACE_PATH and FORGE_HOST_WORKSPACE_PATH in workspace.env', async () => {
-        const { execFile } = await import('child_process');
-        const { promisify } = await import('util');
-        const runGit = promisify(execFile);
-        const localRepoDir = path_1.default.join(tmpDir, 'repos', 'Anvil');
-        await fs_1.promises.mkdir(localRepoDir, { recursive: true });
-        await runGit('git', ['init', localRepoDir]);
-        await runGit('git', ['-C', localRepoDir, 'checkout', '-b', 'main']);
-        await fs_1.promises.writeFile(path_1.default.join(localRepoDir, 'README.md'), '# Anvil');
-        await runGit('git', ['-C', localRepoDir, 'add', '.']);
-        await runGit('git', ['-C', localRepoDir, '-c', 'user.name=Test', '-c', 'user.email=t@t.com',
-            'commit', '-m', 'init']);
         const mockForge = {
             resolve: vitest_1.vi.fn().mockResolvedValue({
                 ref: { version: '1.0.0' },
@@ -216,7 +205,6 @@ const repo_clone_js_1 = require("../../repo/repo-clone.js");
         const creator = new workspace_creator_js_1.WorkspaceCreator(mockForge);
         const record = await creator.create({
             configName: 'sdlc-default',
-            repos: ['Anvil'],
             mountPath,
         });
         const envContent = await fs_1.promises.readFile(path_1.default.join(record.path, 'workspace.env'), 'utf-8');
@@ -288,7 +276,7 @@ const repo_clone_js_1 = require("../../repo/repo-clone.js");
             destPath: cloneDir,
             branchName: 'feature/test-fallback',
             defaultBranch: 'main',
-        })).resolves.toBeUndefined();
+        })).resolves.toMatchObject({ actualDefaultBranch: 'main' });
         // Verify the clone exists and is on the feature branch
         const { stdout: branch } = await runGit('git', ['-C', cloneDir, 'branch', '--show-current']);
         (0, vitest_1.expect)(branch.trim()).toBe('feature/test-fallback');
