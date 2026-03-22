@@ -42,6 +42,11 @@ export interface RepoDevelopResult {
     repoSource: RepoSource;
     workflow: SessionWorkflow;
     agentSlot: number;
+    /**
+     * Non-blocking warning, e.g. when the max_sessions ceiling is reached.
+     * The session is created regardless; caller should surface this to the user.
+     */
+    warning?: string;
 }
 /** Workflow not yet confirmed for this repo */
 export interface RepoDevelopNeedsConfirmation {

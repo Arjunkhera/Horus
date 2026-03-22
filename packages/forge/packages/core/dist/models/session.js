@@ -57,6 +57,12 @@ exports.SessionRecordSchema = zod_1.z.object({
     agentSlot: zod_1.z.number().int().min(1).default(1),
     /** ISO timestamp when the session was created */
     createdAt: zod_1.z.string(),
+    /**
+     * ISO timestamp of the last significant activity in this session
+     * (updated on resume; used by cleanup age threshold).
+     * Defaults to createdAt when not present (backward-compatible).
+     */
+    lastModified: zod_1.z.string().optional(),
 });
 /**
  * Top-level sessions.json file structure.

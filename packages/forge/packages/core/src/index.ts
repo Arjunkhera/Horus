@@ -37,3 +37,5 @@ export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type Re
 
 // Session
 export { SessionStoreManager } from './session/session-store.js';
+export { sessionList, type SessionListOptions, type SessionListItem, type SessionListResult } from './session/session-list.js';
+export { sessionCleanup, type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';

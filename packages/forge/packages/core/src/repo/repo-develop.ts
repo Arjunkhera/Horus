@@ -53,6 +53,11 @@ export interface RepoDevelopResult {
   repoSource: RepoSource;
   workflow: SessionWorkflow;
   agentSlot: number;
+  /**
+   * Non-blocking warning, e.g. when the max_sessions ceiling is reached.
+   * The session is created regardless; caller should surface this to the user.
+   */
+  warning?: string;
 }
 
 /** Workflow not yet confirmed for this repo */
@@ -290,6 +295,8 @@ export async function repoDevelop(
     // Verify the session directory still exists
     try {
       await fs.access(existing.sessionPath);
+      // Update lastModified on resume
+      await sessionStore.touch(existing.sessionId);
       return {
         status: 'resumed',
         sessionId: existing.sessionId,
@@ -355,6 +362,16 @@ export async function repoDevelop(
   // ── Determine feature branch name ─────────────────────────────────────────
   const slug = toSlug(workItem);
   const featureBranch = requestedBranch ?? `feature/${slug}`;
+
+  // ── Max sessions ceiling check (warn only, never block) ──────────────────
+  const maxSessions = globalConfig.workspace.max_sessions ?? 20;
+  const totalSessions = await sessionStore.count();
+  let sessionCeilingWarning: string | undefined;
+  if (totalSessions >= maxSessions) {
+    sessionCeilingWarning =
+      `Session ceiling reached: ${totalSessions}/${maxSessions} active sessions. ` +
+      `Consider running forge_session_cleanup to reclaim stale sessions.`;
+  }
 
   // ── Compute session path ──────────────────────────────────────────────────
   const sessionCount = await sessionStore.countByWorkItem(workItem, repoName);
@@ -447,6 +464,7 @@ export async function repoDevelop(
 
   // ── Save session record ───────────────────────────────────────────────────
   const sessionId = generateSessionId();
+  const now = new Date().toISOString();
   const record: SessionRecord = {
     sessionId,
     workItem,
@@ -458,7 +476,8 @@ export async function repoDevelop(
     repoSource,
     workflow: sessionWorkflow,
     agentSlot,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    lastModified: now,
   };
   await sessionStore.add(record);
 
@@ -473,5 +492,6 @@ export async function repoDevelop(
     repoSource,
     workflow: sessionWorkflow,
     agentSlot,
+    ...(sessionCeilingWarning ? { warning: sessionCeilingWarning } : {}),
   };
 }

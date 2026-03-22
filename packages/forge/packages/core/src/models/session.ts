@@ -60,6 +60,12 @@ export const SessionRecordSchema = z.object({
   agentSlot: z.number().int().min(1).default(1),
   /** ISO timestamp when the session was created */
   createdAt: z.string(),
+  /**
+   * ISO timestamp of the last significant activity in this session
+   * (updated on resume; used by cleanup age threshold).
+   * Defaults to createdAt when not present (backward-compatible).
+   */
+  lastModified: z.string().optional(),
 });
 
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
