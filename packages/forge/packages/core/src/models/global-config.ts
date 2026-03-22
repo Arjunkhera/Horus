@@ -17,11 +17,29 @@ export const WorkspaceSettingsSchema = z.object({
    */
   /**
    * Path to the workspace metadata store file (workspaces.json).
-   * Defaults to ~/.forge/workspaces.json (suitable for standalone/host use).
+   * Defaults to ~/Horus/data/config/workspaces.json (suitable for standalone/host use).
    * Override to a volume-mounted path when running in Docker so metadata
-   * survives container restarts (e.g., /data/workspaces/workspaces.json).
+   * survives container restarts (e.g., /data/config/workspaces.json).
    */
-  store_path: z.string().default('~/.forge/workspaces.json'),
+  store_path: z.string().default('~/Horus/data/config/workspaces.json'),
+  /**
+   * Path to the code session store file (sessions.json).
+   * Tracks active forge_develop sessions (one per work-item+agent).
+   */
+  sessions_path: z.string().default('~/Horus/data/config/sessions.json'),
+  /**
+   * Root directory for managed repo pool (tier-2 in 3-tier resolution).
+   * When a repo is not found in scan_paths, Forge clones it here as a
+   * bare/reference clone before creating a worktree.
+   * Defaults to ~/Horus/data/repos/.
+   */
+  managed_repos_path: z.string().default('~/Horus/data/repos'),
+  /**
+   * Root directory for code sessions (git worktrees).
+   * Each forge_develop call creates a worktree under this path.
+   * Defaults to ~/Horus/data/sessions/.
+   */
+  sessions_root: z.string().default('~/Horus/data/sessions'),
   host_workspaces_path: z.string().optional(),
 });
 
@@ -68,7 +86,7 @@ export type HostEndpoints = z.infer<typeof HostEndpointsSchema>;
  */
 export const ReposConfigSchema = z.object({
   scan_paths: z.array(z.string()).default([]),
-  index_path: z.string().default('~/.forge/repos.json'),
+  index_path: z.string().default('~/Horus/data/config/repos.json'),
   /**
    * Host-side absolute path corresponding to the first scan_path.
    * Only needed when Forge runs inside Docker and the repos directory is
@@ -82,14 +100,14 @@ export const ReposConfigSchema = z.object({
 export type ReposConfig = z.infer<typeof ReposConfigSchema>;
 
 /**
- * Schema for the global Forge configuration (~/.forge/config.yaml).
+ * Schema for the global Forge configuration (~/Horus/data/config/forge.yaml).
  *
  * Global registries act as fallbacks — workspace-local registries
  * take priority, and global registries are appended as lower-priority
  * sources.
  *
  * @example
- * # ~/.forge/config.yaml
+ * # ~/Horus/data/config/forge.yaml
  * registries:
  *   - type: git
  *     name: team-registry
@@ -98,9 +116,10 @@ export type ReposConfig = z.infer<typeof ReposConfigSchema>;
  *     path: registry
  *
  * workspace:
- *   mount_path: ~/workspaces
+ *   mount_path: ~/Horus/data/workspaces
  *   default_config: sdlc-default
  *   retention_days: 30
+ *   store_path: ~/Horus/data/config/workspaces.json
  *   host_workspaces_path: /Users/me/Horus/data/workspaces  # host-side path (Docker only)
  *
  * mcp_endpoints:
@@ -116,7 +135,7 @@ export type ReposConfig = z.infer<typeof ReposConfigSchema>;
  * repos:
  *   scan_paths:
  *     - ~/Repositories
- *   index_path: ~/.forge/repos.json
+ *   index_path: ~/Horus/data/config/repos.json
  */
 /**
  * Tracks a globally installed plugin.

@@ -39,6 +39,7 @@ import { loadRepoIndex, saveRepoIndex } from './repo/repo-index-store.js';
 import { RepoIndexQuery } from './repo/repo-index-query.js';
 import { VaultClient, extractHostingFromUrl } from './vault/vault-client.js';
 import { createReferenceClone, type RepoCloneResult } from './repo/repo-clone.js';
+import { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
 import { expandPath } from './config/path-utils.js';
 
 const execFileAsync = promisify(execFile);
@@ -140,7 +141,7 @@ export interface RepoWorkflowResult extends RepoWorkflow {
  * const report = await forge.install();
  */
 export interface ForgeCoreOptions {
-  /** Override the global config path (default: ~/.forge/config.yaml). Useful for testing. */
+  /** Override the global config path (default: ~/Horus/data/config/forge.yaml). Useful for testing. */
   globalConfigPath?: string;
 }
 
@@ -701,6 +702,41 @@ export class ForgeCore {
   }
 
   /**
+   * Start or resume a code session for a work item on a repository.
+   *
+   * Implements the 3-tier repo resolution strategy:
+   *   Tier 1 — repo index (user's local scan_paths)
+   *   Tier 2 — managed pool (~/Horus/data/repos/<name>/)
+   *   Tier 3 — not found → error with actionable message
+   *
+   * Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/.
+   * If a session already exists for the same workItem+repo, it is resumed.
+   * A second concurrent agent gets a separate slot with a "-2" suffix.
+   *
+   * Returns `needs_workflow_confirmation` when the repo has no saved workflow
+   * and no `workflow` parameter is provided.
+   */
+  async repoDevelop(opts: RepoDevelopOptions): Promise<RepoDevelopResponse> {
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    let repoIndex = await loadRepoIndex(globalConfig.repos.index_path);
+
+    // Auto-scan if no index exists
+    if (!repoIndex && globalConfig.repos.scan_paths.length > 0) {
+      repoIndex = await this.repoScan();
+    }
+
+    // Provide a saveRepoIndex callback so repoDevelop can persist workflow saves
+    const saveRepoIndexFn = async (repos: RepoIndexEntry[]): Promise<void> => {
+      const currentIndex = await loadRepoIndex(globalConfig.repos.index_path);
+      if (currentIndex) {
+        await saveRepoIndex({ ...currentIndex, repos }, globalConfig.repos.index_path);
+      }
+    };
+
+    return repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn);
+  }
+
+  /**
    * Create a new workspace from a workspace config artifact.
    * Resolves the workspace config, sets up folders, installs plugins,
    * creates git worktrees, and registers in metadata store.
@@ -781,7 +817,7 @@ export class ForgeCore {
    * 2. Emits skills to ~/.claude/skills/ using GlobalClaudeCodeStrategy
    * 3. Reads plugin's resources/rules/global-rules.md
    * 4. Upserts a managed section in ~/.claude/CLAUDE.md
-   * 5. Tracks installed files in ~/.forge/config.yaml global_plugins
+   * 5. Tracks installed files in ~/Horus/data/config/forge.yaml global_plugins
    */
   async installGlobal(ref: string): Promise<GlobalInstallReport> {
     const parsed = this.parseRef(ref);
@@ -1064,7 +1100,7 @@ export class ForgeCore {
       // No workspace config — fall through to global config below
     }
 
-    // Load global config (~/.forge/config.yaml) for fallback registries
+    // Load global config (~/Horus/data/config/forge.yaml) for fallback registries
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
 
     if (!config) {

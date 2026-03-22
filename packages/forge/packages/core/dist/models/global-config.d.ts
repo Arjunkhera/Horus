@@ -15,23 +15,47 @@ export declare const WorkspaceSettingsSchema: z.ZodObject<{
      */
     /**
      * Path to the workspace metadata store file (workspaces.json).
-     * Defaults to ~/.forge/workspaces.json (suitable for standalone/host use).
+     * Defaults to ~/Horus/data/config/workspaces.json (suitable for standalone/host use).
      * Override to a volume-mounted path when running in Docker so metadata
-     * survives container restarts (e.g., /data/workspaces/workspaces.json).
+     * survives container restarts (e.g., /data/config/workspaces.json).
      */
     store_path: z.ZodDefault<z.ZodString>;
+    /**
+     * Path to the code session store file (sessions.json).
+     * Tracks active forge_develop sessions (one per work-item+agent).
+     */
+    sessions_path: z.ZodDefault<z.ZodString>;
+    /**
+     * Root directory for managed repo pool (tier-2 in 3-tier resolution).
+     * When a repo is not found in scan_paths, Forge clones it here as a
+     * bare/reference clone before creating a worktree.
+     * Defaults to ~/Horus/data/repos/.
+     */
+    managed_repos_path: z.ZodDefault<z.ZodString>;
+    /**
+     * Root directory for code sessions (git worktrees).
+     * Each forge_develop call creates a worktree under this path.
+     * Defaults to ~/Horus/data/sessions/.
+     */
+    sessions_root: z.ZodDefault<z.ZodString>;
     host_workspaces_path: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     mount_path: string;
     default_config: string;
     retention_days: number;
     store_path: string;
+    sessions_path: string;
+    managed_repos_path: string;
+    sessions_root: string;
     host_workspaces_path?: string | undefined;
 }, {
     mount_path?: string | undefined;
     default_config?: string | undefined;
     retention_days?: number | undefined;
     store_path?: string | undefined;
+    sessions_path?: string | undefined;
+    managed_repos_path?: string | undefined;
+    sessions_root?: string | undefined;
     host_workspaces_path?: string | undefined;
 }>;
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
@@ -157,14 +181,14 @@ export declare const ReposConfigSchema: z.ZodObject<{
 }>;
 export type ReposConfig = z.infer<typeof ReposConfigSchema>;
 /**
- * Schema for the global Forge configuration (~/.forge/config.yaml).
+ * Schema for the global Forge configuration (~/Horus/data/config/forge.yaml).
  *
  * Global registries act as fallbacks — workspace-local registries
  * take priority, and global registries are appended as lower-priority
  * sources.
  *
  * @example
- * # ~/.forge/config.yaml
+ * # ~/Horus/data/config/forge.yaml
  * registries:
  *   - type: git
  *     name: team-registry
@@ -173,10 +197,11 @@ export type ReposConfig = z.infer<typeof ReposConfigSchema>;
  *     path: registry
  *
  * workspace:
- *   mount_path: ~/workspaces
+ *   mount_path: ~/Horus/data/workspaces
  *   default_config: sdlc-default
  *   retention_days: 30
- *   host_workspaces_path: /Users/me/horus-data/workspaces  # host-side path (Docker only)
+ *   store_path: ~/Horus/data/config/workspaces.json
+ *   host_workspaces_path: /Users/me/Horus/data/workspaces  # host-side path (Docker only)
  *
  * mcp_endpoints:
  *   anvil:
@@ -191,7 +216,7 @@ export type ReposConfig = z.infer<typeof ReposConfigSchema>;
  * repos:
  *   scan_paths:
  *     - ~/Repositories
- *   index_path: ~/.forge/repos.json
+ *   index_path: ~/Horus/data/config/repos.json
  */
 /**
  * Tracks a globally installed plugin.
@@ -218,12 +243,15 @@ export type GlobalPluginEntry = z.infer<typeof GlobalPluginEntrySchema>;
 export declare const ClaudePermissionsSchema: z.ZodObject<{
     allow: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
     deny: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+    defaultMode: z.ZodOptional<z.ZodEnum<["default", "allowedTools", "autoEdit", "bypassPermissions", "plan"]>>;
 }, "strip", z.ZodTypeAny, {
     allow: string[];
     deny: string[];
+    defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
 }, {
     allow?: string[] | undefined;
     deny?: string[] | undefined;
+    defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
 }>;
 export type ClaudePermissions = z.infer<typeof ClaudePermissionsSchema>;
 export declare const GlobalConfigSchema: z.ZodObject<{
@@ -286,23 +314,47 @@ export declare const GlobalConfigSchema: z.ZodObject<{
          */
         /**
          * Path to the workspace metadata store file (workspaces.json).
-         * Defaults to ~/.forge/workspaces.json (suitable for standalone/host use).
+         * Defaults to ~/Horus/data/config/workspaces.json (suitable for standalone/host use).
          * Override to a volume-mounted path when running in Docker so metadata
-         * survives container restarts (e.g., /data/workspaces/workspaces.json).
+         * survives container restarts (e.g., /data/config/workspaces.json).
          */
         store_path: z.ZodDefault<z.ZodString>;
+        /**
+         * Path to the code session store file (sessions.json).
+         * Tracks active forge_develop sessions (one per work-item+agent).
+         */
+        sessions_path: z.ZodDefault<z.ZodString>;
+        /**
+         * Root directory for managed repo pool (tier-2 in 3-tier resolution).
+         * When a repo is not found in scan_paths, Forge clones it here as a
+         * bare/reference clone before creating a worktree.
+         * Defaults to ~/Horus/data/repos/.
+         */
+        managed_repos_path: z.ZodDefault<z.ZodString>;
+        /**
+         * Root directory for code sessions (git worktrees).
+         * Each forge_develop call creates a worktree under this path.
+         * Defaults to ~/Horus/data/sessions/.
+         */
+        sessions_root: z.ZodDefault<z.ZodString>;
         host_workspaces_path: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         mount_path: string;
         default_config: string;
         retention_days: number;
         store_path: string;
+        sessions_path: string;
+        managed_repos_path: string;
+        sessions_root: string;
         host_workspaces_path?: string | undefined;
     }, {
         mount_path?: string | undefined;
         default_config?: string | undefined;
         retention_days?: number | undefined;
         store_path?: string | undefined;
+        sessions_path?: string | undefined;
+        managed_repos_path?: string | undefined;
+        sessions_root?: string | undefined;
         host_workspaces_path?: string | undefined;
     }>>;
     mcp_endpoints: z.ZodDefault<z.ZodObject<{
@@ -412,12 +464,15 @@ export declare const GlobalConfigSchema: z.ZodObject<{
     claude_permissions: z.ZodDefault<z.ZodObject<{
         allow: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         deny: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        defaultMode: z.ZodOptional<z.ZodEnum<["default", "allowedTools", "autoEdit", "bypassPermissions", "plan"]>>;
     }, "strip", z.ZodTypeAny, {
         allow: string[];
         deny: string[];
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     }, {
         allow?: string[] | undefined;
         deny?: string[] | undefined;
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
     registries: ({
@@ -441,6 +496,9 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         default_config: string;
         retention_days: number;
         store_path: string;
+        sessions_path: string;
+        managed_repos_path: string;
+        sessions_root: string;
         host_workspaces_path?: string | undefined;
     };
     mcp_endpoints: {
@@ -470,6 +528,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
     claude_permissions: {
         allow: string[];
         deny: string[];
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     };
     host_endpoints?: {
         anvil?: string | undefined;
@@ -498,6 +557,9 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         default_config?: string | undefined;
         retention_days?: number | undefined;
         store_path?: string | undefined;
+        sessions_path?: string | undefined;
+        managed_repos_path?: string | undefined;
+        sessions_root?: string | undefined;
         host_workspaces_path?: string | undefined;
     } | undefined;
     mcp_endpoints?: {
@@ -532,6 +594,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
     claude_permissions?: {
         allow?: string[] | undefined;
         deny?: string[] | undefined;
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     } | undefined;
 }>;
 export type GlobalConfig = z.infer<typeof GlobalConfigSchema>;

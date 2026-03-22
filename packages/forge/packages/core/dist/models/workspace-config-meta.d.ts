@@ -110,12 +110,15 @@ export declare const WorkspaceConfigMetaSchema: z.ZodObject<{
     claude_permissions: z.ZodOptional<z.ZodObject<{
         allow: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         deny: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        defaultMode: z.ZodOptional<z.ZodEnum<["default", "allowedTools", "autoEdit", "bypassPermissions", "plan"]>>;
     }, "strip", z.ZodTypeAny, {
         allow: string[];
         deny: string[];
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     }, {
         allow?: string[] | undefined;
         deny?: string[] | undefined;
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
     id: string;
@@ -147,6 +150,7 @@ export declare const WorkspaceConfigMetaSchema: z.ZodObject<{
     claude_permissions?: {
         allow: string[];
         deny: string[];
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     } | undefined;
 }, {
     id: string;
@@ -162,6 +166,7 @@ export declare const WorkspaceConfigMetaSchema: z.ZodObject<{
     claude_permissions?: {
         allow?: string[] | undefined;
         deny?: string[] | undefined;
+        defaultMode?: "default" | "allowedTools" | "autoEdit" | "bypassPermissions" | "plan" | undefined;
     } | undefined;
     mcp_servers?: Record<string, {
         description: string;

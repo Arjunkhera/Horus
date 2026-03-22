@@ -8,12 +8,14 @@ import { expandPath } from './path-utils.js';
 
 /**
  * Default location for the global Forge configuration.
+ * Config lives under ~/Horus/data/config/ alongside other Horus data.
+ * Legacy path (~/.forge/config.yaml) is auto-migrated by the entrypoint on first run.
  */
-export const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.forge');
-export const GLOBAL_CONFIG_PATH = path.join(GLOBAL_CONFIG_DIR, 'config.yaml');
+export const GLOBAL_CONFIG_DIR = path.join(os.homedir(), 'Horus', 'data', 'config');
+export const GLOBAL_CONFIG_PATH = path.join(GLOBAL_CONFIG_DIR, 'forge.yaml');
 
 /**
- * Load the global Forge configuration from ~/.forge/config.yaml.
+ * Load the global Forge configuration from ~/Horus/data/config/forge.yaml.
  * Returns an empty config (no registries) if the file doesn't exist.
  * Expands all tilde paths to absolute paths.
  *
@@ -33,6 +35,15 @@ export async function loadGlobalConfig(
     }
     if (config.workspace.store_path) {
       config.workspace.store_path = expandPath(config.workspace.store_path);
+    }
+    if (config.workspace.sessions_path) {
+      config.workspace.sessions_path = expandPath(config.workspace.sessions_path);
+    }
+    if (config.workspace.managed_repos_path) {
+      config.workspace.managed_repos_path = expandPath(config.workspace.managed_repos_path);
+    }
+    if (config.workspace.sessions_root) {
+      config.workspace.sessions_root = expandPath(config.workspace.sessions_root);
     }
     if (config.repos.index_path) {
       config.repos.index_path = expandPath(config.repos.index_path);
@@ -61,8 +72,8 @@ export async function loadGlobalConfig(
 }
 
 /**
- * Save a global config to ~/.forge/config.yaml.
- * Creates the ~/.forge directory if it doesn't exist.
+ * Save a global config to ~/Horus/data/config/forge.yaml.
+ * Creates the config directory if it doesn't exist.
  * Does NOT expand paths — stores them as-is (tilde format is fine).
  *
  * @param config - The global config to write (can be partial, will be validated).
