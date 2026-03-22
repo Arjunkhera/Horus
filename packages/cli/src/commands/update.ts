@@ -274,11 +274,13 @@ export const updateCommand = new Command('update')
       console.log(chalk.dim('Continuing — services will be built from source if build contexts are available.'));
     }
 
-    // Restart changed services
+    // Restart changed services (--force-recreate ensures containers are replaced
+    // even when the :latest tag didn't change locally — the pull step above fetched
+    // the new image, but `up -d` alone would skip recreation if the tag matches)
     console.log('');
     console.log(chalk.bold('Restarting services...'));
     try {
-      await composeStreaming(runtime, ['up', '-d']);
+      await composeStreaming(runtime, ['up', '-d', '--force-recreate']);
     } catch (error) {
       console.log(chalk.red('Failed to restart services.'));
       console.log(chalk.dim((error as Error).message));
