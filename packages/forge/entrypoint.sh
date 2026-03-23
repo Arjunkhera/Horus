@@ -29,6 +29,13 @@ FORGE_SCAN_PATHS="${FORGE_SCAN_PATHS:-}"
 # to the host path so Claude Code on the host can access repos directly.
 FORGE_HOST_REPOS_PATH="${FORGE_HOST_REPOS_PATH:-}"
 
+# Sessions and managed-repo-pool paths — derived from WORKSPACES_PATH unless overridden.
+# WORKSPACES_PATH is e.g. /data/workspaces, so _DATA_ROOT is /data.
+_DATA_ROOT="$(dirname "${WORKSPACES_PATH}")"
+SESSIONS_ROOT="${FORGE_SESSIONS_ROOT:-${_DATA_ROOT}/sessions}"
+MANAGED_REPOS_PATH="${FORGE_MANAGED_REPOS_PATH:-${_DATA_ROOT}/repos}"
+SESSIONS_STORE_PATH="${CONFIG_DIR}/sessions.json"
+
 log() {
   echo "{\"level\":\"info\",\"message\":\"$1\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
 }
@@ -119,7 +126,10 @@ workspace:
   mount_path: ${WORKSPACES_PATH}
   default_config: sdlc-default
   retention_days: 30
-  store_path: ${CONFIG_DIR}/workspaces.json${HOST_WORKSPACES_LINE}
+  store_path: ${CONFIG_DIR}/workspaces.json
+  sessions_path: ${SESSIONS_STORE_PATH}
+  sessions_root: ${SESSIONS_ROOT}
+  managed_repos_path: ${MANAGED_REPOS_PATH}${HOST_WORKSPACES_LINE}
 
 mcp_endpoints:
   anvil:
