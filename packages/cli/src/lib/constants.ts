@@ -25,6 +25,7 @@ export const LEGACY_HORUS_DIR = join(homedir(), '.horus');
 export const CONFIG_PATH = join(HORUS_DIR, 'config.yaml');
 export const ENV_PATH = join(HORUS_DIR, '.env');
 export const COMPOSE_PATH = join(HORUS_DIR, 'docker-compose.yml');
+export const COMPOSE_TEST_PATH = join(HORUS_DIR, 'docker-compose.test.yml');
 
 // ── Default port assignments ────────────────────────────────────────────────
 export const DEFAULT_PORTS = {
