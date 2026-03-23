@@ -149,21 +149,22 @@ async function detectWorkflow(
 
 /**
  * Clone a repo into the managed pool as a regular clone (not bare).
- * Used for tier-3 resolution when the repo isn't indexed locally.
+ * Used for tier-3 resolution when the repo isn't indexed locally,
+ * or to create a writable managed clone from a read-only user-tier repo.
  */
 async function cloneToManagedPool(
-  remoteUrl: string,
+  sourceUrl: string,
   destPath: string,
 ): Promise<void> {
   await fs.mkdir(path.dirname(destPath), { recursive: true });
   try {
-    await execFileAsync('git', ['clone', remoteUrl, destPath], {
+    await execFileAsync('git', ['clone', sourceUrl, destPath], {
       timeout: 120000,
     });
   } catch (err: any) {
     throw new ForgeError(
       'CLONE_FAILED',
-      `Failed to clone ${remoteUrl} to ${destPath}: ${err.message}`,
+      `Failed to clone ${sourceUrl} to ${destPath}: ${err.message}`,
       'Check the remote URL and your network/SSH access.',
     );
   }
@@ -185,6 +186,47 @@ async function fetchRemotes(repoPath: string): Promise<boolean> {
   }
 }
 
+/**
+ * Ensure we have a writable clone to use as the worktree base.
+ *
+ * User-tier repos (resolved from scan_paths / repo index) may be mounted
+ * read-only (e.g. Docker `:ro` bind mounts). Git worktree creation writes
+ * branch ref locks into the base repo's `.git/refs/heads/`, which fails on
+ * a read-only filesystem.
+ *
+ * When the repo was resolved from the user tier, this function ensures a
+ * managed clone exists at `managedReposPath/<name>` (always writable) and
+ * returns its path. If the repo is already in the managed pool, the
+ * original path is returned unchanged.
+ */
+async function ensureWritableWorktreeBase(
+  repoEntry: RepoIndexEntry,
+  repoSource: RepoSource,
+  managedReposPath: string,
+): Promise<{ worktreeBasePath: string; effectiveSource: RepoSource }> {
+  if (repoSource !== 'user') {
+    return { worktreeBasePath: repoEntry.localPath, effectiveSource: repoSource };
+  }
+
+  const managedClonePath = path.join(managedReposPath, repoEntry.name);
+  let managedCloneExists = false;
+  try {
+    await fs.access(managedClonePath);
+    managedCloneExists = true;
+  } catch {
+    // Not yet cloned into managed pool
+  }
+
+  if (!managedCloneExists) {
+    // Clone from the user-tier (read-only) path into the managed pool (rw).
+    // cloneToManagedPool accepts any valid git source — a local path works
+    // the same as a remote URL for `git clone`.
+    await cloneToManagedPool(repoEntry.localPath, managedClonePath);
+  }
+
+  return { worktreeBasePath: managedClonePath, effectiveSource: 'managed' };
+}
+
 // installEnforcementHooks is imported from git-enforcement.ts (WI-4)
 
 // ─── Main function ────────────────────────────────────────────────────────────
@@ -195,9 +237,10 @@ async function fetchRemotes(repoPath: string): Promise<boolean> {
  * 1. Resolve the repo via 3-tier lookup
  * 2. Check for existing session → resume if found
  * 3. Verify workflow is confirmed (or accept inline workflow input)
- * 4. git fetch + worktree creation
- * 5. Install enforcement hooks and scripts
- * 6. Save session record
+ * 4. Ensure writable worktree base (auto-clone user-tier repos to managed pool)
+ * 5. git fetch + worktree creation
+ * 6. Install enforcement hooks and scripts
+ * 7. Save session record
  */
 export async function repoDevelop(
   opts: RepoDevelopOptions,
@@ -360,8 +403,23 @@ export async function repoDevelop(
   const sessionDirName = `${slug}-${repoName.toLowerCase()}${suffix}`;
   const sessionPath = path.join(sessionsRoot, sessionDirName);
 
+  // ── Ensure writable worktree base ─────────────────────────────────────────
+  // User-tier repos (from scan_paths) may be mounted read-only (e.g. Docker
+  // `:ro` bind mounts). Git worktree creation writes branch ref locks into
+  // the base repo's .git/refs/heads/, which fails on a read-only filesystem.
+  //
+  // Solution: when the repo was resolved from the user tier, ensure a managed
+  // clone exists at managedReposPath/<name> (which is always writable). Use
+  // that clone as the worktree base instead.
+  const { worktreeBasePath, effectiveSource } = await ensureWritableWorktreeBase(
+    repoEntry,
+    repoSource,
+    managedReposPath,
+  );
+  repoSource = effectiveSource;
+
   // ── Git fetch (best-effort) ───────────────────────────────────────────────
-  await fetchRemotes(repoEntry.localPath);
+  await fetchRemotes(worktreeBasePath);
 
   // ── Create git worktree ───────────────────────────────────────────────────
   await fs.mkdir(sessionsRoot, { recursive: true });
@@ -379,7 +437,7 @@ export async function repoDevelop(
   // Prefer origin/<baseBranch> if available, else local baseBranch
   let worktreeBase = baseBranch;
   try {
-    await runGit(['rev-parse', '--verify', `origin/${baseBranch}`], repoEntry.localPath, 5000);
+    await runGit(['rev-parse', '--verify', `origin/${baseBranch}`], worktreeBasePath, 5000);
     worktreeBase = `origin/${baseBranch}`;
   } catch {
     // No origin/<baseBranch> — use local branch
@@ -389,7 +447,7 @@ export async function repoDevelop(
     await execFileAsync(
       'git',
       ['worktree', 'add', sessionPath, '-b', featureBranch, worktreeBase],
-      { cwd: repoEntry.localPath, timeout: 30000 },
+      { cwd: worktreeBasePath, timeout: 30000 },
     );
   } catch (err: any) {
     // If branch already exists, try to check it out instead
@@ -398,7 +456,7 @@ export async function repoDevelop(
         await execFileAsync(
           'git',
           ['worktree', 'add', sessionPath, featureBranch],
-          { cwd: repoEntry.localPath, timeout: 30000 },
+          { cwd: worktreeBasePath, timeout: 30000 },
         );
       } catch (err2: any) {
         await fs.rm(sessionPath, { recursive: true, force: true }).catch(() => {});

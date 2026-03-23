@@ -100,6 +100,15 @@ vi.mock('child_process', async () => {
             cb(null, { stdout: '', stderr: '' });
           } else if (joined.startsWith('fetch')) {
             cb(null, { stdout: '', stderr: '' });
+          } else if (joined.startsWith('clone')) {
+            // git clone — simulate success by creating the dest directory
+            // args = ['clone', sourceUrl, destPath]
+            const destPath = args[2];
+            if (destPath) {
+              const mkdirSync = require('fs').mkdirSync;
+              mkdirSync(destPath, { recursive: true });
+            }
+            cb(null, { stdout: '', stderr: '' });
           } else {
             cb(null, { stdout: '', stderr: '' });
           }
@@ -158,7 +167,8 @@ describe('repoDevelop', () => {
       expect(result.status).toBe('created');
       if (result.status === 'created') {
         expect(result.repo).toBe('TestRepo');
-        expect(result.repoSource).toBe('user');
+        // User-tier repos are auto-cloned to managed pool for writable worktree base
+        expect(result.repoSource).toBe('managed');
         expect(result.branch).toBe('feature/wi-abc123');
         expect(result.baseBranch).toBe('main');
         expect(result.workflow.type).toBe('owner');
@@ -392,6 +402,12 @@ describe('repoDevelop', () => {
         } else if (joined.startsWith('rev-parse --verify origin/')) {
           // Also fail — no origin ref available
           (cb as any)(new Error('not found'), { stdout: '', stderr: '' });
+        } else if (joined.startsWith('clone')) {
+          const destPath = (args as string[])[2];
+          if (destPath) {
+            require('fs').mkdirSync(destPath, { recursive: true });
+          }
+          (cb as any)(null, { stdout: '', stderr: '' });
         } else {
           (cb as any)(null, { stdout: '', stderr: '' });
         }
@@ -405,6 +421,118 @@ describe('repoDevelop', () => {
       // Should not throw — degrades gracefully
       const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
       expect(result.status).toBe('created');
+    });
+  });
+
+  // ── Read-only user-tier repo: managed clone auto-creation ─────────────────
+
+  describe('read-only user-tier repo workaround', () => {
+    it('auto-creates a managed clone when user-tier repo is used', async () => {
+      // Use a localPath that is NOT inside the managed pool (simulates user-tier)
+      const userRepoPath = path.join(tmpDir, 'user-repos', 'TestRepo');
+      await fs.mkdir(userRepoPath, { recursive: true });
+
+      // Remove the managed pool entry so it doesn't already exist
+      await fs.rm(fakeRepoPath, { recursive: true, force: true });
+
+      const entry = makeRepoEntry({
+        localPath: userRepoPath,
+        workflow: CONFIRMED_WORKFLOW,
+      });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-clone1' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        // repoSource should be 'managed' after auto-cloning
+        expect(result.repoSource).toBe('managed');
+      }
+
+      // Verify that git clone was called with the user-tier path as source
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const cloneCalls = mockExecFile.mock.calls.filter(
+        (call) => (call[1] as string[])?.[0] === 'clone',
+      );
+      expect(cloneCalls.length).toBe(1);
+      const cloneArgs = cloneCalls[0][1] as string[];
+      expect(cloneArgs[1]).toBe(userRepoPath); // source = user-tier path
+      expect(cloneArgs[2]).toBe(path.join(tmpDir, 'repos', 'TestRepo')); // dest = managed pool
+    });
+
+    it('reuses existing managed clone on subsequent calls', async () => {
+      // The managed pool entry already exists (created in beforeEach)
+      // Use a localPath that is outside the managed pool (user-tier)
+      const userRepoPath = path.join(tmpDir, 'user-repos', 'TestRepo');
+      await fs.mkdir(userRepoPath, { recursive: true });
+
+      const entry = makeRepoEntry({
+        localPath: userRepoPath,
+        workflow: CONFIRMED_WORKFLOW,
+      });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-reuse1' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.repoSource).toBe('managed');
+      }
+
+      // Verify git clone was NOT called (managed clone already existed)
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const cloneCalls = mockExecFile.mock.calls.filter(
+        (call) => (call[1] as string[])?.[0] === 'clone',
+      );
+      expect(cloneCalls.length).toBe(0);
+    });
+
+    it('does not clone for repos already in the managed pool (tier-2)', async () => {
+      // Repo found directly in managed pool (not in user index)
+      const opts: RepoDevelopOptions = {
+        repo: 'TestRepo',
+        workItem: 'wi-managed1',
+        workflow: INLINE_WORKFLOW,
+      };
+      const result = await repoDevelop(opts, globalConfig, null, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.repoSource).toBe('managed');
+      }
+
+      // No clone should have been triggered
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const cloneCalls = mockExecFile.mock.calls.filter(
+        (call) => (call[1] as string[])?.[0] === 'clone',
+      );
+      expect(cloneCalls.length).toBe(0);
+    });
+
+    it('session record stores repoSource as managed after auto-clone', async () => {
+      const userRepoPath = path.join(tmpDir, 'user-repos', 'TestRepo');
+      await fs.mkdir(userRepoPath, { recursive: true });
+      await fs.rm(fakeRepoPath, { recursive: true, force: true });
+
+      const entry = makeRepoEntry({
+        localPath: userRepoPath,
+        workflow: CONFIRMED_WORKFLOW,
+      });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-record1' };
+      await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      // Read the session store and verify the repoSource
+      const sessionsJson = await fs.readFile(globalConfig.workspace.sessions_path, 'utf-8');
+      const sessionsData = JSON.parse(sessionsJson);
+      expect(sessionsData.sessions).toHaveLength(1);
+      expect(sessionsData.sessions[0].repoSource).toBe('managed');
     });
   });
 });
