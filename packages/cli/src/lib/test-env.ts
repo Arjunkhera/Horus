@@ -225,6 +225,17 @@ export function buildComposeEnv(
     ...process.env as Record<string, string>,
     HORUS_RUNTIME: runtime.name,
     TEST_DATA_PATH: slotDataPath,
+    // Override base compose port variables so the base file binds to test ports.
+    // Without these, Docker Compose merges (appends) the ports lists from both
+    // files, causing both the production port (e.g. 8100) and the test port
+    // (e.g. 9100) to be bound — failing if the production stack is already up.
+    ANVIL_PORT:               String(ports.anvil),
+    FORGE_PORT:               String(ports.forge),
+    VAULT_MCP_PORT:           String(ports.vault_mcp),
+    VAULT_ROUTER_PORT:        String(ports.vault_router),
+    VAULT_REST_PORT_PERSONAL: String(ports.vault_svc),
+    TYPESENSE_PORT:           String(ports.typesense),
+    // TEST_PORT_* vars for overlay reference (harmless duplicates after above fix)
     TEST_PORT_ANVIL:        String(ports.anvil),
     TEST_PORT_TYPESENSE:    String(ports.typesense),
     TEST_PORT_VAULT_SVC:    String(ports.vault_svc),
