@@ -263,18 +263,23 @@ export class WorkspaceCreator {
         const endpoint =
           globalConfig.mcp_endpoints[serverName as keyof typeof globalConfig.mcp_endpoints];
 
-        if (!endpoint && serverConfig.required) {
+        // Fallback: if mcp_endpoints doesn't have this server, try host_endpoints
+        const hostUrl =
+          globalConfig.host_endpoints?.[serverName as keyof typeof globalConfig.host_endpoints];
+        const resolvedEndpoint = endpoint ?? (hostUrl ? { url: hostUrl, transport: 'http' as const } : undefined);
+
+        if (!resolvedEndpoint && serverConfig.required) {
           console.warn(
             `[Forge] Warning: MCP endpoint '${serverName}' not configured in ~/Horus/data/config/forge.yaml`,
           );
           continue;
         }
 
-        if (endpoint) {
+        if (resolvedEndpoint) {
           const mcpConfig = {
             name: serverName,
-            url: endpoint.url,
-            transport: endpoint.transport,
+            url: resolvedEndpoint.url,
+            transport: resolvedEndpoint.transport,
           };
           await fs.writeFile(
             path.join(mcpDir, `${serverName}.json`),
