@@ -288,7 +288,7 @@ describe('installEnforcementHooks', () => {
   // ─── Writes all files ────────────────────────────────────────────────────
 
   it('installs all 4 files for owner workflow', async () => {
-    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo');
+    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo', tmpDir);
 
     const hookFiles = ['pre-push', 'commit-msg'];
     for (const f of hookFiles) {
@@ -305,7 +305,7 @@ describe('installEnforcementHooks', () => {
 
   it('creates .forge/scripts directory if not present', async () => {
     // No pre-created .forge directory
-    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo');
+    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo', tmpDir);
     const stat = await fs.stat(path.join(tmpDir, '.forge', 'scripts'));
     expect(stat.isDirectory()).toBe(true);
   });
@@ -313,34 +313,34 @@ describe('installEnforcementHooks', () => {
   // ─── Correct content per workflow ────────────────────────────────────────
 
   it('owner workflow: push.sh targets origin', async () => {
-    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo');
+    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo', tmpDir);
     const push = await fs.readFile(path.join(tmpDir, '.forge', 'scripts', 'push.sh'), 'utf8');
     expect(push).toContain('PUSH_REMOTE="origin"');
   });
 
   it('fork workflow: create-pr.sh includes --repo and --head', async () => {
-    await installEnforcementHooks(tmpDir, forkWorkflow(), 'UpstreamRepo');
+    await installEnforcementHooks(tmpDir, forkWorkflow(), 'UpstreamRepo', tmpDir);
     const pr = await fs.readFile(path.join(tmpDir, '.forge', 'scripts', 'create-pr.sh'), 'utf8');
     expect(pr).toContain('--repo "UpstreamOrg/UpstreamRepo"');
     expect(pr).toContain('--head');
   });
 
   it('contributor workflow: create-pr.sh targets correct base branch', async () => {
-    await installEnforcementHooks(tmpDir, contributorWorkflow(), 'SomeProject');
+    await installEnforcementHooks(tmpDir, contributorWorkflow(), 'SomeProject', tmpDir);
     const pr = await fs.readFile(path.join(tmpDir, '.forge', 'scripts', 'create-pr.sh'), 'utf8');
     expect(pr).toContain('--base "develop"');
     expect(pr).not.toContain('--repo');
   });
 
   it('pre-push hook enforces pushTo remote', async () => {
-    await installEnforcementHooks(tmpDir, ownerWorkflow({ pushTo: 'myremote' }), 'TestRepo');
+    await installEnforcementHooks(tmpDir, ownerWorkflow({ pushTo: 'myremote' }), 'TestRepo', tmpDir);
     const hook = await fs.readFile(path.join(tmpDir, '.git', 'hooks', 'pre-push'), 'utf8');
     expect(hook).toContain('EXPECTED_REMOTE="myremote"');
   });
 
   it('commit-msg hook enforces conventional commits when configured', async () => {
     const wf = ownerWorkflow({ commitFormat: 'conventional' });
-    await installEnforcementHooks(tmpDir, wf, 'TestRepo');
+    await installEnforcementHooks(tmpDir, wf, 'TestRepo', tmpDir);
     const hook = await fs.readFile(path.join(tmpDir, '.git', 'hooks', 'commit-msg'), 'utf8');
     expect(hook).toContain('REJECTED');
     expect(hook).toContain('feat|fix|');
@@ -348,7 +348,7 @@ describe('installEnforcementHooks', () => {
 
   it('commit-msg hook is no-op when commitFormat is not set', async () => {
     const wf = ownerWorkflow({ commitFormat: undefined });
-    await installEnforcementHooks(tmpDir, wf, 'TestRepo');
+    await installEnforcementHooks(tmpDir, wf, 'TestRepo', tmpDir);
     const hook = await fs.readFile(path.join(tmpDir, '.git', 'hooks', 'commit-msg'), 'utf8');
     expect(hook).not.toContain('REJECTED');
     expect(hook).toContain('exit 0');
@@ -357,7 +357,7 @@ describe('installEnforcementHooks', () => {
   // ─── Null workflow → placeholders ────────────────────────────────────────
 
   it('installs no-op placeholders when workflow is null', async () => {
-    await installEnforcementHooks(tmpDir, null, 'TestRepo');
+    await installEnforcementHooks(tmpDir, null, 'TestRepo', tmpDir);
 
     const hookNames = ['pre-push', 'commit-msg'];
     for (const f of hookNames) {
@@ -376,7 +376,7 @@ describe('installEnforcementHooks', () => {
   // ─── File permissions ────────────────────────────────────────────────────
 
   it('all hooks and scripts are executable (mode 0o755)', async () => {
-    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo');
+    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo', tmpDir);
 
     const files = [
       path.join(tmpDir, '.git', 'hooks', 'pre-push'),
@@ -396,9 +396,9 @@ describe('installEnforcementHooks', () => {
   // ─── Idempotency ─────────────────────────────────────────────────────────
 
   it('can be called twice without error (idempotent)', async () => {
-    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo');
+    await installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo', tmpDir);
     await expect(
-      installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo'),
+      installEnforcementHooks(tmpDir, ownerWorkflow(), 'TestRepo', tmpDir),
     ).resolves.toBeUndefined();
   });
 });

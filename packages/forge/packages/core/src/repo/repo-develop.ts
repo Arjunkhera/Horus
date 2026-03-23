@@ -495,7 +495,7 @@ export async function repoDevelop(
       ? (effectiveWorkflow as RepoIndexWorkflow).confirmedBy
       : 'user',
   };
-  await installEnforcementHooks(sessionPath, workflowForHooks, repoName);
+  await installEnforcementHooks(sessionPath, workflowForHooks, repoName, worktreeBasePath);
 
   // ── Compute host-side path (Docker path translation) ──────────────────────
   let hostSessionPath: string | undefined;

@@ -254,9 +254,13 @@ function workflowDisplayLabel(workflow: RepoIndexWorkflow): string {
  *   - push.sh
  *   - create-pr.sh
  *
- * Hooks go to: <sessionPath>/.git/hooks/
+ * Hooks go to: <worktreeBasePath>/.git/hooks/
  *   - pre-push
  *   - commit-msg
+ *
+ * `worktreeBasePath` is the base repo (managed clone), whose `.git` is a real
+ * directory. In a git worktree, `sessionPath/.git` is a file (not a dir), so
+ * hooks must be installed into the base repo's `.git/hooks/` instead.
  *
  * All scripts/hooks are chmod 755 (executable).
  *
@@ -268,8 +272,9 @@ export async function installEnforcementHooks(
   sessionPath: string,
   workflow: RepoIndexWorkflow | null,
   repoName: string,
+  worktreeBasePath: string,
 ): Promise<void> {
-  const hooksDir = path.join(sessionPath, '.git', 'hooks');
+  const hooksDir = path.join(worktreeBasePath, '.git', 'hooks');
   const scriptsDir = path.join(sessionPath, '.forge', 'scripts');
 
   await fs.mkdir(hooksDir, { recursive: true });
