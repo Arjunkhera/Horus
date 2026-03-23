@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { COMPOSE_PATH } from './constants.js';
+import { COMPOSE_PATH, COMPOSE_TEST_PATH } from './constants.js';
 import { ensureHorusDir, resolveGitHubHost, type Config } from './config.js';
 
 // ── Podman rootless compatibility ────────────────────────────────────────────
@@ -176,6 +176,74 @@ const HORUS_UI_SERVICE = `\
       timeout: 5s
       start_period: 30s
       retries: 3`;
+
+// ── Static test compose overlay ──────────────────────────────────────────────
+
+/**
+ * Static Docker Compose override for integration testing (shadow stack).
+ * Remaps ports and volumes to per-slot test values via TEST_PORT_* and
+ * TEST_DATA_PATH env vars set by `horus test-env acquire`.
+ *
+ * This is written to ~/Horus/docker-compose.test.yml by `installComposeFile()`
+ * so that `horus test-env acquire` can find it at runtime.
+ */
+const TEST_COMPOSE_CONTENT = `# ─────────────────────────────────────────────────────────────────────────────
+# Horus — Shadow Stack Overlay for Integration Testing
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage (managed by \`horus test-env acquire\`):
+#
+#   docker compose \\
+#     -p horus-test-0 \\
+#     -f ~/Horus/docker-compose.yml \\
+#     -f ~/Horus/docker-compose.test.yml \\
+#     up -d
+#
+# All TEST_PORT_* and TEST_DATA_PATH are set by \`horus test-env acquire\`.
+# Slot 0 defaults: ports 9100-9399, data at ~/Horus/data/test-env/slot-0/
+#
+# NOTE: vault-personal is assumed as the primary vault name. If your config
+# uses a different vault name, set TEST_VAULT_NAME accordingly.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  anvil:
+    ports:
+      - "\${TEST_PORT_ANVIL:-9100}:8100"
+    volumes:
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/notes:/data/notes:rw"
+
+  vault-personal:
+    ports:
+      - "\${TEST_PORT_VAULT_SVC:-9101}:8000"
+    volumes:
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/vaults/personal:/data/knowledge-repo:rw"
+
+  vault-router:
+    ports:
+      - "\${TEST_PORT_VAULT_ROUTER:-9150}:8400"
+
+  vault-mcp:
+    ports:
+      - "\${TEST_PORT_VAULT_MCP:-9200}:8300"
+
+  forge:
+    ports:
+      - "\${TEST_PORT_FORGE:-9250}:8200"
+    volumes:
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/registry:/data/registry:rw"
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/workspaces:/data/workspaces:rw"
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/sessions:/data/sessions:rw"
+
+  typesense:
+    ports:
+      - "\${TEST_PORT_TYPESENSE:-9108}:8108"
+    volumes:
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/typesense-data:/data"
+
+  horus-ui:
+    ports:
+      - "\${TEST_PORT_UI:-9260}:8400"
+`;
 
 // ── Dynamic compose generation ───────────────────────────────────────────────
 
@@ -357,7 +425,7 @@ export function composeFileExists(): boolean {
 }
 
 /**
- * Install the generated docker-compose.yml to ~/Horus/docker-compose.yml.
+ * Install docker-compose.yml and docker-compose.test.yml to ~/Horus/.
  * Dynamically generates the file from config, supporting multiple vaults.
  * When the runtime is Podman, services are overridden to run as root inside
  * the container so they can write to host-mounted volumes.
@@ -366,6 +434,7 @@ export function installComposeFile(config: Config, runtime?: 'docker' | 'podman'
   ensureHorusDir();
   const content = generateComposeFile(config, runtime);
   writeFileSync(COMPOSE_PATH, content, 'utf-8');
+  writeFileSync(COMPOSE_TEST_PATH, TEST_COMPOSE_CONTENT, 'utf-8');
 }
 
 /**
