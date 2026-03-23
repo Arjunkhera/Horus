@@ -9,6 +9,7 @@ import type {
   RepoIndexEntry,
 } from '../models/index.js';
 import { WorkspaceMetadataStore, generateWorkspaceId } from './workspace-metadata-store.js';
+import { ForgeError } from '../adapters/errors.js';
 import { WorkspaceManager } from './workspace-manager.js';
 import { loadGlobalConfig } from '../config/global-config-loader.js';
 import { expandPath } from '../config/path-utils.js';
@@ -117,7 +118,8 @@ export class WorkspaceCreator {
       const refString = `workspace-config:${options.configName}@${options.configVersion ?? '*'}`;
       configArtifact = await this.forge.resolve(refString);
     } catch (err: any) {
-      throw new WorkspaceCreateError(
+      throw new ForgeError(
+        'CONFIG_NOT_FOUND',
         `Workspace config '${options.configName}' not found in registry`,
         `Available configs: forge list --available -t workspace-config`,
       );
@@ -213,7 +215,12 @@ export class WorkspaceCreator {
         console.warn(`[Forge] Warning: Failed to install plugins (claude-code): ${err.message}`);
       }
 
-      // Install Cursor target in parallel — skills emit to .cursor/rules/*.mdc
+      // Snapshot the lock after claude-code install so we can merge file paths later.
+      // Each install() call writes a fresh lock for its target, so without merging
+      // the cursor install would overwrite the claude-code file entries.
+      const claudeCodeLock = await workspaceManager.readLock();
+
+      // Install Cursor target — skills emit to .cursor/rules/*.mdc
       try {
         if (!workspaceForge) {
           workspaceForge = new (await import('../core.js')).ForgeCore(workspacePath);
@@ -224,6 +231,26 @@ export class WorkspaceCreator {
         });
       } catch (err: any) {
         console.warn(`[Forge] Warning: Failed to install plugins (cursor): ${err.message}`);
+      }
+
+      // Merge claude-code file paths into the lock written by the cursor install.
+      // This ensures forge.lock tracks ALL emitted files regardless of target.
+      try {
+        const mergedLock = await workspaceManager.readLock();
+        for (const [key, claudeEntry] of Object.entries(claudeCodeLock.artifacts)) {
+          const cursorEntry = mergedLock.artifacts[key];
+          if (cursorEntry) {
+            // Merge file lists, deduplicating
+            const allFiles = new Set([...cursorEntry.files, ...claudeEntry.files]);
+            cursorEntry.files = Array.from(allFiles);
+          } else {
+            // Artifact only existed in claude-code install (shouldn't happen, but safe)
+            mergedLock.artifacts[key] = claudeEntry;
+          }
+        }
+        await workspaceManager.writeLock(mergedLock);
+      } catch (err: any) {
+        console.warn(`[Forge] Warning: Failed to merge lock files: ${err.message}`);
       }
 
       // Step 8: Emit MCP configs
