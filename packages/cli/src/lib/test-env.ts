@@ -214,6 +214,35 @@ export function removeSlotDirs(slotDataPath: string): void {
   }
 }
 
+/**
+ * Pre-seed the slot's notes directory so Anvil starts with a valid git repo
+ * instead of attempting an HTTPS clone on startup.
+ *
+ * Happy path: local clone of production notes (instant, no network).
+ * Fallback: git init + empty commit (Anvil healthy, notes empty — safe for testing).
+ */
+export async function preSeedNotesDir(dataDir: string, slotDataPath: string): Promise<void> {
+  const srcNotesPath = join(dataDir, 'notes');
+  const destNotesPath = join(slotDataPath, 'notes');
+
+  if (existsSync(join(srcNotesPath, '.git'))) {
+    // Remove the empty dir createSlotDirs made so git clone can recreate it
+    if (existsSync(destNotesPath)) {
+      rmSync(destNotesPath, { recursive: true });
+    }
+    await execa('git', ['clone', '--local', srcNotesPath, destNotesPath]);
+  } else {
+    // Fallback: init a minimal git repo so Anvil doesn't try to HTTPS-clone
+    await execa('git', ['-C', destNotesPath, 'init']);
+    await execa('git', [
+      '-C', destNotesPath,
+      '-c', 'user.email=horus@local',
+      '-c', 'user.name=Horus',
+      'commit', '--allow-empty', '-m', 'init',
+    ]);
+  }
+}
+
 // ── Compose operations ───────────────────────────────────────────────────────
 
 export function buildComposeEnv(
