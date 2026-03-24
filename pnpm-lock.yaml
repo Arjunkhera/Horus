@@ -127,6 +127,9 @@ importers:
 
   packages/forge/packages/core:
     dependencies:
+      '@horus/search':
+        specifier: workspace:*
+        version: link:../../../search
       '@types/semver':
         specifier: ^7.7.1
         version: 7.7.1

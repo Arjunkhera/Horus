@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sessionCleanup = exports.sessionList = exports.SessionStoreManager = exports.repoDevelop = exports.RepoCloneError = exports.createReferenceClone = exports.normalizeGitUrl = exports.RepoIndexQuery = exports.loadRepoIndex = exports.saveRepoIndex = exports.scan = exports.Registry = exports.ForgeCore = void 0;
+exports.sessionCleanup = exports.sessionList = exports.SessionStoreManager = exports.ForgeSearchClient = exports.repoDevelop = exports.normalizeGitUrl = exports.RepoIndexQuery = exports.loadRepoIndex = exports.saveRepoIndex = exports.scan = exports.Registry = exports.ForgeCore = void 0;
 // Core
 var core_js_1 = require("./core.js");
 Object.defineProperty(exports, "ForgeCore", { enumerable: true, get: function () { return core_js_1.ForgeCore; } });
@@ -42,11 +42,11 @@ var repo_index_query_js_1 = require("./repo/repo-index-query.js");
 Object.defineProperty(exports, "RepoIndexQuery", { enumerable: true, get: function () { return repo_index_query_js_1.RepoIndexQuery; } });
 var url_utils_js_1 = require("./repo/url-utils.js");
 Object.defineProperty(exports, "normalizeGitUrl", { enumerable: true, get: function () { return url_utils_js_1.normalizeGitUrl; } });
-var repo_clone_js_1 = require("./repo/repo-clone.js");
-Object.defineProperty(exports, "createReferenceClone", { enumerable: true, get: function () { return repo_clone_js_1.createReferenceClone; } });
-Object.defineProperty(exports, "RepoCloneError", { enumerable: true, get: function () { return repo_clone_js_1.RepoCloneError; } });
 var repo_develop_js_1 = require("./repo/repo-develop.js");
 Object.defineProperty(exports, "repoDevelop", { enumerable: true, get: function () { return repo_develop_js_1.repoDevelop; } });
+// Search
+var forge_search_client_js_1 = require("./search/forge-search-client.js");
+Object.defineProperty(exports, "ForgeSearchClient", { enumerable: true, get: function () { return forge_search_client_js_1.ForgeSearchClient; } });
 // Session
 var session_store_js_1 = require("./session/session-store.js");
 Object.defineProperty(exports, "SessionStoreManager", { enumerable: true, get: function () { return session_store_js_1.SessionStoreManager; } });

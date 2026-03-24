@@ -34,6 +34,9 @@ export { RepoIndexQuery } from './repo/repo-index-query.js';
 export { normalizeGitUrl } from './repo/url-utils.js';
 export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type RepoDevelopResult, type RepoDevelopNeedsConfirmation, type WorkflowInput } from './repo/repo-develop.js';
 
+// Search
+export { ForgeSearchClient, type ForgeSearchHit } from './search/forge-search-client.js';
+
 // Session
 export { SessionStoreManager } from './session/session-store.js';
 export { sessionList, type SessionListOptions, type SessionListItem, type SessionListResult } from './session/session-list.js';
