@@ -69,8 +69,11 @@ const FORGE_SERVICE = `\
     ports:
       - "\${FORGE_PORT:-8200}:8200"
     volumes:
+      - \${HORUS_DATA_PATH}/config:/data/config:rw
       - \${HORUS_DATA_PATH}/registry:/data/registry:rw
       - \${HORUS_DATA_PATH}/workspaces:/data/workspaces:rw
+      - \${HORUS_DATA_PATH}/repos:/data/horus-repos:rw
+      - \${HORUS_DATA_PATH}/sessions:/data/sessions:rw
       - \${HOST_REPOS_PATH}:/data/repos:ro
     environment:
       - HORUS_RUNTIME=\${HORUS_RUNTIME:-docker}
@@ -78,6 +81,8 @@ const FORGE_SERVICE = `\
       - FORGE_HOST=0.0.0.0
       - FORGE_REGISTRY_PATH=/data/registry
       - FORGE_WORKSPACES_PATH=/data/workspaces
+      - FORGE_CONFIG_PATH=/data/config
+      - FORGE_MANAGED_REPOS_PATH=/data/horus-repos
       - FORGE_REGISTRY_REPO_URL=\${FORGE_REGISTRY_REPO_URL:-}
       - FORGE_SYNC_INTERVAL=\${FORGE_SYNC_INTERVAL:-300}
       - FORGE_ANVIL_URL=http://anvil:8100
@@ -230,8 +235,10 @@ services:
     ports:
       - "\${TEST_PORT_FORGE:-9250}:8200"
     volumes:
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/config:/data/config:rw"
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/registry:/data/registry:rw"
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/workspaces:/data/workspaces:rw"
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/repos:/data/horus-repos:rw"
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/sessions:/data/sessions:rw"
 
   typesense:
