@@ -179,13 +179,14 @@ describe('Integration: CRUD Operations', () => {
     }
   });
 
-  it('should create note and search for it by title keyword', async () => {
+  it('should create note and find it via filter search', async () => {
     // Create
     const createInput: CreateNoteInput = {
       type: 'task',
       title: 'Unique Searchable Task',
       fields: {
         status: 'open',
+        priority: 'P2-medium',
       },
     };
 
@@ -193,10 +194,12 @@ describe('Integration: CRUD Operations', () => {
     expect(!isAnvilError(createResult)).toBe(true);
 
     if (!isAnvilError(createResult)) {
-      // Search
+      // Search by filter (text search requires Typesense)
       const searchResult = await handleSearch(
         {
-          query: 'Searchable',
+          type: 'task',
+          status: 'open',
+          priority: 'P2-medium',
         },
         ctx
       );

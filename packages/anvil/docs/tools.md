@@ -215,7 +215,7 @@ Full-text search across all notes with filtering.
 **Input Schema**:
 ```typescript
 {
-  query?: string;  // Free-text search query (FTS5)
+  query?: string;  // Free-text search query
   filters?: {
     type?: string;
     status?: string | { not: string };

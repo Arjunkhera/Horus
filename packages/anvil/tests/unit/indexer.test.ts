@@ -9,7 +9,7 @@ import {
   getReverseRelationships,
   getAllNotePaths,
 } from '../../src/index/indexer.js';
-import { searchFts, queryNotes, combinedSearch } from '../../src/index/fts.js';
+import { queryNotes } from '../../src/index/query.js';
 import type { Note } from '../../src/types/index.js';
 
 describe('Indexer and Search', () => {
@@ -176,28 +176,6 @@ describe('Indexer and Search', () => {
       expect(rel.target_id).toBe('future-note');
     });
 
-    it('should update FTS table when note is upserted', () => {
-      const note: Note = {
-        noteId: 'note-fts',
-        type: 'note',
-        title: 'Searchable Title',
-        created: '2024-01-01T00:00:00Z',
-        modified: '2024-01-01T00:00:00Z',
-        tags: [],
-        related: [],
-        body: 'This is the body content with keywords.',
-        filePath: '/vault/note-fts.md',
-        fields: {},
-      };
-
-      upsertNote(db, note);
-
-      const ftsRow = db.getOne<any>(
-        'SELECT rowid FROM notes_fts WHERE title MATCH ? LIMIT 1',
-        ['Searchable']
-      );
-      expect(ftsRow).toBeDefined();
-    });
   });
 
   describe('deleteNote', () => {
@@ -467,91 +445,6 @@ describe('Indexer and Search', () => {
     });
   });
 
-  describe('searchFts', () => {
-    it('should search and return ranked results', () => {
-      const notes: Note[] = [
-        {
-          noteId: 'search-1',
-          type: 'note',
-          title: 'Database Design',
-          created: '2024-01-01T00:00:00Z',
-          modified: '2024-01-01T00:00:00Z',
-          tags: [],
-          related: [],
-          body: 'Information about databases and design patterns',
-          filePath: '/vault/1.md',
-          fields: {},
-        },
-        {
-          noteId: 'search-2',
-          type: 'note',
-          title: 'API Design',
-          created: '2024-01-02T00:00:00Z',
-          modified: '2024-01-02T00:00:00Z',
-          tags: [],
-          related: [],
-          body: 'Information about APIs and REST',
-          filePath: '/vault/2.md',
-          fields: {},
-        },
-      ];
-
-      fullRebuild(db, notes);
-
-      const results = searchFts(db, 'database', 10, 0);
-
-      expect(results.length).toBeGreaterThan(0);
-      expect(results[0].noteId).toBe('search-1'); // Should rank highest
-    });
-
-    it('should handle prefix queries', () => {
-      const notes: Note[] = [
-        {
-          noteId: 'prefix-1',
-          type: 'note',
-          title: 'Testing Framework',
-          created: '2024-01-01T00:00:00Z',
-          modified: '2024-01-01T00:00:00Z',
-          tags: [],
-          related: [],
-          body: 'Unit tests and integration testing framework',
-          filePath: '/vault/test.md',
-          fields: {},
-        },
-      ];
-
-      fullRebuild(db, notes);
-
-      const results = searchFts(db, 'testing', 10, 0);
-
-      expect(results.length).toBeGreaterThan(0);
-    });
-
-    it('should return snippets from matching content', () => {
-      const notes: Note[] = [
-        {
-          noteId: 'snippet-1',
-          type: 'note',
-          title: 'Long Document',
-          created: '2024-01-01T00:00:00Z',
-          modified: '2024-01-01T00:00:00Z',
-          tags: [],
-          related: [],
-          body: 'Lorem ipsum dolor sit amet. The keyword appears here. More text follows with additional content.',
-          filePath: '/vault/snippet.md',
-          fields: {},
-        },
-      ];
-
-      fullRebuild(db, notes);
-
-      const results = searchFts(db, 'keyword', 10, 0);
-
-      expect(results.length).toBeGreaterThan(0);
-      expect(results[0].snippet).toBeTruthy();
-    });
-  });
-
   describe('queryNotes', () => {
     beforeEach(() => {
       const notes: Note[] = [
@@ -651,70 +544,6 @@ describe('Indexer and Search', () => {
       // Should return notes that are NOT closed (open + note without status)
       expect(result.total).toBe(2);
       expect(result.rows.every((r: any) => r.status !== 'closed')).toBe(true);
-    });
-  });
-
-  describe('combinedSearch', () => {
-    beforeEach(() => {
-      const notes: Note[] = [
-        {
-          noteId: 'combined-1',
-          type: 'task',
-          title: 'Important Meeting',
-          created: '2024-01-01T00:00:00Z',
-          modified: '2024-01-01T00:00:00Z',
-          tags: ['urgent'],
-          related: [],
-          status: 'open',
-          body: 'Discussion about project database and architecture',
-          filePath: '/vault/meeting.md',
-          fields: {},
-        },
-        {
-          noteId: 'combined-2',
-          type: 'note',
-          title: 'Database Optimization',
-          created: '2024-01-05T00:00:00Z',
-          modified: '2024-01-05T00:00:00Z',
-          tags: ['technical'],
-          related: [],
-          body: 'Strategies for database performance tuning',
-          filePath: '/vault/optimization.md',
-          fields: {},
-        },
-      ];
-
-      fullRebuild(db, notes);
-    });
-
-    it('should combine FTS and filters', () => {
-      const result = combinedSearch(
-        db,
-        'database',
-        { status: 'open' },
-        10,
-        0
-      );
-
-      // Should find 'combined-1' which matches 'database' and has status=open
-      expect(result.results.length).toBeGreaterThan(0);
-      expect(result.results.some((r) => r.noteId === 'combined-1')).toBe(true);
-    });
-
-    it('should apply recency boost', () => {
-      const result = combinedSearch(
-        db,
-        'database',
-        {},
-        10,
-        0
-      );
-
-      // More recent note should rank higher
-      if (result.results.length > 1) {
-        // combined-2 is more recent and should rank higher
-        expect(result.results[0].noteId).toBe('combined-2');
-      }
     });
   });
 });

@@ -37,15 +37,6 @@ CREATE TABLE IF NOT EXISTS notes (
   FOREIGN KEY (type) REFERENCES types(type_id) ON DELETE SET NULL
 );
 
--- Full-text search virtual table (FTS5)
-CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-  title,
-  description,
-  body_text,
-  content=notes,
-  content_rowid=rowid
-);
-
 -- Tags (normalized, one row per tag per note)
 CREATE TABLE IF NOT EXISTS note_tags (
   note_id TEXT NOT NULL,

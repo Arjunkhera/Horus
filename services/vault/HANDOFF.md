@@ -3,7 +3,7 @@
 ## 📍 Current Status: Phase 1 Complete
 
 **Completed:** 2026-02-19  
-**Next Phase:** Phase 2 - Layer 1 (QMD Adapter)
+**Next Phase:** Phase 2 - Layer 1 (Search Store) — NOTE: Original adapter was replaced by Typesense (external search, TS-4).
 
 ---
 
@@ -42,81 +42,22 @@
 
 ---
 
-## 🔜 Next Steps: Phase 2 - Layer 1 (QMD Adapter)
+## Phase 2 - Layer 1 (Search Store)
 
-### Task 2.1: Define Abstract SearchStore Interface
+> **Historical note:** The original plan called for a subprocess adapter. That was replaced
+> by a local engine, which was then removed in the Typesense migration (TS-4). The current
+> implementation uses `FilesystemStore` for document retrieval. Text search is provided by Typesense.
+
+### Task 2.1: Define Abstract SearchStore Interface -- DONE
 
 **File:** `src/layer1/interface.py`
 
-Create an ABC (Abstract Base Class) that defines the contract for search/storage operations. This allows QMD to be swapped out later for Elasticsearch or Document Service.
+### Task 2.2: Implement Search Store -- DONE (FilesystemStore)
 
-**Methods to define:**
-```python
-class SearchStore(ABC):
-    @abstractmethod
-    def search(self, query: str, collection: str | None = None, limit: int = 10) -> list[SearchResult]
-    
-    @abstractmethod
-    def semantic_search(self, query: str, collection: str | None = None, limit: int = 10) -> list[SearchResult]
-    
-    @abstractmethod
-    def hybrid_search(self, query: str, collection: str | None = None, limit: int = 10) -> list[SearchResult]
-    
-    @abstractmethod
-    def get_document(self, file_path: str) -> str | None
-    
-    @abstractmethod
-    def get_documents_by_glob(self, pattern: str) -> list[Document]
-    
-    @abstractmethod
-    def list_documents(self, collection: str | None = None) -> list[str]
-    
-    @abstractmethod
-    def reindex(self) -> None
-    
-    @abstractmethod
-    def status(self) -> dict
-```
+**File:** `src/layer1/filesystem_store.py`
 
-**Also define:**
-- `SearchResult` dataclass: `file_path`, `score`, `snippet`, `collection`
-- `Document` dataclass: `file_path`, `content`, `collection`
-
-### Task 2.2: Implement QMD Adapter
-
-**File:** `src/layer1/qmd_adapter.py`
-
-Implement `QMDAdapter(SearchStore)` that shells out to QMD CLI via `subprocess.run()`.
-
-**Key implementation details:**
-- Use `--index knowledge` flag to isolate from user's personal QMD index
-- All commands use `--json` for structured output
-- Helper method `_run_qmd(args: list[str]) -> str` for subprocess execution
-- Parse JSON output into dataclass instances
-
-**QMD commands to use:**
-- `qmd --index knowledge search "<query>" --json -n <limit>` - BM25 keyword search
-- `qmd --index knowledge vsearch "<query>" --json -n <limit>` - Semantic vector search
-- `qmd --index knowledge query "<query>" --json -n <limit>` - Hybrid (best quality)
-- `qmd --index knowledge get "<file_path>"` - Retrieve full document
-- `qmd --index knowledge multi-get "<pattern>" --json` - Retrieve multiple docs
-- `qmd --index knowledge ls [collection]` - List indexed documents
-- `qmd --index knowledge update` - Re-index all collections
-- `qmd --index knowledge embed` - Rebuild vector embeddings
-- `qmd --index knowledge status` - Index health info
-
-### Task 2.3: Collection Setup Logic
-
-**File:** `src/layer1/qmd_adapter.py` (add to QMDAdapter class)
-
-Add `ensure_collections(self, shared_path: str, workspace_path: str)` method that:
-1. Checks existing collections via `qmd --index knowledge collection list`
-2. Adds "shared" collection if missing: `qmd --index knowledge collection add {shared_path} --name shared --mask "**/*.md"`
-3. Adds "workspace" collection if missing: `qmd --index knowledge collection add {workspace_path} --name workspace --mask "**/*.md"`
-4. Runs initial index: `qmd --index knowledge update`
-5. Runs initial embed: `qmd --index knowledge embed`
-
-Must be idempotent - safe to call multiple times.
+Filesystem-based store that handles document retrieval. Search operations return empty results
+until a Typesense-backed SearchStore is configured.
 
 ---
 
@@ -129,7 +70,7 @@ Must be idempotent - safe to call multiple times.
 
 ### Code Repositories
 - **Service code:** `/Users/akhera/Desktop/Repositories/automation/knowledge-service/`
-- **QMD location:** `/Users/akhera/Desktop/Repositories/qmd` (already cloned)
+- **Search:** Typesense (external service, shared with Anvil)
 - **Data repo (future):** `akhera/knowledge-base` (markdown pages - not created yet)
 
 ### Architecture
@@ -138,7 +79,7 @@ Must be idempotent - safe to call multiple times.
 │  REST API (:8000, FastAPI)                                  │
 │    ├── Layer 2: Knowledge Logic                             │
 │    │     (scope-chain, mode filter, progressive disclosure) │
-│    └── Layer 1: QMD Adapter (subprocess)                    │
+│    └── Layer 1: FilesystemStore + Typesense (planned)       │
 │          ├── Collection: "shared"                            │
 │          │     └── /data/knowledge-repo/ (cloned inside)    │
 │          └── Collection: "workspace"                         │
@@ -156,16 +97,9 @@ cd /Users/akhera/Desktop/Repositories/automation/knowledge-service
 pip install -r requirements.txt
 ```
 
-### Verify QMD is Available
+### Run Tests
 ```bash
-qmd --version
-# Should show QMD version info
-```
-
-### Run Tests (Phase 2+)
-```bash
-# After implementing Layer 1, test QMD integration:
-python -c "from src.layer1.qmd_adapter import QMDAdapter; adapter = QMDAdapter(); print(adapter.status())"
+pytest tests/ -v
 ```
 
 ---
@@ -176,10 +110,9 @@ python -c "from src.layer1.qmd_adapter import QMDAdapter; adapter = QMDAdapter()
   - [x] Task 1.1: Project structure + requirements.txt
   - [x] Task 1.2: Pydantic models
 
-- [ ] **Phase 2**: Layer 1 - QMD Adapter
-  - [ ] Task 2.1: Abstract SearchStore interface
-  - [ ] Task 2.2: QMD adapter implementation
-  - [ ] Task 2.3: Collection setup logic
+- [x] **Phase 2**: Layer 1 - Search Store
+  - [x] Task 2.1: Abstract SearchStore interface
+  - [x] Task 2.2: FilesystemStore implementation (Typesense replaces old local engine)
 
 - [ ] **Phase 3**: Layer 2 - Knowledge Logic
   - [ ] Task 3.1: Frontmatter parser
@@ -213,20 +146,14 @@ python -c "from src.layer1.qmd_adapter import QMDAdapter; adapter = QMDAdapter()
 
 1. **Read the sample pages first** - Understanding the frontmatter schema is crucial. See `Tasks/examples/knowledge-service-page-samples.md` for 10 validated examples.
 
-2. **Test QMD commands manually** - Before implementing the adapter, run QMD commands in your terminal to understand the output format.
+2. **The two-layer architecture is key** - Layer 1 (search/storage) is swappable. Layer 2 (knowledge logic) is stable. Keep them decoupled.
 
-3. **Start simple** - Implement the interface first, then add one QMD command at a time to the adapter.
-
-4. **Use subprocess with caution** - Always capture stderr, handle non-zero exit codes, and parse JSON carefully.
-
-5. **The two-layer architecture is key** - Layer 1 (search/storage) is swappable. Layer 2 (knowledge logic) is stable. Keep them decoupled.
+3. **Typesense integration** - The next step for Layer 1 is to add a TypesenseStore that implements SearchStore using the shared `@horus/search` package.
 
 ---
 
 ## 🐛 Known Issues / Gotchas
 
-- QMD requires Bun runtime - will be bundled in Docker image (Phase 6)
-- QMD uses `--index` flag to isolate indexes - always use `--index knowledge`
 - Collection paths must be absolute in Docker container
 - File watcher (Phase 5) needs debouncing to avoid re-indexing on every keystroke
 

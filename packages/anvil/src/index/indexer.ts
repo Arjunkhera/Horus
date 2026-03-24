@@ -22,8 +22,7 @@ function ensureTypeExists(db: AnvilDb, typeId: string): void {
  * 1. Upsert into notes table
  * 2. Sync note_tags table
  * 3. Sync relationships table
- * 4. Update notes_fts virtual table
- * 5. Forward reference reconciliation
+ * 4. Forward reference reconciliation
  */
 export function upsertNote(db: AnvilDb, note: Note): void {
   db.transaction(() => {
@@ -36,7 +35,7 @@ export function upsertNote(db: AnvilDb, note: Note): void {
  * Delete a note and update related data.
  * 1. Set target_id = NULL in relationships where target_id = noteId (preserve forward ref)
  * 2. Delete from notes (cascade deletes tags and relationships where source_id = noteId)
- * 3. Delete from notes_fts
+ * 3. Optimize after deletion
  */
 export function deleteNote(db: AnvilDb, noteId: string): void {
   db.transaction(() => {
@@ -55,18 +54,14 @@ export function deleteNote(db: AnvilDb, noteId: string): void {
 /**
  * Full rebuild within a single transaction.
  * 1. DELETE all notes (cascade deletes tags, relationships)
- * 2. DELETE from notes_fts (virtual table cleanup)
- * 3. Upsert all notes one by one
+ * 2. Upsert all notes one by one
  */
 export function fullRebuild(db: AnvilDb, notes: Note[]): void {
   db.transaction(() => {
     // Step 1: Delete all notes
     db.run('DELETE FROM notes', []);
 
-    // Step 2: Clear FTS table
-    db.run('DELETE FROM notes_fts', []);
-
-    // Step 3: Upsert all notes one by one (within the same transaction)
+    // Step 2: Upsert all notes one by one (within the same transaction)
     for (const note of notes) {
       upsertNoteInternal(db, note);
     }
@@ -170,13 +165,6 @@ function upsertNoteInternal(db: AnvilDb, note: Note): void {
       [note.noteId, targetId, rel.targetTitle, rel.relationType]
     );
   }
-
-  // Update notes_fts virtual table
-  db.run(
-    `INSERT OR REPLACE INTO notes_fts(rowid, title, description, body_text)
-     SELECT rowid, title, description, body_text FROM notes WHERE note_id = ?`,
-    [note.noteId]
-  );
 
   // Forward reference reconciliation
   db.run(

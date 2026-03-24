@@ -100,18 +100,18 @@ describe('Integration: Search', () => {
     }
   });
 
-  it('should create note with unique content and find via FTS search', async () => {
+  it('should return error for text search when no search engine configured', async () => {
     const uniqueKeyword = 'xyzuniquekeyword12345';
     const input: CreateNoteInput = {
       type: 'note',
-      title: 'FTS Test Note',
+      title: 'Search Engine Test Note',
       content: `This note contains the ${uniqueKeyword} that we will search for.`,
     };
 
     const createResult = await handleCreateNote(input, ctx);
     expect(!isAnvilError(createResult)).toBe(true);
 
-    // Search for the unique keyword
+    // Text search without a search engine should return an error
     const searchResult = await handleSearch(
       {
         query: uniqueKeyword,
@@ -119,13 +119,9 @@ describe('Integration: Search', () => {
       ctx
     );
 
-    expect(!isAnvilError(searchResult)).toBe(true);
-    if (!isAnvilError(searchResult)) {
-      expect(searchResult.results.length).toBeGreaterThan(0);
-      const found = searchResult.results.some(
-        (r) => r.title === 'FTS Test Note'
-      );
-      expect(found).toBe(true);
+    expect(isAnvilError(searchResult)).toBe(true);
+    if (isAnvilError(searchResult)) {
+      expect(searchResult.code).toBe('SERVER_ERROR');
     }
   });
 

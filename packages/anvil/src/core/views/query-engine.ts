@@ -3,7 +3,7 @@
 import type { AnvilDb } from '../../index/sqlite.js';
 import type { QueryFilter, SortOrder } from '../../types/query.js';
 import type { ListView, TableView, BoardView } from '../../types/view.js';
-import { queryNotes } from '../../index/fts.js';
+import { queryNotes } from '../../index/query.js';
 import {
   renderList,
   renderTable,

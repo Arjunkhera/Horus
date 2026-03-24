@@ -7,7 +7,7 @@ import type { SearchResponse, SearchResult } from '../types/view.js';
 import type { AnvilError } from '../types/error.js';
 import type { QueryFilter } from '../types/query.js';
 import { makeError, ERROR_CODES } from '../types/error.js';
-import { searchFts, queryNotes, combinedSearch, buildQuerySql } from '../index/fts.js';
+import { queryNotes, buildQuerySql } from '../index/query.js';
 
 /**
  * Resolve semantic search results to database note IDs.
@@ -231,7 +231,7 @@ function hasFilters(filter: QueryFilter): boolean {
 
 /**
  * Handle anvil_search request.
- * Performs FTS, filter-only, or combined search based on input.
+ * Uses Typesense search engine for text queries and SQLite for filter-only queries.
  * Returns paginated SearchResult objects with metadata and tags.
  */
 export async function handleSearch(
@@ -263,7 +263,7 @@ export async function handleSearch(
     let searchResults: Array<{ noteId: string; score?: number; snippet?: string }> = [];
     let total = 0;
 
-    // Case 1: Query + Filters → semantic search candidates filtered by structured criteria
+    // Case 1: Query + Filters -> semantic search candidates filtered by structured criteria
     if (input.query && hasActiveFilters) {
       if (ctx.searchEngine) {
         try {
@@ -276,22 +276,19 @@ export async function handleSearch(
           total = filtered.length;
           searchResults = filtered.slice(offset, offset + limit);
         } catch {
-          // Semantic search failed — fall back to FTS combined search
-          const combined = combinedSearch(ctx.db.raw, input.query, filter, limit, offset);
-          searchResults = combined.results;
-          total = combined.total;
+          return makeError(
+            ERROR_CODES.SERVER_ERROR,
+            'Search engine unavailable. Text search requires Typesense.'
+          );
         }
       } else {
-        const combined = combinedSearch(ctx.db.raw, input.query, filter, limit, offset);
-        searchResults = combined.results.map((r) => ({
-          noteId: r.noteId,
-          score: r.score,
-          snippet: r.snippet,
-        }));
-        total = combined.total;
+        return makeError(
+          ERROR_CODES.SERVER_ERROR,
+          'Search engine not configured. Text search requires Typesense.'
+        );
       }
     }
-    // Case 2: Query only → semantic search (or FTS fallback)
+    // Case 2: Query only -> semantic search via Typesense
     else if (input.query && !hasActiveFilters) {
       if (ctx.searchEngine) {
         try {
@@ -300,38 +297,19 @@ export async function handleSearch(
           searchResults = resolved;
           total = resolved.length < limit ? offset + resolved.length : offset + limit;
         } catch {
-          // Semantic search failed — fall back to FTS
-          const ftsResults = searchFts(ctx.db.raw, input.query, limit, offset);
-          searchResults = ftsResults;
-          total = ftsResults.length < limit
-            ? offset + ftsResults.length
-            : (ctx.db.raw.getOne<{ count: number }>(
-                `SELECT COUNT(*) as count FROM notes_fts WHERE notes_fts MATCH ?`,
-                [input.query]
-              )?.count ?? 0);
+          return makeError(
+            ERROR_CODES.SERVER_ERROR,
+            'Search engine unavailable. Text search requires Typesense.'
+          );
         }
       } else {
-        const ftsResults = searchFts(ctx.db.raw, input.query, limit, offset);
-        total = ftsResults.length;
-
-        if (ftsResults.length < limit) {
-          total = offset + ftsResults.length;
-        } else {
-          const countRow = ctx.db.raw.getOne<{ count: number }>(
-            `SELECT COUNT(*) as count FROM notes_fts WHERE notes_fts MATCH ?`,
-            [input.query]
-          );
-          total = countRow?.count ?? 0;
-        }
-
-        searchResults = ftsResults.map((r) => ({
-          noteId: r.noteId,
-          score: r.score,
-          snippet: r.snippet,
-        }));
+        return makeError(
+          ERROR_CODES.SERVER_ERROR,
+          'Search engine not configured. Text search requires Typesense.'
+        );
       }
     }
-    // Case 3: Filters only → use queryNotes
+    // Case 3: Filters only -> use queryNotes (pure SQL)
     else if (hasActiveFilters) {
       const queryResult = queryNotes(
         ctx.db.raw,
@@ -346,7 +324,7 @@ export async function handleSearch(
       }));
       total = queryResult.total;
     }
-    // Case 4: No query and no filters → return empty
+    // Case 4: No query and no filters -> return empty
     else {
       return {
         results: [],
