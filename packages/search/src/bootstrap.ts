@@ -1,4 +1,4 @@
-import type Typesense from 'typesense';
+import type { Client as TypesenseClient } from 'typesense';
 import type { CollectionCreateSchema } from 'typesense/lib/Typesense/Collections.js';
 import type { EmbeddingConfig } from './config.js';
 
@@ -47,7 +47,7 @@ const RETRY_INTERVAL_MS = 2000;
  * Retries up to 5 times with 2 s intervals on connection errors.
  */
 export async function bootstrapCollection(
-  client: Typesense.Client,
+  client: TypesenseClient,
   embeddingConfig?: EmbeddingConfig | null,
 ): Promise<void> {
   const schema = structuredClone(BASE_SCHEMA);
@@ -72,7 +72,7 @@ export async function bootstrapCollection(
     try {
       // Check if the collection already exists
       const collections = await client.collections().retrieve();
-      const exists = collections.some((c) => c.name === COLLECTION_NAME);
+      const exists = collections.some((c: { name: string }) => c.name === COLLECTION_NAME);
       if (exists) {
         return; // Already bootstrapped — nothing to do
       }
