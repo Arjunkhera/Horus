@@ -11,6 +11,7 @@ import { startStdio } from './mcp/transports/stdio.js';
 import { startHttp } from './mcp/transports/http.js';
 import { createTypeWatcher } from './watcher/type-watcher.js';
 import { createSearchEngine } from './core/search/index.js';
+import { AnvilWatcher } from './storage/watcher.js';
 import type { ToolContext } from './tools/create-note.js';
 import type { TypeWatcher } from './watcher/type-watcher.js';
 
@@ -62,11 +63,21 @@ async function main(): Promise<void> {
   const { engine: searchEngine, mode: searchMode } = await createSearchEngine(db.raw);
   process.stderr.write(JSON.stringify({ level: 'info', message: `Search engine: ${searchMode}`, timestamp: new Date().toISOString() }) + '\n');
 
+  // Create and start note watcher (startup catchup + live file watching)
+  const watcher = new AnvilWatcher({
+    vaultPath: config.vault_path,
+    db: db.raw,
+    registry,
+  });
+  await watcher.start();
+  process.stderr.write(JSON.stringify({ level: 'info', message: 'Note watcher started (startup catchup complete)', timestamp: new Date().toISOString() }) + '\n');
+
   // Create tool context
   const ctx: ToolContext = {
     vaultPath: config.vault_path,
     registry,
     db,
+    watcher,
     searchEngine,
   };
 
@@ -95,9 +106,11 @@ async function main(): Promise<void> {
   // Set up signal handlers for graceful shutdown
   const shutdown = async () => {
     console.info('[index] Shutting down...');
+    await watcher.stop();
     if (typeWatcher) {
       await typeWatcher.close();
     }
+    db.close();
     process.exit(0);
   };
 
