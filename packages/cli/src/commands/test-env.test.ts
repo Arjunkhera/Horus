@@ -16,6 +16,7 @@ import {
   createSlotDirs,
   removeSlotDirs,
   getTestEnvRoot,
+  preSeedNotesDir,
   type SlotLock,
   type TestEnvConfig,
 } from '../lib/test-env.js';
@@ -278,5 +279,60 @@ describe('slot data directory management', () => {
 
   it('removeSlotDirs is a no-op when path does not exist', () => {
     expect(() => removeSlotDirs(join(testDir, 'nonexistent'))).not.toThrow();
+  });
+});
+
+// ── preSeedNotesDir ──────────────────────────────────────────────────────────
+
+describe('preSeedNotesDir', () => {
+  it('clones from production notes when src is a valid git repo', async () => {
+    // Set up a minimal git repo as the "production" notes source
+    const srcDataDir = join(testDir, 'src-data');
+    const srcNotesPath = join(srcDataDir, 'notes');
+    mkdirSync(srcNotesPath, { recursive: true });
+    const { execa } = await import('execa');
+    await execa('git', ['-C', srcNotesPath, 'init']);
+    await execa('git', [
+      '-C', srcNotesPath,
+      '-c', 'user.email=test@local', '-c', 'user.name=Test',
+      'commit', '--allow-empty', '-m', 'init',
+    ]);
+
+    const slotPath = getSlotDataPath(testDir, 0);
+    createSlotDirs(slotPath);
+
+    await preSeedNotesDir(srcDataDir, slotPath);
+
+    const destNotesPath = join(slotPath, 'notes');
+    expect(existsSync(destNotesPath)).toBe(true);
+    expect(existsSync(join(destNotesPath, '.git'))).toBe(true);
+  });
+
+  it('falls back to git init when src has no git repo', async () => {
+    const srcDataDir = join(testDir, 'src-no-git');
+    // notes dir exists but is not a git repo
+    mkdirSync(join(srcDataDir, 'notes'), { recursive: true });
+
+    const slotPath = getSlotDataPath(testDir, 1);
+    createSlotDirs(slotPath);
+
+    await preSeedNotesDir(srcDataDir, slotPath);
+
+    const destNotesPath = join(slotPath, 'notes');
+    expect(existsSync(join(destNotesPath, '.git'))).toBe(true);
+  });
+
+  it('falls back to git init when src notes dir is missing entirely', async () => {
+    const srcDataDir = join(testDir, 'src-missing');
+    mkdirSync(srcDataDir, { recursive: true });
+    // no notes subdir
+
+    const slotPath = getSlotDataPath(testDir, 2);
+    createSlotDirs(slotPath);
+
+    await preSeedNotesDir(srcDataDir, slotPath);
+
+    const destNotesPath = join(slotPath, 'notes');
+    expect(existsSync(join(destNotesPath, '.git'))).toBe(true);
   });
 });

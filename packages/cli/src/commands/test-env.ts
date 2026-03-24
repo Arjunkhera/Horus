@@ -23,6 +23,7 @@ import {
   seedFromFixtures,
   seedFromLive,
   projectName,
+  preSeedNotesDir,
 } from '../lib/test-env.js';
 
 // ── horus test-env ───────────────────────────────────────────────────────────
@@ -71,6 +72,18 @@ testEnvCommand
     const dirSpinner = ora(`Creating slot-${slot} data directories...`).start();
     createSlotDirs(slotDataPath);
     dirSpinner.succeed(`Data directory: ${chalk.dim(slotDataPath)}`);
+
+    // Pre-seed notes dir so Anvil finds a valid git repo instead of HTTPS-cloning
+    const seedSpinner = ora('Pre-seeding notes directory...').start();
+    try {
+      await preSeedNotesDir(dataDir, slotDataPath);
+      seedSpinner.succeed('Notes directory ready');
+    } catch (error) {
+      seedSpinner.fail(`Notes pre-seed failed: ${(error as Error).message}`);
+      removeLock(dataDir, slot);
+      removeSlotDirs(slotDataPath);
+      process.exit(1);
+    }
 
     // Write lock file before starting compose (so other agents see it occupied)
     writeLock(dataDir, {
