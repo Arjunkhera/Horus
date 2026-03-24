@@ -2,7 +2,7 @@
 FastAPI application entry point for Vault Knowledge Service.
 
 Sets up the REST API with:
-- FTS5 search engine initialization
+- Typesense search engine initialization (with FTS5 fallback)
 - Collection setup (shared + workspace)
 - Schema loader initialization
 - Health and status endpoints
@@ -25,6 +25,7 @@ import os
 
 from .config.settings import load_settings
 from .layer1.fts_engine import FtsSearchEngine
+from .layer1.typesense_engine import TypesenseSearchEngine
 from .layer2.schema import SchemaLoader
 from .api.routes import router, get_store, get_schema_loader, get_settings
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
@@ -39,13 +40,38 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _build_store(settings: any, collection_paths: dict) -> any:
+    """
+    Attempt to create a TypesenseSearchEngine; fall back to FtsSearchEngine on failure.
+
+    Returns the store instance and a bool indicating whether Typesense is active.
+    """
+    try:
+        ts_store = TypesenseSearchEngine(collection_paths=collection_paths)
+        # Probe the connection — status() will throw if Typesense is unreachable
+        probe = ts_store.status()
+        if probe.get("status") == "error":
+            raise RuntimeError(probe.get("error", "unknown Typesense error"))
+        logger.info("Typesense connection established (collection: %s)", probe.get("collection"))
+        return ts_store, True
+    except Exception as exc:
+        logger.warning(
+            "Typesense unavailable (%s) — falling back to FTS5 search engine", exc
+        )
+        fts_store = FtsSearchEngine(
+            db_path=os.path.join(settings.workspace_path, ".vault", "fts5_index.db"),
+            collection_paths=collection_paths,
+        )
+        return fts_store, False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for FastAPI app.
 
     Handles startup and shutdown:
-    - Startup: Initialize FTS5 search engine, setup collections, start sync daemon
+    - Startup: Initialize Typesense (or FTS5 fallback), setup collections, start sync daemon
     - Shutdown: Cleanup resources
     """
     # ============================================================================
@@ -59,16 +85,15 @@ async def lifespan(app: FastAPI):
     logger.info("Vault configuration resolved:")
     settings.log_sources(sources)
 
-    # Initialize FTS5 search engine
-    store = FtsSearchEngine(
-        db_path=os.path.join(settings.workspace_path, ".vault", "fts5_index.db"),
-        collection_paths={
-            "shared": settings.knowledge_repo_path,
-            "workspace": settings.workspace_path,
-        },
-    )
+    collection_paths = {
+        "shared": settings.knowledge_repo_path,
+        "workspace": settings.workspace_path,
+    }
 
-    # Setup collections (idempotent)
+    # Initialize search engine (Typesense preferred, FTS5 fallback)
+    store, using_typesense = _build_store(settings, collection_paths)
+
+    # Setup collections (idempotent — both engines support this call)
     logger.info("Setting up collections...")
     store.ensure_collections(
         shared_path=settings.knowledge_repo_path,
@@ -76,13 +101,14 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Collections setup complete")
 
-    # Build initial FTS5 index
-    logger.info("Building FTS5 index...")
+    # Build initial index
+    engine_name = "Typesense" if using_typesense else "FTS5"
+    logger.info("Building %s index...", engine_name)
     try:
         store.reindex()
-        logger.info("FTS5 index ready")
+        logger.info("%s index ready", engine_name)
     except Exception as e:
-        logger.warning("FTS5 index build failed (non-fatal): %s", e)
+        logger.warning("%s index build failed (non-fatal): %s", engine_name, e)
 
     # Store search engine in app state for dependency injection
     app.state.store = store

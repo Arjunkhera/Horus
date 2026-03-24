@@ -120,25 +120,53 @@ SettingsDepends = Annotated[VaultSettings, Depends(get_settings)]
 # uvicorn event loop.
 # ============================================================================
 
+def _find_repo_profile(repo: str, store: SearchStore, doc_cache: dict) -> "PageSummary | None":
+    """
+    Locate the repo-profile entry point for `repo`.
+
+    Strategy:
+    1. If the store is a TypesenseSearchEngine, use a deterministic filter query
+       (scope_repo:={repo} && source_type:=repo-profile && source:=vault).
+    2. Fall back to text search if the filter returns no results or the store
+       does not support filter_search.
+    """
+    from ..layer1.typesense_engine import TypesenseSearchEngine
+
+    # --- Typesense deterministic filter path ---
+    if isinstance(store, TypesenseSearchEngine):
+        filter_by = (
+            f"scope_repo:={repo} && source_type:=repo-profile && source:=vault"
+        )
+        filter_results = store.filter_search(filter_by, limit=5)
+        for result in filter_results:
+            content = doc_cache.get(result.file_path)
+            if not content:
+                continue
+            parsed = parse_page(content)
+            if parsed.type == "repo-profile" and parsed.scope.get("repo") == repo:
+                return to_page_summary(parsed, result.file_path)
+        # If filter returned no match, fall through to text search below
+
+    # --- Text search fallback (FTS5 or Typesense with no exact match) ---
+    results = store.search(repo, limit=20)
+    for result in results:
+        content = doc_cache.get(result.file_path)
+        if not content:
+            continue
+        parsed = parse_page(content)
+        if parsed.type == "repo-profile" and parsed.scope.get("repo") == repo:
+            return to_page_summary(parsed, result.file_path)
+
+    return None
+
+
 def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore) -> ResolveContextResponse:
     """Synchronous implementation of resolve-context."""
     doc_cache = store.get_all_documents()
     scope = resolve_scope(request.repo, store, doc_cache=doc_cache)
     operational_pages_tuples = collect_operational_pages(scope, store, doc_cache=doc_cache)
 
-    entry_point: PageSummary | None = None
-    results = store.search(request.repo, limit=20)
-
-    for result in results:
-        content = doc_cache.get(result.file_path)
-        if not content:
-            continue
-
-        parsed = parse_page(content)
-
-        if parsed.type == "repo-profile" and parsed.scope.get("repo") == request.repo:
-            entry_point = to_page_summary(parsed, result.file_path)
-            break
+    entry_point: PageSummary | None = _find_repo_profile(request.repo, store, doc_cache)
 
     if request.include_full:
         operational_pages_list: list[PageFull] = [
