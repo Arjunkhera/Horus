@@ -575,4 +575,147 @@ describe('repoDevelop', () => {
       expect(sessionsData.sessions[0].repoSource).toBe('managed');
     });
   });
+
+  // ── Docker host path fixup ─────────────────────────────────────────────────
+
+  describe('Docker host path fixup', () => {
+    it('rewrites .git pointer and backlink when host paths are configured', async () => {
+      // Simulate Docker layout using tmpDir as the "/data" root
+      const containerData = path.join(tmpDir, 'data');
+      const containerSessionsRoot = path.join(containerData, 'sessions');
+      const containerManagedRepos = path.join(containerData, 'horus-repos');
+      const hostBase = path.join(tmpDir, 'host');
+      const hostRepos = path.join(hostBase, 'repos');
+
+      const dockerConfig = makeGlobalConfig(tmpDir);
+      dockerConfig.workspace.sessions_root = containerSessionsRoot;
+      dockerConfig.workspace.managed_repos_path = containerManagedRepos;
+      dockerConfig.workspace.host_workspaces_path = path.join(hostBase, 'workspaces');
+      dockerConfig.workspace.host_managed_repos_path = hostRepos;
+
+      // Create the managed repo dir so tier-2 resolution finds it
+      const managedRepoPath = path.join(containerManagedRepos, 'TestRepo');
+      await fs.mkdir(managedRepoPath, { recursive: true });
+
+      const entry = makeRepoEntry({
+        localPath: managedRepoPath,
+        workflow: CONFIRMED_WORKFLOW,
+      });
+      const repoIndex = { repos: [entry] };
+
+      // Override mock so `git worktree add` creates a realistic .git file + backlink
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+        const joined = (args as string[]).join(' ');
+        if (joined.startsWith('worktree add')) {
+          // args = ['worktree', 'add', sessionPath, '-b', branch, base]
+          const sessionDir = (args as string[])[2];
+          const sessionDirName = path.basename(sessionDir);
+          const worktreeDir = path.join(managedRepoPath, '.git', 'worktrees', sessionDirName);
+          const fsSync = require('fs');
+          fsSync.mkdirSync(sessionDir, { recursive: true });
+          fsSync.mkdirSync(worktreeDir, { recursive: true });
+          fsSync.writeFileSync(
+            path.join(sessionDir, '.git'),
+            `gitdir: ${containerManagedRepos}/TestRepo/.git/worktrees/${sessionDirName}\n`,
+          );
+          fsSync.writeFileSync(
+            path.join(worktreeDir, 'gitdir'),
+            `${sessionDir}/.git\n`,
+          );
+          (cb as any)(null, { stdout: '', stderr: '' });
+        } else if (joined.startsWith('rev-parse --verify origin/')) {
+          (cb as any)(null, { stdout: 'abc1234', stderr: '' });
+        } else {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        }
+        return {} as any;
+      });
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-docker1' };
+      const result = await repoDevelop(opts, dockerConfig, repoIndex, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.hostSessionPath).toBeDefined();
+        const sessionDir = result.sessionPath;
+        const sessionDirName = path.basename(sessionDir);
+        const worktreeDir = path.join(managedRepoPath, '.git', 'worktrees', sessionDirName);
+
+        // Verify .git file was rewritten with host managed repos path
+        const dotGit = await fs.readFile(path.join(sessionDir, '.git'), 'utf-8');
+        expect(dotGit).toContain(hostRepos);
+        expect(dotGit).not.toContain(containerManagedRepos);
+
+        // Verify backlink was rewritten with host session path
+        const backlink = await fs.readFile(path.join(worktreeDir, 'gitdir'), 'utf-8');
+        expect(backlink).toContain(result.hostSessionPath!);
+        expect(backlink).not.toContain(containerSessionsRoot);
+      }
+    });
+
+    it('sets origin remote to GitHub URL from repo index', async () => {
+      const entry = makeRepoEntry({
+        localPath: fakeRepoPath,
+        workflow: CONFIRMED_WORKFLOW,
+        remoteUrl: 'git@github.com:Org/TestRepo.git',
+      });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-remote1' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+      expect(result.status).toBe('created');
+
+      // Verify git remote set-url was called with the GitHub URL
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const remoteSetUrlCalls = mockExecFile.mock.calls.filter(
+        (call) => {
+          const args = call[1] as string[];
+          return args[0] === 'remote' && args[1] === 'set-url';
+        },
+      );
+      expect(remoteSetUrlCalls.length).toBe(1);
+      expect((remoteSetUrlCalls[0][1] as string[])[3]).toBe('git@github.com:Org/TestRepo.git');
+    });
+
+    it('skips remote set-url when remoteUrl is a local path', async () => {
+      const entry = makeRepoEntry({
+        localPath: fakeRepoPath,
+        workflow: CONFIRMED_WORKFLOW,
+        remoteUrl: '/data/repos/TestRepo',
+      });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-localremote1' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+      expect(result.status).toBe('created');
+
+      // Verify git remote set-url was NOT called
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const remoteSetUrlCalls = mockExecFile.mock.calls.filter(
+        (call) => {
+          const args = call[1] as string[];
+          return args[0] === 'remote' && args[1] === 'set-url';
+        },
+      );
+      expect(remoteSetUrlCalls.length).toBe(0);
+    });
+
+    it('does not rewrite paths when host config is not set (native install)', async () => {
+      // Default config has no host_workspaces_path or host_managed_repos_path
+      const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-native1' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.hostSessionPath).toBeUndefined();
+      }
+    });
+  });
 });
