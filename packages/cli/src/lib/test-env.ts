@@ -264,6 +264,7 @@ export function buildComposeEnv(
     VAULT_ROUTER_PORT:        String(ports.vault_router),
     VAULT_REST_PORT_PERSONAL: String(ports.vault_svc),
     TYPESENSE_PORT:           String(ports.typesense),
+    UI_PORT:                  String(ports.ui),
     // TEST_PORT_* vars for overlay reference (harmless duplicates after above fix)
     TEST_PORT_ANVIL:        String(ports.anvil),
     TEST_PORT_TYPESENSE:    String(ports.typesense),
