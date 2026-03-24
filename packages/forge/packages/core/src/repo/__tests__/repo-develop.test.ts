@@ -280,35 +280,75 @@ describe('repoDevelop', () => {
     });
   });
 
-  // ── Multi-agent: second agent gets a different slot ───────────────────────
+  // ── Multi-agent: slot-2 assignment ────────────────────────────────────────
 
-  describe('multi-agent: second agent gets separate slot', () => {
-    it('creates a second session with agentSlot=2 and a "-2" suffix in the path', async () => {
+  describe('multi-agent slot-2 assignment', () => {
+    it('first session gets agentSlot=1 and no path suffix', async () => {
       const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
       const repoIndex = { repos: [entry] };
 
-      // First agent creates a session
       const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-abc123' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.agentSlot).toBe(1);
+        expect(result.sessionPath).not.toMatch(/-2$/);
+        expect(result.sessionPath).not.toMatch(/-2\//);
+      }
+    });
+
+    it('creates agentSlot=2 with "-2" path suffix when slot-1 record exists but directory is gone', async () => {
+      // This is the primary achievable slot-2 scenario:
+      // slot-1 was recorded in sessions.json but its worktree directory was
+      // subsequently deleted (e.g., manual cleanup, container recreated).
+      // findByWorkItem returns the slot-1 record, fs.access fails → fall through.
+      // countByWorkItem returns 1 → new agentSlot = 2.
+      const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const repoIndex = { repos: [entry] };
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-slot2' };
+
+      // Create slot 1
       const first = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
       expect(first.status).toBe('created');
       if (first.status !== 'created') return;
 
-      // Delete the session path so "resume" doesn't trigger for slot 1
-      // (simulating a second agent before the first agent's directory is active)
-      // Actually: the multi-agent test expects a NEW session to be created when
-      // the first session exists but the directory exists too (both paths exist).
-      // To force a second slot, we keep the first session's path intact.
-      // The current logic resumes on first slot if path exists. For a second agent
-      // to get slot 2, they would be a DIFFERENT process that has already resumed
-      // slot 1. This scenario is tested conceptually by verifying the slot counter.
+      // Delete slot-1's session directory to simulate orphaned record
+      await fs.rm(first.sessionPath, { recursive: true, force: true });
 
-      // Verify sessions.json has exactly 1 entry with slot=1
-      const sessionsJson = await fs.readFile(globalConfig.workspace.sessions_path, 'utf-8');
-      const sessionsData = JSON.parse(sessionsJson);
-      expect(sessionsData.sessions).toHaveLength(1);
-      expect(sessionsData.sessions[0].agentSlot).toBe(1);
-      expect(sessionsData.sessions[0].sessionPath).not.toContain('-2/');
+      // Second call: slot-1 record exists but path is gone → creates slot 2
+      const second = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+      expect(second.status).toBe('created');
+      if (second.status === 'created') {
+        expect(second.agentSlot).toBe(2);
+        expect(second.sessionPath).toMatch(/-2$/);
+      }
     });
+
+    it('slot-2 session is persisted in sessions.json alongside slot-1 record', async () => {
+      const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const repoIndex = { repos: [entry] };
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-slots' };
+
+      // Create slot 1 then orphan it
+      const first = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+      if (first.status !== 'created') return;
+      await fs.rm(first.sessionPath, { recursive: true, force: true });
+
+      // Create slot 2
+      await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      const raw = await fs.readFile(globalConfig.workspace.sessions_path, 'utf-8');
+      const data = JSON.parse(raw);
+      const slots = data.sessions.filter((s: any) => s.workItem === 'wi-slots');
+      expect(slots.length).toBe(2);
+      expect(slots.map((s: any) => s.agentSlot).sort()).toEqual([1, 2]);
+    });
+
+    // NOTE: True concurrent slot-2 (two agents calling forge_develop simultaneously,
+    // both receiving status=created with different slots) requires agent-identity
+    // tracking — currently not implemented. A sequential second agent receives
+    // status=resumed on slot 1 if the path exists. Tracked separately.
   });
 
   // ── Workflow confirmation flow ────────────────────────────────────────────
