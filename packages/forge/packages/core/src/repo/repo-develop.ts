@@ -229,6 +229,62 @@ async function ensureWritableWorktreeBase(
 
 // installEnforcementHooks is imported from git-enforcement.ts (WI-4)
 
+/** Check if a string looks like a local filesystem path (not a remote URL). */
+function isLocalPath(url: string): boolean {
+  return !url.includes('://') && !url.startsWith('git@');
+}
+
+/**
+ * Rewrite git worktree pointers so they use host-side paths instead of
+ * Docker-internal container paths. This fixes two files:
+ *
+ * 1. `<sessionPath>/.git` — the worktree's gitdir pointer to the main repo
+ * 2. `<mainRepo>/.git/worktrees/<id>/gitdir` — the backlink to the worktree
+ *
+ * Without this fix, every git command run from the host fails with
+ * "fatal: not a git repository" because the paths only exist inside Docker.
+ */
+async function fixWorktreePathsForHost(
+  sessionPath: string,
+  hostSessionPath: string,
+  worktreeBasePath: string,
+  managedReposPath: string,
+  hostManagedReposPath: string,
+  worktreeId: string,
+): Promise<void> {
+  // 1. Rewrite the .git file in the session worktree
+  const dotGitPath = path.join(sessionPath, '.git');
+  try {
+    const dotGitContent = await fs.readFile(dotGitPath, 'utf-8');
+    // e.g. "gitdir: /data/horus-repos/Horus/.git/worktrees/04b527d2-horus\n"
+    const rewritten = dotGitContent.replace(managedReposPath, hostManagedReposPath);
+    if (rewritten !== dotGitContent) {
+      await fs.writeFile(dotGitPath, rewritten, 'utf-8');
+    }
+  } catch {
+    // Best-effort — don't fail session creation if rewrite fails
+  }
+
+  // 2. Rewrite the backlink in the main repo's worktrees directory
+  const backlinkPath = path.join(
+    worktreeBasePath,
+    '.git',
+    'worktrees',
+    worktreeId,
+    'gitdir',
+  );
+  try {
+    const backlinkContent = await fs.readFile(backlinkPath, 'utf-8');
+    // e.g. "/data/sessions/04b527d2-horus/.git\n"
+    const rewritten = backlinkContent.replace(sessionPath, hostSessionPath);
+    if (rewritten !== backlinkContent) {
+      await fs.writeFile(backlinkPath, rewritten, 'utf-8');
+    }
+  } catch {
+    // Best-effort
+  }
+}
+
 // ─── Main function ────────────────────────────────────────────────────────────
 
 /**
@@ -497,8 +553,25 @@ export async function repoDevelop(
   };
   await installEnforcementHooks(sessionPath, workflowForHooks, repoName, worktreeBasePath);
 
+  // ── Configure GitHub remote on worktree ────────────────────────────────────
+  // The worktree inherits remotes from the managed clone, which may point to
+  // a container-internal local path. Override origin with the real GitHub URL.
+  // IMPORTANT: This must run BEFORE .git path rewrite, because git commands
+  // inside the container need container-internal paths to work.
+  if (repoEntry.remoteUrl && !isLocalPath(repoEntry.remoteUrl)) {
+    try {
+      await runGit(['remote', 'set-url', 'origin', repoEntry.remoteUrl], sessionPath, 5000);
+    } catch {
+      // If set-url fails (no origin), add it
+      try {
+        await runGit(['remote', 'add', 'origin', repoEntry.remoteUrl], sessionPath, 5000);
+      } catch { /* best-effort */ }
+    }
+  }
+
   // ── Compute host-side path (Docker path translation) ──────────────────────
   let hostSessionPath: string | undefined;
+  const hostManagedReposPath = globalConfig.workspace.host_managed_repos_path;
   if (hostWorkspacesPath && sessionsRoot.includes('/data/')) {
     // Translate /data/sessions/... → hostWorkspacesPath/../sessions/...
     const dataIdx = sessionsRoot.indexOf('/data/');
@@ -509,6 +582,20 @@ export async function repoDevelop(
       const sessionRelative = path.relative(sessionsRoot, sessionPath);
       hostSessionPath = path.join(hostSessionsRoot, sessionRelative);
     }
+  }
+
+  // ── Fix git worktree pointers for host access (Docker path translation) ───
+  // When Forge runs in Docker, git worktree paths are container-internal.
+  // Rewrite them so git works from the host where Claude Code runs.
+  if (hostSessionPath && hostManagedReposPath) {
+    await fixWorktreePathsForHost(
+      sessionPath,
+      hostSessionPath,
+      worktreeBasePath,
+      managedReposPath,
+      hostManagedReposPath,
+      sessionDirName,
+    );
   }
 
   // ── Build workflow snapshot ───────────────────────────────────────────────

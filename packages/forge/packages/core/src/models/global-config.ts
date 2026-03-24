@@ -47,6 +47,14 @@ export const WorkspaceSettingsSchema = z.object({
    */
   max_sessions: z.number().int().min(1).default(20),
   host_workspaces_path: z.string().optional(),
+  /**
+   * Host-side absolute path for the managed repos pool directory.
+   * Only needed when Forge runs inside Docker and the managed repos volume
+   * is bind-mounted with a different name than on the host
+   * (e.g., host: ${HORUS_DATA_PATH}/repos → container: /data/horus-repos).
+   * Used to rewrite .git worktree pointers so git works from the host.
+   */
+  host_managed_repos_path: z.string().optional(),
 });
 
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;

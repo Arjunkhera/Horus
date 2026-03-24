@@ -28,6 +28,9 @@ FORGE_SCAN_PATHS="${FORGE_SCAN_PATHS:-}"
 # When set, localPath in repo results is translated from the container path
 # to the host path so Claude Code on the host can access repos directly.
 FORGE_HOST_REPOS_PATH="${FORGE_HOST_REPOS_PATH:-}"
+# Host-side path for the managed repos pool (Docker only).
+# Used to rewrite .git worktree pointers so git works from the host.
+FORGE_HOST_MANAGED_REPOS_PATH="${FORGE_HOST_MANAGED_REPOS_PATH:-}"
 
 # Sessions and managed-repo-pool paths — derived from WORKSPACES_PATH unless overridden.
 # WORKSPACES_PATH is e.g. /data/workspaces, so _DATA_ROOT is /data.
@@ -116,6 +119,11 @@ HOST_REPOS_PATH_LINE=""
 [ -n "$FORGE_HOST_REPOS_PATH" ] && HOST_REPOS_PATH_LINE="
   host_repos_path: ${FORGE_HOST_REPOS_PATH}"
 
+# Build optional host_managed_repos_path line
+HOST_MANAGED_REPOS_PATH_LINE=""
+[ -n "$FORGE_HOST_MANAGED_REPOS_PATH" ] && HOST_MANAGED_REPOS_PATH_LINE="
+  host_managed_repos_path: ${FORGE_HOST_MANAGED_REPOS_PATH}"
+
 cat > "${CONFIG_DIR}/forge.yaml" << EOF
 registries:
   - type: filesystem
@@ -129,7 +137,7 @@ workspace:
   store_path: ${CONFIG_DIR}/workspaces.json
   sessions_path: ${SESSIONS_STORE_PATH}
   sessions_root: ${SESSIONS_ROOT}
-  managed_repos_path: ${MANAGED_REPOS_PATH}${HOST_WORKSPACES_LINE}
+  managed_repos_path: ${MANAGED_REPOS_PATH}${HOST_WORKSPACES_LINE}${HOST_MANAGED_REPOS_PATH_LINE}
 
 mcp_endpoints:
   anvil:
