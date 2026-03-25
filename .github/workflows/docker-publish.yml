@@ -30,6 +30,7 @@ jobs:
         with:
           filters: |
             anvil:
+              - 'packages/search/**'
               - 'packages/anvil/**'
             vault:
               - 'services/vault/**'
@@ -38,6 +39,7 @@ jobs:
             vault-mcp:
               - 'packages/vault-mcp/**'
             forge:
+              - 'packages/search/**'
               - 'packages/forge/**'
             horus-ui:
               - 'packages/ui-server/**'
@@ -87,7 +89,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: packages/anvil
+          context: .
           file: packages/anvil/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
@@ -295,7 +297,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: packages/forge
+          context: .
           file: packages/forge/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
