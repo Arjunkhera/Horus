@@ -17,6 +17,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import Typesense from 'typesense';
+import type { Client as TypesenseClient } from 'typesense';
 
 const TYPESENSE_HOST = process.env.TYPESENSE_HOST;
 const TYPESENSE_PORT = parseInt(process.env.TYPESENSE_PORT ?? '8108', 10);
@@ -29,7 +30,7 @@ const COLLECTION_NAME = 'horus_documents';
 const describeTypesense = TYPESENSE_HOST ? describe : describe.skip;
 
 describeTypesense('Integration: Anvil Typesense Search', () => {
-  let client: Typesense.Client;
+  let client: TypesenseClient;
   let testDocIds: string[] = [];
 
   beforeAll(async () => {
