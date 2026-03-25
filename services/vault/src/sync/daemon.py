@@ -152,24 +152,31 @@ async def git_pull_loop(
 class WorkspaceChangeHandler(FileSystemEventHandler):
     """
     Watchdog event handler for workspace file changes.
-    
-    Monitors markdown file changes and triggers debounced re-index.
+
+    For TypesenseSearchEngine stores: performs per-file upsert/delete so that
+    search results are updated within seconds without a full re-index.
+
+    For other stores (e.g. FtsSearchEngine): debounced full re-index (original
+    behaviour).
+
     Ignores changes in common exclude paths (.git, node_modules, etc).
     """
-    
+
     def __init__(
         self,
         store: SearchStore,
         reindex_lock: ReindexLock,
-        debounce_seconds: float = 5.0
+        workspace_path: str,
+        debounce_seconds: float = 5.0,
     ) -> None:
         super().__init__()
         self.store = store
         self.reindex_lock = reindex_lock
+        self.workspace_path = workspace_path
         self.debounce_seconds = debounce_seconds
         self.debounce_task: Optional[asyncio.Task[None]] = None
         self.change_count = 0
-        
+
         # Paths to ignore (relative patterns)
         self.ignore_patterns = {
             ".git/",
@@ -180,36 +187,82 @@ class WorkspaceChangeHandler(FileSystemEventHandler):
             ".cache/",
             "__pycache__/",
             ".venv/",
-            "venv/"
+            "venv/",
         }
-    
+
+    @property
+    def _is_typesense(self) -> bool:
+        """Return True if the backing store supports per-file upsert/delete."""
+        try:
+            from ..layer1.typesense_engine import TypesenseSearchEngine
+            return isinstance(self.store, TypesenseSearchEngine)
+        except ImportError:
+            return False
+
     def _should_ignore(self, path: str) -> bool:
         """Check if path should be ignored based on ignore patterns."""
         for pattern in self.ignore_patterns:
             if pattern in path:
                 return True
         return False
-    
+
     def _should_process(self, event: FileSystemEvent) -> bool:
-        """Check if event should trigger a re-index."""
-        # Ignore directory events
+        """Check if event should trigger an update."""
         if event.is_directory:
             return False
-        
-        # Only process markdown files
         if not event.src_path.endswith(".md"):
             return False
-        
-        # Check ignore patterns
         if self._should_ignore(event.src_path):
             return False
-        
         return True
-    
+
+    def _file_path_for(self, abs_path: str) -> Optional[str]:
+        """
+        Convert an absolute filesystem path to a collection-prefixed file_path.
+
+        Returns None if the path cannot be mapped to a known collection.
+        """
+        # The workspace watcher is rooted at workspace_path, so collection = "workspace"
+        try:
+            rel = os.path.relpath(abs_path, self.workspace_path)
+            if not rel.startswith(".."):
+                return f"workspace/{rel}"
+        except ValueError:
+            pass
+        return None
+
+    # ------------------------------------------------------------------
+    # Per-file Typesense update helpers
+    # ------------------------------------------------------------------
+
+    def _upsert_file(self, abs_path: str) -> None:
+        """Parse the file and upsert it into Typesense (fire-and-forget)."""
+        file_path = self._file_path_for(abs_path)
+        if not file_path:
+            return
+        try:
+            content = Path(abs_path).read_text(encoding="utf-8")
+            self.store.upsert_document(file_path, content)  # type: ignore[attr-defined]
+            logger.debug("Typesense upsert: %s", file_path)
+        except Exception as exc:
+            logger.warning("Failed to upsert %s: %s", file_path, exc)
+
+    def _delete_file(self, abs_path: str) -> None:
+        """Delete a document from Typesense (fire-and-forget)."""
+        file_path = self._file_path_for(abs_path)
+        if not file_path:
+            return
+        self.store.delete_document(file_path)  # type: ignore[attr-defined]
+        logger.debug("Typesense delete: %s", file_path)
+
+    # ------------------------------------------------------------------
+    # Debounced full re-index (FTS5 fallback path)
+    # ------------------------------------------------------------------
+
     async def _debounced_reindex(self) -> None:
         """
         Debounced re-index coroutine.
-        
+
         Waits for debounce period, then triggers re-index.
         If new changes arrive, this task is cancelled and restarted.
         """
@@ -217,42 +270,67 @@ class WorkspaceChangeHandler(FileSystemEventHandler):
             await asyncio.sleep(self.debounce_seconds)
             await self.reindex_lock.reindex(self.store, f"workspace-change-{self.change_count}")
         except asyncio.CancelledError:
-            # Task was cancelled by new change, this is expected
             pass
-    
+
     def _trigger_debounced_reindex(self) -> None:
-        """
-        Trigger debounced re-index.
-        
-        Cancels any pending re-index and starts a new debounce timer.
-        """
-        # Cancel existing debounce task if any
+        """Trigger debounced full re-index (used for non-Typesense stores)."""
         if self.debounce_task and not self.debounce_task.done():
             self.debounce_task.cancel()
-        
-        # Start new debounce task
         loop = asyncio.get_event_loop()
         self.debounce_task = loop.create_task(self._debounced_reindex())
-    
+
+    # ------------------------------------------------------------------
+    # Watchdog event handlers
+    # ------------------------------------------------------------------
+
     def on_created(self, event: FileSystemEvent) -> None:
         """Handle file creation events."""
-        if self._should_process(event):
-            self.change_count += 1
-            logger.debug(f"Workspace file created: {event.src_path}")
+        if not self._should_process(event):
+            return
+        self.change_count += 1
+        logger.debug("Workspace file created: %s", event.src_path)
+        if self._is_typesense:
+            self._upsert_file(event.src_path)
+        else:
             self._trigger_debounced_reindex()
-    
+
     def on_modified(self, event: FileSystemEvent) -> None:
         """Handle file modification events."""
-        if self._should_process(event):
-            self.change_count += 1
-            logger.debug(f"Workspace file modified: {event.src_path}")
+        if not self._should_process(event):
+            return
+        self.change_count += 1
+        logger.debug("Workspace file modified: %s", event.src_path)
+        if self._is_typesense:
+            self._upsert_file(event.src_path)
+        else:
             self._trigger_debounced_reindex()
-    
+
     def on_deleted(self, event: FileSystemEvent) -> None:
         """Handle file deletion events."""
-        if self._should_process(event):
-            self.change_count += 1
-            logger.debug(f"Workspace file deleted: {event.src_path}")
+        if not self._should_process(event):
+            return
+        self.change_count += 1
+        logger.debug("Workspace file deleted: %s", event.src_path)
+        if self._is_typesense:
+            self._delete_file(event.src_path)
+        else:
+            self._trigger_debounced_reindex()
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        """Handle file move/rename events (e.g. git mv)."""
+        if event.is_directory:
+            return
+        if not event.src_path.endswith(".md"):
+            return
+        if self._should_ignore(event.src_path) and self._should_ignore(event.dest_path):
+            return
+        self.change_count += 1
+        logger.debug("Workspace file moved: %s -> %s", event.src_path, event.dest_path)
+        if self._is_typesense:
+            self._delete_file(event.src_path)
+            if event.dest_path.endswith(".md") and not self._should_ignore(event.dest_path):
+                self._upsert_file(event.dest_path)
+        else:
             self._trigger_debounced_reindex()
 
 
@@ -260,49 +338,47 @@ def start_workspace_watcher(
     store: SearchStore,
     workspace_path: str,
     reindex_lock: ReindexLock,
-    debounce_seconds: float = 5.0
+    debounce_seconds: float = 5.0,
 ) -> Optional[Any]:  # type: ignore[name-defined]
     """
     Start file system watcher for workspace changes.
-    
-    Uses watchdog library to monitor workspace directory.
-    Changes are debounced - re-index only triggers after no changes for debounce_seconds.
-    
+
+    For TypesenseSearchEngine: per-file upsert/delete on each markdown event.
+    For other stores: debounced full re-index.
+
     Args:
         store: SearchStore instance for re-indexing
         workspace_path: Path to workspace directory to monitor
         reindex_lock: Shared lock for coordinating re-index operations
-        debounce_seconds: Seconds to wait after last change before re-indexing
-    
+        debounce_seconds: Seconds to wait after last change before re-indexing (non-Typesense)
+
     Returns:
         Observer instance if started successfully, None if workspace doesn't exist
     """
-    logger.info(f"Starting workspace watcher (path: {workspace_path}, debounce: {debounce_seconds}s)")
-    
-    # Validate workspace path exists
+    logger.info("Starting workspace watcher (path: %s, debounce: %ss)", workspace_path, debounce_seconds)
+
     if not os.path.isdir(workspace_path):
-        logger.warning(f"Workspace path does not exist: {workspace_path}")
+        logger.warning("Workspace path does not exist: %s", workspace_path)
         logger.warning("Workspace watcher will not start until path exists")
         return None
-    
+
     try:
-        # Create event handler
         event_handler = WorkspaceChangeHandler(
             store=store,
             reindex_lock=reindex_lock,
-            debounce_seconds=debounce_seconds
+            workspace_path=workspace_path,
+            debounce_seconds=debounce_seconds,
         )
-        
-        # Create and start observer
+
         observer = Observer()
         observer.schedule(event_handler, workspace_path, recursive=True)
         observer.start()
-        
-        logger.info(f"Workspace watcher started successfully")
+
+        logger.info("Workspace watcher started successfully")
         return observer
-        
+
     except Exception as e:
-        logger.error(f"Failed to start workspace watcher: {e}", exc_info=True)
+        logger.error("Failed to start workspace watcher: %s", e, exc_info=True)
         return None
 
 
