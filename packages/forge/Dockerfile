@@ -1,85 +1,83 @@
-# ─── Stage 1: Builder ─────────────────────────────────────────────────────
-# Installs all dependencies (including dev) and compiles TypeScript.
-# Context: monorepo root (needs packages/search + packages/forge).
+# ─── Stage 0: Build @horus/search ─────────────────────────────────────────
+# Context: monorepo root. Builds the shared search package in isolation.
+FROM node:22-bookworm-slim AS search-builder
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /search
+COPY packages/search/package.json packages/search/tsconfig.json ./
+RUN pnpm install --no-frozen-lockfile
+COPY packages/search/src/ ./src/
+RUN pnpm build
+
+
+# ─── Stage 1: Build Forge ─────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /build
 
-# Copy root workspace manifests first (layer cache)
+# Copy forge workspace manifests
 COPY packages/forge/package.json packages/forge/pnpm-workspace.yaml packages/forge/.npmrc ./
-# Include @horus/search in the forge sub-workspace
-COPY packages/search/package.json ./packages/search/
 
 # Copy package manifests for all forge workspace packages
 COPY packages/forge/packages/core/package.json ./packages/core/
 COPY packages/forge/packages/cli/package.json ./packages/cli/
 COPY packages/forge/packages/mcp-server/package.json ./packages/mcp-server/
 
-# Augment pnpm-workspace to include search as a sibling package
+# Add pre-built @horus/search as a workspace sibling
+COPY packages/search/package.json ./packages/search/
+COPY --from=search-builder /search/dist/ ./packages/search/dist/
 RUN echo "  - '../search'" >> pnpm-workspace.yaml
 
-# Install all deps (including devDependencies needed for TypeScript build)
-# --no-frozen-lockfile: forge has no standalone pnpm-lock.yaml (monorepo root manages it)
+# Install all deps
 RUN pnpm install --no-frozen-lockfile
 
-# Copy source files
-COPY packages/search/ ./packages/search/
+# Copy source files and per-package tsconfigs
 COPY packages/forge/packages/ ./packages/
 COPY packages/forge/tsconfig.json ./
 
-# Build @horus/search first, then forge packages in dependency order
-RUN cd packages/search && pnpm build && cd /build \
-    && pnpm --filter @forge/core build \
+# Build packages in dependency order
+RUN pnpm --filter @forge/core build \
     && pnpm --filter @forge/mcp-server build \
     && pnpm --filter @forge/cli build
 
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────
-# Lean image with only production deps and compiled JS.
 FROM node:22-bookworm-slim
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# System dependencies: git (repo index scanning), curl (health checks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
 RUN useradd -ms /bin/bash forge
 
 WORKDIR /app
 
-# Copy root workspace manifests for production install
+# Copy workspace manifests for production install
 COPY packages/forge/package.json packages/forge/pnpm-workspace.yaml packages/forge/.npmrc ./
-COPY packages/search/package.json ./packages/search/
-
-# Copy package manifests (needed for pnpm workspace resolution)
 COPY packages/forge/packages/core/package.json ./packages/core/
 COPY packages/forge/packages/cli/package.json ./packages/cli/
 COPY packages/forge/packages/mcp-server/package.json ./packages/mcp-server/
-
-# Augment workspace to include search
+COPY packages/search/package.json ./packages/search/
 RUN echo "  - '../search'" >> pnpm-workspace.yaml
 
-# Install production dependencies only
 RUN pnpm install --prod --no-frozen-lockfile
 
-# Copy compiled output from builder stage
-COPY --from=builder /build/packages/search/dist ./packages/search/dist
+# Copy compiled output
+COPY --from=search-builder /search/dist ./packages/search/dist
 COPY --from=builder /build/packages/core/dist ./packages/core/dist
 COPY --from=builder /build/packages/cli/dist ./packages/cli/dist
 COPY --from=builder /build/packages/mcp-server/dist ./packages/mcp-server/dist
 
-# Copy entrypoint script
 COPY packages/forge/entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 
-# Create data directories and set ownership
 RUN mkdir -p /data/registry /data/workspaces \
     && chown -R forge:forge /app /data /home/forge
 
@@ -87,7 +85,6 @@ USER forge
 
 EXPOSE 8200
 
-# Environment configuration with defaults
 ENV FORGE_PORT=8200
 ENV FORGE_HOST=0.0.0.0
 ENV FORGE_REGISTRY_PATH=/data/registry
@@ -95,7 +92,6 @@ ENV FORGE_WORKSPACES_PATH=/data/workspaces
 ENV FORGE_ANVIL_URL=http://anvil:8100
 ENV FORGE_VAULT_URL=http://vault:8000
 
-# Health check — waits for the HTTP server to be ready
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
   CMD curl -f http://localhost:${FORGE_PORT}/health || exit 1
 
