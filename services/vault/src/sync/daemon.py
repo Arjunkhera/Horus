@@ -316,6 +316,23 @@ class WorkspaceChangeHandler(FileSystemEventHandler):
         else:
             self._trigger_debounced_reindex()
 
+    def on_moved(self, event: FileSystemEvent) -> None:
+        """Handle file move/rename events (e.g. git mv)."""
+        if event.is_directory:
+            return
+        if not event.src_path.endswith(".md"):
+            return
+        if self._should_ignore(event.src_path) and self._should_ignore(event.dest_path):
+            return
+        self.change_count += 1
+        logger.debug("Workspace file moved: %s -> %s", event.src_path, event.dest_path)
+        if self._is_typesense:
+            self._delete_file(event.src_path)
+            if event.dest_path.endswith(".md") and not self._should_ignore(event.dest_path):
+                self._upsert_file(event.dest_path)
+        else:
+            self._trigger_debounced_reindex()
+
 
 def start_workspace_watcher(
     store: SearchStore,

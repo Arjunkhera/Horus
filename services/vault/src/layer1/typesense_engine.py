@@ -377,6 +377,14 @@ class TypesenseSearchEngine(SearchStore):
         """
         from ..layer2.frontmatter import parse_page
 
+        # Purge stale vault documents before re-indexing
+        try:
+            self._get_client().collections[COLLECTION].documents.delete(
+                {"filter_by": f"source:={SOURCE} && vault_name:={self._vault_name}"}
+            )
+        except Exception as e:
+            logger.warning("Failed to purge stale vault documents: %s", e)
+
         count = 0
         errors = 0
 
