@@ -19,18 +19,19 @@ import os
 import time
 import pytest
 
-# Skip entire module if Typesense is not available
-TYPESENSE_HOST = os.environ.get("TYPESENSE_HOST")
-pytestmark = pytest.mark.skipif(
-    not TYPESENSE_HOST,
-    reason="TYPESENSE_HOST not set — Typesense integration tests skipped"
-)
+TYPESENSE_HOST = os.environ.get("TYPESENSE_HOST", "")
 
-# Only import typesense when it's available
 try:
     import typesense
+    HAS_TYPESENSE = True
 except ImportError:
-    pytestmark = pytest.mark.skip(reason="typesense Python client not installed")
+    typesense = None  # type: ignore
+    HAS_TYPESENSE = False
+
+pytestmark = pytest.mark.skipif(
+    not TYPESENSE_HOST or not HAS_TYPESENSE,
+    reason="TYPESENSE_HOST not set or typesense package not installed"
+)
 
 
 TYPESENSE_PORT = int(os.environ.get("TYPESENSE_PORT", "8108"))
