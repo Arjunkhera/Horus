@@ -1,9 +1,8 @@
 import { type WorkspaceCreateOptions } from './workspace/workspace-creator.js';
 import type { ArtifactSummary, ArtifactType, InstallReport, SearchResult, ResolvedArtifact, WorkspaceRecord } from './models/index.js';
 import type { ForgeConfig } from './models/forge-config.js';
-import type { RepoIndex, RepoIndexEntry } from './models/repo-index.js';
+import type { RepoIndex, RepoIndexEntry, RepoIndexWorkflow } from './models/repo-index.js';
 import type { RepoWorkflow } from './models/repo-workflow.js';
-import { type RepoCloneResult } from './repo/repo-clone.js';
 import { type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
 import { type SessionListOptions, type SessionListResult } from './session/session-list.js';
 import { type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
@@ -37,6 +36,43 @@ export interface GlobalPluginInfo {
     files: string[];
 }
 /**
+ * Auto-detected workflow values returned when user confirmation is needed.
+ */
+export interface AutoDetectedWorkflow {
+    type: 'owner' | 'fork' | 'contributor';
+    upstream?: string;
+    fork?: string;
+    pushTo: string;
+    prTarget: {
+        repo: string;
+        branch: string;
+    };
+    branchPattern?: string;
+    commitFormat?: string;
+    remotesSnapshot?: Record<string, string>;
+}
+/**
+ * Result returned by `repoWorkflow()`.
+ *
+ * When `needsConfirmation` is true, the agent should present `autoDetected`
+ * values to the user for confirmation, then call `repoWorkflowSave()`.
+ *
+ * When `source` is 'index', the workflow was previously confirmed and saved.
+ * A `stalenessWarning` may be present if remotes changed since confirmation.
+ */
+export interface RepoWorkflowResult extends RepoWorkflow {
+    /** True when workflow has not been confirmed and user should verify */
+    needsConfirmation?: boolean;
+    /** Auto-detected values to present to the user for confirmation */
+    autoDetected?: AutoDetectedWorkflow;
+    /** ISO timestamp when workflow was last confirmed (index source only) */
+    confirmedAt?: string;
+    /** Who confirmed the workflow (index source only) */
+    confirmedBy?: 'user' | 'auto';
+    /** Warning if remotes have changed since confirmation (index source only) */
+    stalenessWarning?: string;
+}
+/**
  * Main orchestration class for Forge. Wires together Registry, Resolver,
  * Compiler, and WorkspaceManager. Both the CLI and MCP server call this.
  *
@@ -57,7 +93,14 @@ export declare class ForgeCore {
     private readonly globalConfigPath;
     private _metadataStore?;
     private _lifecycleManager?;
+    /** Lazily initialized — null when Typesense is not configured. */
+    private _searchClient?;
     constructor(workspaceRoot?: string, options?: ForgeCoreOptions);
+    /**
+     * Return the ForgeSearchClient if Typesense is configured, or null otherwise.
+     * Initialised once and cached.
+     */
+    private getSearchClient;
     private getMetadataStore;
     private getLifecycleManager;
     /**
@@ -67,6 +110,7 @@ export declare class ForgeCore {
     init(name: string): Promise<void>;
     /**
      * Search the registry for artifacts matching a query.
+     * Tries Typesense fuzzy search first; falls back to in-memory scoring when unavailable.
      */
     search(query: string, type?: ArtifactType): Promise<SearchResult[]>;
     /**
@@ -97,6 +141,7 @@ export declare class ForgeCore {
     getConfig(): Promise<ForgeConfig>;
     /**
      * Scan configured directories for git repositories and update the index.
+     * After scanning, upserts all repos into Typesense (when available).
      */
     repoScan(): Promise<RepoIndex>;
     /**
@@ -105,6 +150,8 @@ export declare class ForgeCore {
     repoList(query?: string): Promise<RepoIndexEntry[]>;
     /**
      * Resolve a repository by name or remote URL.
+     * When resolving by name, tries Typesense fuzzy search first for typo tolerance,
+     * then falls back to exact/substring matching in the local index.
      */
     repoResolve(opts: {
         name?: string;
@@ -114,25 +161,28 @@ export declare class ForgeCore {
      * Resolve the git workflow configuration for a repository.
      *
      * Resolution order:
+     *   0. Repo index confirmed workflow — previously saved to repos.json
      *   1. Vault repo profile  — shared, team-wide knowledge (hosting + workflow fields)
-     *   2. Auto-detect         — inspect local git remotes (upstream → fork, else direct)
+     *   2. Auto-detect         — inspect local git remotes (upstream → fork/contributor, else owner)
      *   3. Default fallback    — direct strategy, main branch
-     */
-    repoWorkflow(repoName: string): Promise<RepoWorkflow>;
-    /**
-     * Create an isolated reference clone of a repository.
      *
-     * Looks up the repo in the local index, creates a reference clone at
-     * destPath (default: <workspaceRoot>/<repoName> when inside a workspace,
-     * or <mountPath>/<repoName> otherwise), optionally creates a feature
-     * branch, and returns paths in host-translated form.
+     * When no confirmed workflow exists in the index and Vault has no profile,
+     * returns a result with `needsConfirmation: true` and `autoDetected` values
+     * so the caller (agent) can present them to the user for confirmation.
+     * Once confirmed, call `repoWorkflowSave()` to persist the workflow.
      */
-    repoClone(opts: {
-        repoName: string;
-        branchName?: string;
-        destPath?: string;
-        workspacePath?: string;
-    }): Promise<RepoCloneResult>;
+    repoWorkflow(repoName: string): Promise<RepoWorkflowResult>;
+    /**
+     * Save confirmed workflow metadata for a repository to the repo index.
+     *
+     * Called after the user confirms (or accepts) the auto-detected workflow
+     * values returned by `repoWorkflow()` with `needsConfirmation: true`.
+     *
+     * @param repoName - Repository name in the index
+     * @param workflow - Confirmed workflow values (agent passes user-confirmed or auto-detected)
+     * @param confirmedBy - "user" if user explicitly confirmed, "auto" if accepted without edits
+     */
+    repoWorkflowSave(repoName: string, workflow: Omit<RepoIndexWorkflow, 'confirmedAt' | 'confirmedBy'>, confirmedBy?: 'user' | 'auto'): Promise<RepoIndexWorkflow>;
     /**
      * Start or resume a code session for a work item on a repository.
      *
@@ -238,10 +288,36 @@ export declare class ForgeCore {
      */
     private findAdapterWithResource;
     /**
-     * Detect git workflow strategy from a repo's local remotes.
+     * Fetch all remotes and their fetch URLs from a local git repository.
+     * Returns a map of { remoteName → fetchUrl }.
+     * Returns empty map on any error.
+     */
+    private _listRemotes;
+    /**
+     * Full workflow detection from a repo's local remotes.
      *
-     * - Has an 'upstream' remote → fork strategy (push to origin fork, PR against upstream)
-     * - Otherwise              → direct strategy (push feature branch to shared origin)
+     * Strategy:
+     *   - Has 'upstream' remote  → fork  (origin = personal fork, upstream = canonical)
+     *   - No 'upstream'          → owner (sole maintainer, push directly to origin)
+     *
+     * Note: "contributor" (external collaborator, no fork, only branch) is rare
+     * in local git setups. We detect it when origin URL does not match the
+     * authenticated user's account, but since we can't check that without a
+     * GitHub API call, we default to "owner" for the auto-detect path.
+     * Users can correct this during confirmation.
+     */
+    private _detectWorkflowFull;
+    /**
+     * Check whether the workflow metadata may be stale by comparing the current
+     * remote URLs to the snapshot taken at confirmation time.
+     *
+     * Returns a warning string if remotes have changed, null if unchanged.
+     * On any git error, returns null (fail silently).
+     */
+    private _checkWorkflowStaleness;
+    /**
+     * @deprecated Use _detectWorkflowFull instead.
+     * Kept for backward compatibility with any callers that only need the strategy string.
      */
     private _detectWorkflowStrategy;
     private buildRegistry;

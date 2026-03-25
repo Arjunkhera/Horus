@@ -41,6 +41,7 @@ import { VaultClient, extractHostingFromUrl } from './vault/vault-client.js';
 import { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse } from './repo/repo-develop.js';
 import { sessionList, type SessionListOptions, type SessionListResult } from './session/session-list.js';
 import { sessionCleanup, type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
+import { ForgeSearchClient } from './search/forge-search-client.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -151,6 +152,8 @@ export class ForgeCore {
   private readonly globalConfigPath: string | undefined;
   private _metadataStore?: WorkspaceMetadataStore;
   private _lifecycleManager?: WorkspaceLifecycleManager;
+  /** Lazily initialized — null when Typesense is not configured. */
+  private _searchClient?: ForgeSearchClient | null;
 
   constructor(
     private readonly workspaceRoot: string = process.cwd(),
@@ -161,6 +164,17 @@ export class ForgeCore {
     this.compiler.register(new ClaudeCodeStrategy());
     this.compiler.register(new CursorStrategy());
     this.globalConfigPath = options?.globalConfigPath;
+  }
+
+  /**
+   * Return the ForgeSearchClient if Typesense is configured, or null otherwise.
+   * Initialised once and cached.
+   */
+  private getSearchClient(): ForgeSearchClient | null {
+    if (this._searchClient === undefined) {
+      this._searchClient = ForgeSearchClient.create();
+    }
+    return this._searchClient;
   }
 
   private async getMetadataStore(): Promise<WorkspaceMetadataStore> {
@@ -189,6 +203,11 @@ export class ForgeCore {
 
   /**
    * Search the registry for artifacts matching a query.
+   * Uses in-memory scoring via the Registry adapter.
+   *
+   * TODO: When a registry-level "scan" or "sync" hook exists, call
+   * searchClient.indexArtifact() for each entry so Typesense fuzzy search
+   * can be used here (similar to how repoScan() indexes repos).
    */
   async search(query: string, type?: ArtifactType): Promise<SearchResult[]> {
     const registry = await this.buildRegistry();
@@ -378,18 +397,26 @@ export class ForgeCore {
 
   /**
    * Scan configured directories for git repositories and update the index.
+   * After scanning, upserts all repos into Typesense (when available).
    */
   async repoScan(): Promise<RepoIndex> {
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
     const { scan_paths, index_path } = globalConfig.repos;
-    
+
     if (scan_paths.length === 0) {
       throw new Error('No scan paths configured. Run: forge config set repos.scan_paths ~/Repositories');
     }
-    
+
     const existing = await loadRepoIndex(index_path);
     const index = await repoScannerScan(scan_paths, existing ?? undefined);
     await saveRepoIndex(index, index_path);
+
+    // Index all repos into Typesense (graceful — errors are swallowed inside indexRepos)
+    const searchClient = this.getSearchClient();
+    if (searchClient) {
+      await searchClient.indexRepos(index.repos);
+    }
+
     return index;
   }
 
@@ -417,6 +444,8 @@ export class ForgeCore {
 
   /**
    * Resolve a repository by name or remote URL.
+   * When resolving by name, tries Typesense fuzzy search first for typo tolerance,
+   * then falls back to exact/substring matching in the local index.
    */
   async repoResolve(opts: { name?: string; remoteUrl?: string }): Promise<RepoIndexEntry | null> {
     if (!opts.name && !opts.remoteUrl) {
@@ -438,8 +467,25 @@ export class ForgeCore {
 
     const q = new RepoIndexQuery(index.repos);
     let entry: RepoIndexEntry | null = null;
-    if (opts.name) entry = q.findByName(opts.name);
-    else if (opts.remoteUrl) entry = q.findByRemoteUrl(opts.remoteUrl);
+
+    if (opts.name) {
+      // Try Typesense fuzzy search first (handles typos and partial matches)
+      const searchClient = this.getSearchClient();
+      if (searchClient) {
+        const hits = await searchClient.searchRepos(opts.name);
+        if (hits !== null && hits.length > 0) {
+          // Take the top result and look it up in the local index for full data
+          entry = q.findByName(hits[0]);
+        }
+      }
+      // Fallback: exact name match in the local index
+      if (!entry) {
+        entry = q.findByName(opts.name);
+      }
+    } else if (opts.remoteUrl) {
+      entry = q.findByRemoteUrl(opts.remoteUrl);
+    }
+
     return entry ? translateRepoPath(entry, scan_paths, host_repos_path) : null;
   }
 

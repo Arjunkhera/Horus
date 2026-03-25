@@ -30,11 +30,10 @@ const repo_scanner_js_1 = require("./repo/repo-scanner.js");
 const repo_index_store_js_1 = require("./repo/repo-index-store.js");
 const repo_index_query_js_1 = require("./repo/repo-index-query.js");
 const vault_client_js_1 = require("./vault/vault-client.js");
-const repo_clone_js_1 = require("./repo/repo-clone.js");
 const repo_develop_js_1 = require("./repo/repo-develop.js");
 const session_list_js_1 = require("./session/session-list.js");
 const session_cleanup_js_1 = require("./session/session-cleanup.js");
-const path_utils_js_1 = require("./config/path-utils.js");
+const forge_search_client_js_1 = require("./search/forge-search-client.js");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 /**
  * Translate a Docker-internal repo localPath to the equivalent host path.
@@ -61,6 +60,8 @@ class ForgeCore {
     globalConfigPath;
     _metadataStore;
     _lifecycleManager;
+    /** Lazily initialized — null when Typesense is not configured. */
+    _searchClient;
     constructor(workspaceRoot = process.cwd(), options) {
         this.workspaceRoot = workspaceRoot;
         this.workspaceManager = new workspace_manager_js_1.WorkspaceManager(workspaceRoot);
@@ -68,6 +69,16 @@ class ForgeCore {
         this.compiler.register(new claude_code_strategy_js_1.ClaudeCodeStrategy());
         this.compiler.register(new cursor_strategy_js_1.CursorStrategy());
         this.globalConfigPath = options?.globalConfigPath;
+    }
+    /**
+     * Return the ForgeSearchClient if Typesense is configured, or null otherwise.
+     * Initialised once and cached.
+     */
+    getSearchClient() {
+        if (this._searchClient === undefined) {
+            this._searchClient = forge_search_client_js_1.ForgeSearchClient.create();
+        }
+        return this._searchClient;
     }
     async getMetadataStore() {
         if (!this._metadataStore) {
@@ -92,8 +103,37 @@ class ForgeCore {
     }
     /**
      * Search the registry for artifacts matching a query.
+     * Tries Typesense fuzzy search first; falls back to in-memory scoring when unavailable.
      */
     async search(query, type) {
+        const searchClient = this.getSearchClient();
+        if (searchClient) {
+            const hits = await searchClient.searchArtifacts(query, type);
+            if (hits !== null && hits.length > 0) {
+                // Map Typesense hits to SearchResult shape — fetch full meta from registry for each hit
+                const registry = await this.buildRegistry();
+                const results = [];
+                for (const hit of hits) {
+                    const hitType = hit.source_type;
+                    const hitId = hit.id.replace(`forge-${hitType}-`, '');
+                    try {
+                        const bundle = await registry.get({ type: hitType, id: hitId, version: '' });
+                        results.push({
+                            ref: { type: hitType, id: hitId, version: bundle.meta.version },
+                            meta: bundle.meta,
+                            score: 100, // Typesense already ranked — treat all hits as high score
+                            matchedOn: ['name'],
+                        });
+                    }
+                    catch {
+                        // Artifact in Typesense but not in local registry — skip
+                    }
+                }
+                if (results.length > 0)
+                    return results;
+            }
+        }
+        // Fallback: in-memory scoring
         const registry = await this.buildRegistry();
         return registry.search(query, type);
     }
@@ -258,6 +298,7 @@ class ForgeCore {
     }
     /**
      * Scan configured directories for git repositories and update the index.
+     * After scanning, upserts all repos into Typesense (when available).
      */
     async repoScan() {
         const globalConfig = await (0, global_config_loader_js_1.loadGlobalConfig)(this.globalConfigPath);
@@ -268,6 +309,11 @@ class ForgeCore {
         const existing = await (0, repo_index_store_js_1.loadRepoIndex)(index_path);
         const index = await (0, repo_scanner_js_1.scan)(scan_paths, existing ?? undefined);
         await (0, repo_index_store_js_1.saveRepoIndex)(index, index_path);
+        // Index all repos into Typesense (graceful — errors are swallowed inside indexRepos)
+        const searchClient = this.getSearchClient();
+        if (searchClient) {
+            await searchClient.indexRepos(index.repos);
+        }
         return index;
     }
     /**
@@ -290,6 +336,8 @@ class ForgeCore {
     }
     /**
      * Resolve a repository by name or remote URL.
+     * When resolving by name, tries Typesense fuzzy search first for typo tolerance,
+     * then falls back to exact/substring matching in the local index.
      */
     async repoResolve(opts) {
         if (!opts.name && !opts.remoteUrl) {
@@ -307,22 +355,68 @@ class ForgeCore {
             return null;
         const q = new repo_index_query_js_1.RepoIndexQuery(index.repos);
         let entry = null;
-        if (opts.name)
-            entry = q.findByName(opts.name);
-        else if (opts.remoteUrl)
+        if (opts.name) {
+            // Try Typesense fuzzy search first (handles typos and partial matches)
+            const searchClient = this.getSearchClient();
+            if (searchClient) {
+                const hits = await searchClient.searchRepos(opts.name);
+                if (hits !== null && hits.length > 0) {
+                    // Take the top result and look it up in the local index for full data
+                    entry = q.findByName(hits[0]);
+                }
+            }
+            // Fallback: exact name match in the local index
+            if (!entry) {
+                entry = q.findByName(opts.name);
+            }
+        }
+        else if (opts.remoteUrl) {
             entry = q.findByRemoteUrl(opts.remoteUrl);
+        }
         return entry ? translateRepoPath(entry, scan_paths, host_repos_path) : null;
     }
     /**
      * Resolve the git workflow configuration for a repository.
      *
      * Resolution order:
+     *   0. Repo index confirmed workflow — previously saved to repos.json
      *   1. Vault repo profile  — shared, team-wide knowledge (hosting + workflow fields)
-     *   2. Auto-detect         — inspect local git remotes (upstream → fork, else direct)
+     *   2. Auto-detect         — inspect local git remotes (upstream → fork/contributor, else owner)
      *   3. Default fallback    — direct strategy, main branch
+     *
+     * When no confirmed workflow exists in the index and Vault has no profile,
+     * returns a result with `needsConfirmation: true` and `autoDetected` values
+     * so the caller (agent) can present them to the user for confirmation.
+     * Once confirmed, call `repoWorkflowSave()` to persist the workflow.
      */
     async repoWorkflow(repoName) {
         const globalConfig = await (0, global_config_loader_js_1.loadGlobalConfig)(this.globalConfigPath);
+        const indexPath = globalConfig.repos.index_path;
+        // --- Tier 0: Confirmed workflow in repo index ---
+        const repoIndex = await (0, repo_index_store_js_1.loadRepoIndex)(indexPath);
+        if (repoIndex) {
+            const q = new repo_index_query_js_1.RepoIndexQuery(repoIndex.repos);
+            const entry = q.findByName(repoName);
+            if (entry?.workflow) {
+                // Check for staleness: compare current remotes to the snapshot at confirmation time
+                const stalenessWarning = await this._checkWorkflowStaleness(entry.localPath, entry.workflow);
+                const hosting = (0, vault_client_js_1.extractHostingFromUrl)(entry.remoteUrl);
+                return {
+                    repoName,
+                    hosting,
+                    workflow: {
+                        strategy: entry.workflow.type,
+                        defaultBranch: entry.defaultBranch,
+                        prTarget: entry.workflow.prTarget.branch,
+                        branchConvention: entry.workflow.branchPattern,
+                    },
+                    source: 'index',
+                    confirmedAt: entry.workflow.confirmedAt,
+                    confirmedBy: entry.workflow.confirmedBy,
+                    stalenessWarning: stalenessWarning ?? undefined,
+                };
+            }
+        }
         const vaultEndpoint = globalConfig.mcp_endpoints.vault;
         // --- Tier 1: Vault repo profile ---
         if (vaultEndpoint) {
@@ -355,17 +449,29 @@ class ForgeCore {
         // --- Tier 2: Auto-detect from local git remotes ---
         const repo = await this.repoResolve({ name: repoName });
         if (repo) {
-            const strategy = await this._detectWorkflowStrategy(repo.localPath);
+            const detected = await this._detectWorkflowFull(repo.localPath, repo.remoteUrl);
             const hosting = (0, vault_client_js_1.extractHostingFromUrl)(repo.remoteUrl);
             return {
                 repoName,
                 hosting,
                 workflow: {
-                    strategy,
+                    strategy: detected.type,
                     defaultBranch: repo.defaultBranch,
                     prTarget: repo.defaultBranch,
                 },
                 source: 'auto-detect',
+                needsConfirmation: true,
+                autoDetected: {
+                    type: detected.type,
+                    upstream: detected.upstream,
+                    fork: detected.fork,
+                    pushTo: detected.pushTo,
+                    prTarget: {
+                        repo: hosting.org ? `${hosting.org}/${repoName}` : repoName,
+                        branch: repo.defaultBranch,
+                    },
+                    remotesSnapshot: detected.remotesSnapshot,
+                },
             };
         }
         // --- Tier 3: Default fallback ---
@@ -374,69 +480,50 @@ class ForgeCore {
             hosting: { hostname: 'github.com', org: '' },
             workflow: { strategy: 'direct', defaultBranch: 'main', prTarget: 'main' },
             source: 'default',
+            needsConfirmation: true,
+            autoDetected: {
+                type: 'owner',
+                pushTo: 'origin',
+                prTarget: { repo: repoName, branch: 'main' },
+            },
         };
     }
     /**
-     * Create an isolated reference clone of a repository.
+     * Save confirmed workflow metadata for a repository to the repo index.
      *
-     * Looks up the repo in the local index, creates a reference clone at
-     * destPath (default: <workspaceRoot>/<repoName> when inside a workspace,
-     * or <mountPath>/<repoName> otherwise), optionally creates a feature
-     * branch, and returns paths in host-translated form.
+     * Called after the user confirms (or accepts) the auto-detected workflow
+     * values returned by `repoWorkflow()` with `needsConfirmation: true`.
+     *
+     * @param repoName - Repository name in the index
+     * @param workflow - Confirmed workflow values (agent passes user-confirmed or auto-detected)
+     * @param confirmedBy - "user" if user explicitly confirmed, "auto" if accepted without edits
      */
-    async repoClone(opts) {
+    async repoWorkflowSave(repoName, workflow, confirmedBy = 'user') {
         const globalConfig = await (0, global_config_loader_js_1.loadGlobalConfig)(this.globalConfigPath);
-        const { scan_paths, host_repos_path } = globalConfig.repos;
-        let repoIndex = await (0, repo_index_store_js_1.loadRepoIndex)(globalConfig.repos.index_path);
-        if (!repoIndex && globalConfig.repos.scan_paths.length > 0) {
-            repoIndex = await this.repoScan();
-        }
+        const indexPath = globalConfig.repos.index_path;
+        let repoIndex = await (0, repo_index_store_js_1.loadRepoIndex)(indexPath);
         if (!repoIndex) {
-            throw new errors_js_1.ForgeError('REPO_INDEX_NOT_FOUND', 'Repository index not found.', 'Run: forge repo scan');
+            if (globalConfig.repos.scan_paths.length > 0) {
+                repoIndex = await this.repoScan();
+            }
+            else {
+                throw new errors_js_1.ForgeError('REPO_INDEX_NOT_FOUND', 'Repository index not found.', 'Run: forge repo scan');
+            }
         }
-        const query = new repo_index_query_js_1.RepoIndexQuery(repoIndex.repos);
-        const repo = query.findByName(opts.repoName);
-        if (!repo) {
-            throw new errors_js_1.ForgeError('REPO_NOT_FOUND', `Repository "${opts.repoName}" not found in local index.`, 'Run: forge repo scan');
+        const q = new repo_index_query_js_1.RepoIndexQuery(repoIndex.repos);
+        const entry = q.findByName(repoName);
+        if (!entry) {
+            throw new errors_js_1.ForgeError('REPO_NOT_FOUND', `Repository "${repoName}" not found in index.`, 'Run: forge repo scan');
         }
-        const mountPath = (0, path_utils_js_1.expandPath)(globalConfig.workspace.mount_path);
-        const hostMountPath = globalConfig.workspace.host_workspaces_path ?? mountPath;
-        // Resolve workspacePath, translating host path → container path when Forge
-        // runs in Docker. MCP callers pass $FORGE_WORKSPACE_PATH (host-side absolute
-        // path). Without translation, the host path never matches mountPath and the
-        // clone always lands in the workspaces root instead of the workspace folder.
-        let effectiveRoot = path_1.default.resolve(opts.workspacePath ?? this.workspaceRoot);
-        if (hostMountPath !== mountPath && effectiveRoot.startsWith(hostMountPath + path_1.default.sep)) {
-            effectiveRoot = mountPath + effectiveRoot.slice(hostMountPath.length);
-        }
-        const resolvedMount = path_1.default.resolve(mountPath);
-        const insideWorkspace = effectiveRoot.startsWith(resolvedMount + path_1.default.sep) && effectiveRoot !== resolvedMount;
-        const basePath = insideWorkspace ? effectiveRoot : mountPath;
-        const clonePath = opts.destPath ?? path_1.default.join(basePath, opts.repoName);
-        const { actualDefaultBranch } = await (0, repo_clone_js_1.createReferenceClone)({
-            localPath: repo.localPath,
-            remoteUrl: repo.remoteUrl,
-            destPath: clonePath,
-            branchName: opts.branchName,
-            defaultBranch: repo.defaultBranch,
-        });
-        // If the clone revealed a different default branch than the index stored, update it.
-        if (actualDefaultBranch !== repo.defaultBranch) {
-            const updatedRepos = repoIndex.repos.map((r) => r.name === repo.name ? { ...r, defaultBranch: actualDefaultBranch } : r);
-            await (0, repo_index_store_js_1.saveRepoIndex)({ ...repoIndex, repos: updatedRepos }, globalConfig.repos.index_path);
-        }
-        const translatedRepo = translateRepoPath(repo, scan_paths, host_repos_path);
-        // Compute host-side clone path for display (Docker path → host path)
-        const cloneRelative = path_1.default.relative(mountPath, clonePath);
-        const hostClonePath = path_1.default.join(hostMountPath, cloneRelative);
-        const origin = repo.remoteUrl ?? translatedRepo.localPath;
-        return {
-            repoName: opts.repoName,
-            clonePath,
-            hostClonePath,
-            branch: opts.branchName ?? actualDefaultBranch,
-            origin,
+        const confirmedAt = new Date().toISOString();
+        const savedWorkflow = {
+            ...workflow,
+            confirmedAt,
+            confirmedBy,
         };
+        const updatedRepos = repoIndex.repos.map(r => r.name === repoName ? { ...r, workflow: savedWorkflow } : r);
+        await (0, repo_index_store_js_1.saveRepoIndex)({ ...repoIndex, repos: updatedRepos }, indexPath);
+        return savedWorkflow;
     }
     /**
      * Start or resume a code session for a work item on a repository.
@@ -710,25 +797,96 @@ class ForgeCore {
     }
     // Internal helpers
     /**
-     * Detect git workflow strategy from a repo's local remotes.
-     *
-     * - Has an 'upstream' remote → fork strategy (push to origin fork, PR against upstream)
-     * - Otherwise              → direct strategy (push feature branch to shared origin)
+     * Fetch all remotes and their fetch URLs from a local git repository.
+     * Returns a map of { remoteName → fetchUrl }.
+     * Returns empty map on any error.
      */
-    async _detectWorkflowStrategy(localPath) {
+    async _listRemotes(localPath) {
         try {
-            const { stdout } = await execFileAsync('git', ['remote'], {
-                cwd: localPath,
-                timeout: 3000,
-            });
-            const remotes = stdout.trim().split('\n').map(r => r.trim()).filter(Boolean);
-            if (remotes.includes('upstream'))
-                return 'fork';
+            const { stdout } = await execFileAsync('git', ['remote', '-v'], { cwd: localPath, timeout: 3000 });
+            const result = {};
+            for (const line of stdout.trim().split('\n')) {
+                // Each line: "remoteName\turl (fetch)" or "remoteName\turl (push)"
+                const fetchMatch = line.match(/^(\S+)\s+(\S+)\s+\(fetch\)$/);
+                if (fetchMatch) {
+                    result[fetchMatch[1]] = fetchMatch[2];
+                }
+            }
+            return result;
         }
         catch {
-            // git not available or not a git repo — fall back to direct
+            return {};
         }
-        return 'direct';
+    }
+    /**
+     * Full workflow detection from a repo's local remotes.
+     *
+     * Strategy:
+     *   - Has 'upstream' remote  → fork  (origin = personal fork, upstream = canonical)
+     *   - No 'upstream'          → owner (sole maintainer, push directly to origin)
+     *
+     * Note: "contributor" (external collaborator, no fork, only branch) is rare
+     * in local git setups. We detect it when origin URL does not match the
+     * authenticated user's account, but since we can't check that without a
+     * GitHub API call, we default to "owner" for the auto-detect path.
+     * Users can correct this during confirmation.
+     */
+    async _detectWorkflowFull(localPath, remoteUrl) {
+        const remotes = await this._listRemotes(localPath);
+        if (remotes['upstream']) {
+            // Fork workflow: origin is the user's fork, upstream is the canonical repo
+            return {
+                type: 'fork',
+                upstream: remotes['upstream'],
+                fork: remotes['origin'],
+                pushTo: 'origin',
+                remotesSnapshot: remotes,
+            };
+        }
+        // Default: owner workflow (user has full commit access to origin)
+        return {
+            type: 'owner',
+            pushTo: 'origin',
+            remotesSnapshot: remotes,
+        };
+    }
+    /**
+     * Check whether the workflow metadata may be stale by comparing the current
+     * remote URLs to the snapshot taken at confirmation time.
+     *
+     * Returns a warning string if remotes have changed, null if unchanged.
+     * On any git error, returns null (fail silently).
+     */
+    async _checkWorkflowStaleness(localPath, workflow) {
+        if (!workflow.remotesSnapshot)
+            return null;
+        const currentRemotes = await this._listRemotes(localPath);
+        const snapshot = workflow.remotesSnapshot;
+        // Check for any additions, removals, or URL changes
+        const snapshotKeys = Object.keys(snapshot);
+        const currentKeys = Object.keys(currentRemotes);
+        const added = currentKeys.filter(k => !snapshot[k]);
+        const removed = snapshotKeys.filter(k => !currentRemotes[k]);
+        const changed = snapshotKeys.filter(k => currentRemotes[k] && currentRemotes[k] !== snapshot[k]);
+        if (added.length > 0 || removed.length > 0 || changed.length > 0) {
+            const parts = [];
+            if (added.length > 0)
+                parts.push(`added: ${added.join(', ')}`);
+            if (removed.length > 0)
+                parts.push(`removed: ${removed.join(', ')}`);
+            if (changed.length > 0)
+                parts.push(`changed: ${changed.join(', ')}`);
+            return `Workflow may be stale — remotes have changed since confirmation (${parts.join('; ')}). Consider re-confirming via forge_repo_workflow.`;
+        }
+        return null;
+    }
+    /**
+     * @deprecated Use _detectWorkflowFull instead.
+     * Kept for backward compatibility with any callers that only need the strategy string.
+     */
+    async _detectWorkflowStrategy(localPath) {
+        const detected = await this._detectWorkflowFull(localPath, null);
+        return detected.type;
     }
     async buildRegistry() {
         let config = null;

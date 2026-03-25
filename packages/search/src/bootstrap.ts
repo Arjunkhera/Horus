@@ -26,6 +26,12 @@ const BASE_SCHEMA: CollectionCreateSchema = {
     { name: 'scope_program', type: 'string', facet: true, optional: true },
     { name: 'scope_context', type: 'string', facet: true, optional: true },
     { name: 'vault_name', type: 'string', facet: true, optional: true },
+    // Forge-specific fields (optional — Anvil/Vault documents are unaffected)
+    { name: 'local_path', type: 'string', optional: true },
+    { name: 'remote_url', type: 'string', optional: true },
+    { name: 'language', type: 'string', facet: true, optional: true },
+    { name: 'clone_state', type: 'string', facet: true, optional: true },
+    { name: 'default_branch', type: 'string', optional: true },
     { name: 'created_at', type: 'int64' },
     { name: 'modified_at', type: 'int64', sort: true },
   ],
