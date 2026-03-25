@@ -44,6 +44,12 @@ const ANVIL_SERVICE = `\
       - ANVIL_SYNC_INTERVAL=\${ANVIL_SYNC_INTERVAL:-300}
       - ANVIL_DEBOUNCE_SECONDS=\${ANVIL_DEBOUNCE_SECONDS:-5}
       - GITHUB_TOKEN=\${GITHUB_TOKEN:-}
+      - TYPESENSE_HOST=typesense
+      - TYPESENSE_PORT=8108
+      - TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
+    depends_on:
+      typesense:
+        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -94,8 +100,13 @@ const FORGE_SERVICE = `\
       - FORGE_HOST_FORGE_URL=http://localhost:\${FORGE_PORT:-8200}
       - FORGE_SCAN_PATHS=\${FORGE_SCAN_PATHS:-/data/repos}
       - GITHUB_TOKEN=\${GITHUB_TOKEN:-}
+      - TYPESENSE_HOST=typesense
+      - TYPESENSE_PORT=8108
+      - TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
     depends_on:
       anvil:
+        condition: service_healthy
+      typesense:
         condition: service_healthy
       vault-router:
         condition: service_healthy
