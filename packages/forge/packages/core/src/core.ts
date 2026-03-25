@@ -203,35 +203,13 @@ export class ForgeCore {
 
   /**
    * Search the registry for artifacts matching a query.
-   * Tries Typesense fuzzy search first; falls back to in-memory scoring when unavailable.
+   * Uses in-memory scoring via the Registry adapter.
+   *
+   * TODO: When a registry-level "scan" or "sync" hook exists, call
+   * searchClient.indexArtifact() for each entry so Typesense fuzzy search
+   * can be used here (similar to how repoScan() indexes repos).
    */
   async search(query: string, type?: ArtifactType): Promise<SearchResult[]> {
-    const searchClient = this.getSearchClient();
-    if (searchClient) {
-      const hits = await searchClient.searchArtifacts(query, type);
-      if (hits !== null && hits.length > 0) {
-        // Map Typesense hits to SearchResult shape — fetch full meta from registry for each hit
-        const registry = await this.buildRegistry();
-        const results: SearchResult[] = [];
-        for (const hit of hits) {
-          const hitType = hit.source_type as ArtifactType;
-          const hitId = hit.id.replace(`forge-${hitType}-`, '');
-          try {
-            const bundle = await registry.get({ type: hitType, id: hitId, version: '' });
-            results.push({
-              ref: { type: hitType, id: hitId, version: bundle.meta.version },
-              meta: bundle.meta,
-              score: 100, // Typesense already ranked — treat all hits as high score
-              matchedOn: ['name'],
-            });
-          } catch {
-            // Artifact in Typesense but not in local registry — skip
-          }
-        }
-        if (results.length > 0) return results;
-      }
-    }
-    // Fallback: in-memory scoring
     const registry = await this.buildRegistry();
     return registry.search(query, type);
   }
