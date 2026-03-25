@@ -1,5 +1,6 @@
 # ─── Stage 1: Builder ─────────────────────────────────────────────────────
 # Installs all dependencies (including dev) and compiles TypeScript.
+# Context: monorepo root (needs packages/search + packages/forge).
 FROM node:22-bookworm-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -7,22 +8,30 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /build
 
 # Copy root workspace manifests first (layer cache)
-COPY package.json tsconfig.json pnpm-workspace.yaml .npmrc ./
+COPY packages/forge/package.json packages/forge/pnpm-workspace.yaml packages/forge/.npmrc ./
+# Include @horus/search in the forge sub-workspace
+COPY packages/search/package.json ./packages/search/
 
-# Copy package manifests for all workspace packages
-COPY packages/core/package.json ./packages/core/
-COPY packages/cli/package.json ./packages/cli/
-COPY packages/mcp-server/package.json ./packages/mcp-server/
+# Copy package manifests for all forge workspace packages
+COPY packages/forge/packages/core/package.json ./packages/core/
+COPY packages/forge/packages/cli/package.json ./packages/cli/
+COPY packages/forge/packages/mcp-server/package.json ./packages/mcp-server/
+
+# Augment pnpm-workspace to include search as a sibling package
+RUN echo "  - '../search'" >> pnpm-workspace.yaml
 
 # Install all deps (including devDependencies needed for TypeScript build)
 # --no-frozen-lockfile: forge has no standalone pnpm-lock.yaml (monorepo root manages it)
 RUN pnpm install --no-frozen-lockfile
 
-# Copy source files and per-package tsconfigs
-COPY packages/ ./packages/
+# Copy source files
+COPY packages/search/ ./packages/search/
+COPY packages/forge/packages/ ./packages/
+COPY packages/forge/tsconfig.json ./
 
-# Build packages in explicit dependency order: core → mcp-server → cli
-RUN pnpm --filter @forge/core build \
+# Build @horus/search first, then forge packages in dependency order
+RUN cd packages/search && pnpm build && cd /build \
+    && pnpm --filter @forge/core build \
     && pnpm --filter @forge/mcp-server build \
     && pnpm --filter @forge/cli build
 
@@ -46,23 +55,28 @@ RUN useradd -ms /bin/bash forge
 WORKDIR /app
 
 # Copy root workspace manifests for production install
-COPY package.json pnpm-workspace.yaml .npmrc ./
+COPY packages/forge/package.json packages/forge/pnpm-workspace.yaml packages/forge/.npmrc ./
+COPY packages/search/package.json ./packages/search/
 
 # Copy package manifests (needed for pnpm workspace resolution)
-COPY packages/core/package.json ./packages/core/
-COPY packages/cli/package.json ./packages/cli/
-COPY packages/mcp-server/package.json ./packages/mcp-server/
+COPY packages/forge/packages/core/package.json ./packages/core/
+COPY packages/forge/packages/cli/package.json ./packages/cli/
+COPY packages/forge/packages/mcp-server/package.json ./packages/mcp-server/
+
+# Augment workspace to include search
+RUN echo "  - '../search'" >> pnpm-workspace.yaml
 
 # Install production dependencies only
 RUN pnpm install --prod --no-frozen-lockfile
 
 # Copy compiled output from builder stage
+COPY --from=builder /build/packages/search/dist ./packages/search/dist
 COPY --from=builder /build/packages/core/dist ./packages/core/dist
 COPY --from=builder /build/packages/cli/dist ./packages/cli/dist
 COPY --from=builder /build/packages/mcp-server/dist ./packages/mcp-server/dist
 
 # Copy entrypoint script
-COPY entrypoint.sh ./
+COPY packages/forge/entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 
 # Create data directories and set ownership

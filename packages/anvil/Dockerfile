@@ -1,20 +1,27 @@
 # ─── Stage 1: Builder ─────────────────────────────────────────────────────
 # Installs all dependencies (including dev) and compiles TypeScript.
+# Context: monorepo root (needs packages/search + packages/anvil).
 FROM node:22-bookworm-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /build
 
-# Copy manifests first (layer cache)
-COPY package.json package-lock.json tsconfig.json ./
+# Minimal workspace manifest (only search + anvil)
+COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+COPY packages/search/package.json ./packages/search/
+COPY packages/anvil/package.json ./packages/anvil/
 
 # Install all deps (including devDependencies needed for TypeScript compilation)
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 # Copy source files
-COPY src/ ./src/
+COPY packages/search/ ./packages/search/
+COPY packages/anvil/src/ ./packages/anvil/src/
+COPY packages/anvil/tsconfig.json ./packages/anvil/
 
-# Compile TypeScript → dist/
-RUN npm run build
+# Build search first (anvil depends on it), then anvil
+RUN pnpm --filter @horus/search build && pnpm --filter anvil-mcp build
 
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────
@@ -30,21 +37,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user
 RUN useradd -ms /bin/bash anvil
 
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 WORKDIR /app
 
 # Install production dependencies only
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+COPY packages/search/package.json ./packages/search/
+COPY packages/anvil/package.json ./packages/anvil/
+RUN pnpm install --prod --frozen-lockfile
 
 # Copy compiled output from builder stage
-COPY --from=builder /build/dist/ ./dist/
+COPY --from=builder /build/packages/search/dist/ ./packages/search/dist/
+COPY --from=builder /build/packages/anvil/dist/ ./packages/anvil/dist/
 
 # Copy static assets
-COPY defaults/ ./defaults/
+COPY packages/anvil/defaults/ ./packages/anvil/defaults/
 
 # Entrypoint script
-COPY entrypoint.sh ./
-RUN chmod +x entrypoint.sh
+COPY packages/anvil/entrypoint.sh ./packages/anvil/
+RUN chmod +x packages/anvil/entrypoint.sh
 
 RUN mkdir -p /data/notes && chown -R anvil:anvil /app /data /home/anvil
 
@@ -62,4 +74,4 @@ ENV ANVIL_DEBOUNCE_SECONDS=5
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
   CMD curl -f http://localhost:8100/health || exit 1
 
-CMD ["./entrypoint.sh"]
+CMD ["./packages/anvil/entrypoint.sh"]
