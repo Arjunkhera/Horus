@@ -22,7 +22,7 @@ We have chosen an event-driven architecture for the new microservices.
 **Date**: 2026-01-15
 **Status**: Accepted
 
-SQLite with FTS5 extension for full-text search in vault indexing.
+SQLite for structured storage with Typesense for full-text search in vault indexing.
 
 **Rationale**:
 - Zero external dependencies

@@ -9,4 +9,4 @@ export {
   getReverseRelationships,
   getAllNotePaths,
 } from './indexer.js';
-export { searchFts, queryNotes, combinedSearch, SearchResult } from './fts.js';
+export { queryNotes, buildQuerySql } from './query.js';

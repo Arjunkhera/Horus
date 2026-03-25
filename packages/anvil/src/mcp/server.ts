@@ -119,13 +119,13 @@ export function createMcpServer(ctx: ToolContext): Server {
     {
       name: 'anvil_search',
       description:
-        'Search notes by free-text query and/or structured filters. Supports FTS, type filtering, tags (AND semantics), and date ranges.',
+        'Search notes by free-text query and/or structured filters. Supports text search, type filtering, tags (AND semantics), and date ranges.',
       inputSchema: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: 'Free-text search query (supports FTS5 syntax). Omit entirely for unfiltered search — do not pass "*".',
+            description: 'Free-text search query. Omit entirely for unfiltered search — do not pass "*".',
           },
           type: {
             type: 'string',
@@ -201,7 +201,7 @@ export function createMcpServer(ctx: ToolContext): Server {
             type: 'object',
             description: 'Query filter criteria',
             properties: {
-              query: { type: 'string', description: 'FTS5 text search' },
+              query: { type: 'string', description: 'Text search query' },
               type: { type: 'string', description: 'Filter by note type' },
               status: { type: 'string', description: 'Filter by status' },
               priority: { type: 'string', description: 'Filter by priority' },

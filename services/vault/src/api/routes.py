@@ -204,11 +204,11 @@ def _search_sync(request: SearchRequest, store: SearchStore) -> SearchResponse:
     doc_cache = store.get_all_documents()
 
     # If both search and doc_cache returned nothing, this is likely a system
-    # error (e.g. FTS5 index empty) rather than "no results".
+    # error (e.g. search index empty) rather than "no results".
     if not search_results and not doc_cache:
         logger.error(
             "Search returned zero results AND doc_cache is empty for query '%s'. "
-            "FTS5 may be non-functional. Store status: %s",
+            "Search engine may be non-functional. Store status: %s",
             request.query,
             store.status() if hasattr(store, "status") else "unknown",
         )

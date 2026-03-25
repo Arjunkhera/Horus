@@ -40,14 +40,6 @@ CREATE TABLE IF NOT EXISTS notes (
   FOREIGN KEY (type) REFERENCES types(type_id) ON DELETE SET NULL
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-  title,
-  description,
-  body_text,
-  content=notes,
-  content_rowid=rowid
-);
-
 CREATE TABLE IF NOT EXISTS note_tags (
   note_id TEXT NOT NULL,
   tag TEXT NOT NULL,
@@ -81,7 +73,7 @@ type SqliteDatabase = InstanceType<typeof Database>;
 /**
  * Thin wrapper around node-sqlite3-wasm providing a consistent query interface.
  * Replaces better-sqlite3 to eliminate native binary dependencies.
- * node-sqlite3-wasm is a WASM SQLite build with FTS5, synchronous API, and file persistence.
+ * node-sqlite3-wasm is a WASM SQLite build with synchronous API and file persistence.
  */
 export class AnvilDb {
   private sqlDb: SqliteDatabase;
@@ -164,7 +156,7 @@ export class AnvilDatabase {
     this._db.exec(SCHEMA_SQL);
   }
 
-  /** Expose raw AnvilDb for use by indexer/fts modules */
+  /** Expose raw AnvilDb for use by indexer/query modules */
   get raw(): AnvilDb {
     return this._db;
   }

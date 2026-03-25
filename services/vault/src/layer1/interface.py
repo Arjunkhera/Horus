@@ -4,7 +4,7 @@ Abstract SearchStore interface for the Knowledge Service.
 This module defines the contract that any search/storage backend must implement.
 Layer 2 (Knowledge Logic) depends only on this interface, not on specific implementations.
 
-Current implementation: FtsSearchEngine (SQLite FTS5)
+Current implementations: FilesystemStore (file-based), Typesense (planned)
 """
 
 from abc import ABC, abstractmethod

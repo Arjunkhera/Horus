@@ -16,7 +16,7 @@ export interface SearchResult {
 
 /**
  * Interface for search engines that can be plugged into Anvil.
- * Implementations can use FTS5, semantic search, or other strategies.
+ * Implementations can use Typesense, semantic search, or other strategies.
  */
 export interface SearchEngine {
   /**

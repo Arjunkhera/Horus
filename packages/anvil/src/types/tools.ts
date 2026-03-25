@@ -87,7 +87,7 @@ export const UpdateNoteOutputSchema = z.object({
 // ─── anvil_search ──────────────────────────────────────────────────────────
 
 export const SearchInputSchema = z.object({
-  query: z.string().optional().describe('Free-text search query (supports FTS5 syntax)'),
+  query: z.string().optional().describe('Free-text search query'),
   type: z.string().optional(),
   status: z.string().optional(),
   priority: z.string().optional(),

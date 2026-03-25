@@ -5,7 +5,7 @@ import type { ToolContext } from './create-note.js';
 import type { ViewData } from '../types/view.js';
 import type { AnvilError } from '../types/error.js';
 import type { QueryFilter, SortOrder } from '../types/query.js';
-import { queryNotes } from '../index/fts.js';
+import { queryNotes } from '../index/query.js';
 import {
   renderList,
   renderTable,

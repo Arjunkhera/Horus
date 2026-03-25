@@ -182,12 +182,11 @@ async function main(): Promise<void> {
     db.upsertType(type);
   }
 
-  // Attempt Typesense bootstrap (non-fatal — degrades to FTS5)
+  // Attempt Typesense bootstrap (non-fatal — degrades to filter-only queries)
   const typesenseClient = await initTypesense();
 
-  // Initialize search engine
+  // Initialize search engine (Typesense only — FTS5 removed)
   const { engine: searchEngine, mode: searchMode } = await createSearchEngine(
-    db.raw,
     typesenseClient ?? undefined,
   );
   process.stderr.write(

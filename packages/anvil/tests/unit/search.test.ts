@@ -112,7 +112,7 @@ describe('anvil_search', () => {
     };
   });
 
-  it('performs FTS-only search and returns ranked results', async () => {
+  it('returns error for text query when no search engine configured', async () => {
     const input: SearchInput = {
       query: 'implementation',
       limit: 10,
@@ -120,25 +120,10 @@ describe('anvil_search', () => {
     };
 
     const result = await handleSearch(input, ctx);
-    expect('error' in result).toBe(false);
-    if ('error' in result) return;
-
-    // Should find notes with "implementation" in title or body
-    expect(result.results.length).toBeGreaterThan(0);
-    expect(result.total).toBeGreaterThan(0);
-
-    // Notes should have FTS scores
-    const withScores = result.results.filter((r) => r.score !== null && r.score !== undefined);
-    expect(withScores.length).toBeGreaterThan(0);
-
-    // Verify metadata is populated
-    for (const searchResult of result.results) {
-      expect(searchResult.noteId).toBeDefined();
-      expect(searchResult.type).toBeDefined();
-      expect(searchResult.title).toBeDefined();
-      expect(Array.isArray(searchResult.tags)).toBe(true);
-      expect(searchResult.modified).toBeDefined();
-    }
+    // Without a search engine, text queries should return an error
+    expect('error' in result).toBe(true);
+    if (!('error' in result)) return;
+    expect(result.code).toBe('SERVER_ERROR');
   });
 
   it('performs filter-only search by type', async () => {
@@ -162,7 +147,7 @@ describe('anvil_search', () => {
     }
   });
 
-  it('performs combined search with text query and type filter', async () => {
+  it('returns error for combined query+filter when no search engine configured', async () => {
     const input: SearchInput = {
       query: 'implementation',
       type: 'task',
@@ -171,16 +156,10 @@ describe('anvil_search', () => {
     };
 
     const result = await handleSearch(input, ctx);
-    expect('error' in result).toBe(false);
-    if ('error' in result) return;
-
-    // Should find task notes with "implementation"
-    expect(result.results.length).toBeGreaterThan(0);
-
-    // All results should be of type 'task'
-    for (const searchResult of result.results) {
-      expect(searchResult.type).toBe('task');
-    }
+    // Without a search engine, text queries should return an error
+    expect('error' in result).toBe(true);
+    if (!('error' in result)) return;
+    expect(result.code).toBe('SERVER_ERROR');
   });
 
   it('filters by status', async () => {
@@ -307,7 +286,7 @@ describe('anvil_search', () => {
     expect(result.results.length).toBeGreaterThan(0);
   });
 
-  it('returns empty results for nonexistent search term', async () => {
+  it('returns error for nonexistent search term when no search engine configured', async () => {
     const input: SearchInput = {
       query: 'xyzabc123notfound',
       limit: 10,
@@ -315,12 +294,10 @@ describe('anvil_search', () => {
     };
 
     const result = await handleSearch(input, ctx);
-    expect('error' in result).toBe(false);
-    if ('error' in result) return;
-
-    // Should return empty results
-    expect(result.results).toEqual([]);
-    expect(result.total).toBe(0);
+    // Without a search engine, text queries should return an error
+    expect('error' in result).toBe(true);
+    if (!('error' in result)) return;
+    expect(result.code).toBe('SERVER_ERROR');
   });
 
   it('respects pagination limit', async () => {
@@ -414,9 +391,10 @@ describe('anvil_search', () => {
     expect(result.total).toBe(0);
   });
 
-  it('populates all SearchResult fields correctly', async () => {
+  it('populates all SearchResult fields correctly for filter-only query', async () => {
     const input: SearchInput = {
-      query: 'implementation',
+      type: 'task',
+      status: 'active',
       limit: 10,
       offset: 0,
     };

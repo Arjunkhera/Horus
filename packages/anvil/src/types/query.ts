@@ -25,7 +25,7 @@ export type ScopeFilter = {
  * All fields are optional and composable via AND semantics.
  */
 export type QueryFilter = {
-  /** Free-text query (passed to FTS5) */
+  /** Free-text query (passed to search engine) */
   query?: string;
   type?: string;
   status?: StatusFilter;

@@ -2,7 +2,7 @@
 FastAPI application entry point for Vault Knowledge Service.
 
 Sets up the REST API with:
-- Typesense search engine initialization (with FTS5 fallback)
+- Typesense search engine initialization (with FilesystemStore fallback)
 - Collection setup (shared + workspace)
 - Schema loader initialization
 - Health and status endpoints
@@ -21,11 +21,9 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-import os
-
 from .config.settings import load_settings
-from .layer1.fts_engine import FtsSearchEngine
 from .layer1.typesense_engine import TypesenseSearchEngine
+from .layer1.filesystem_store import FilesystemStore
 from .layer2.schema import SchemaLoader
 from .api.routes import router, get_store, get_schema_loader, get_settings
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
@@ -56,13 +54,10 @@ def _build_store(settings: any, collection_paths: dict) -> any:
         return ts_store, True
     except Exception as exc:
         logger.warning(
-            "Typesense unavailable (%s) — falling back to FTS5 search engine", exc
+            "Typesense unavailable (%s) — falling back to FilesystemStore", exc
         )
-        fts_store = FtsSearchEngine(
-            db_path=os.path.join(settings.workspace_path, ".vault", "fts5_index.db"),
-            collection_paths=collection_paths,
-        )
-        return fts_store, False
+        fs_store = FilesystemStore(collection_paths=collection_paths)
+        return fs_store, False
 
 
 @asynccontextmanager
@@ -71,7 +66,7 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for FastAPI app.
 
     Handles startup and shutdown:
-    - Startup: Initialize Typesense (or FTS5 fallback), setup collections, start sync daemon
+    - Startup: Initialize Typesense (or FilesystemStore fallback), setup collections, start sync daemon
     - Shutdown: Cleanup resources
     """
     # ============================================================================
@@ -102,7 +97,7 @@ async def lifespan(app: FastAPI):
     logger.info("Collections setup complete")
 
     # Build initial index
-    engine_name = "Typesense" if using_typesense else "FTS5"
+    engine_name = "Typesense" if using_typesense else "FilesystemStore"
     logger.info("Building %s index...", engine_name)
     try:
         store.reindex()
