@@ -12,16 +12,139 @@ import { startHttp } from './mcp/transports/http.js';
 import { createTypeWatcher } from './watcher/type-watcher.js';
 import { createSearchEngine } from './core/search/index.js';
 import { AnvilWatcher } from './storage/watcher.js';
+import { loadSearchConfig, createClient, bootstrapCollection } from '@horus/search';
 import type { ToolContext } from './tools/create-note.js';
 import type { TypeWatcher } from './watcher/type-watcher.js';
+import type { TypesenseClient } from '@horus/search';
+
+/**
+ * Attempt to initialise Typesense: connect, bootstrap collection, return client.
+ * Returns null if Typesense is unavailable — Anvil will fall back to FTS5.
+ */
+async function initTypesense(): Promise<TypesenseClient | null> {
+  try {
+    const cfg = loadSearchConfig();
+    const client = createClient(cfg);
+    await bootstrapCollection(client);
+    process.stderr.write(
+      JSON.stringify({
+        level: 'info',
+        message: `Typesense connected (${cfg.host}:${cfg.port})`,
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+    return client;
+  } catch (err) {
+    process.stderr.write(
+      JSON.stringify({
+        level: 'warn',
+        message: `Typesense unavailable — falling back to FTS5: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+    return null;
+  }
+}
+
+/**
+ * Full re-index: push all notes currently in SQLite into Typesense.
+ * Uses the Typesense import API for bulk efficiency.
+ */
+async function reindexToTypesense(
+  db: AnvilDatabase,
+  client: TypesenseClient,
+): Promise<void> {
+  try {
+    const rows = db.raw.getAll<{
+      noteId: string;
+      title: string;
+      bodyText: string;
+      type: string;
+      status: string | null;
+      priority: string | null;
+      created: string;
+      modified: string;
+    }>(
+      `SELECT
+        note_id as noteId,
+        title,
+        body_text as bodyText,
+        type,
+        status,
+        priority,
+        created,
+        modified
+      FROM notes`,
+    );
+
+    if (!rows || rows.length === 0) return;
+
+    // Fetch tags per note
+    const allTags = db.raw.getAll<{ note_id: string; tag: string }>(
+      `SELECT note_id, tag FROM note_tags`,
+    );
+    const tagsMap = new Map<string, string[]>();
+    for (const row of allTags ?? []) {
+      if (!tagsMap.has(row.note_id)) tagsMap.set(row.note_id, []);
+      tagsMap.get(row.note_id)!.push(row.tag);
+    }
+
+    // Fetch project relationships per note
+    const projectRels = db.raw.getAll<{ source_id: string; target_id: string }>(
+      `SELECT source_id, target_id FROM relationships WHERE relation_type = 'project' AND target_id IS NOT NULL`,
+    );
+    const projectMap = new Map<string, string>();
+    for (const rel of projectRels ?? []) {
+      projectMap.set(rel.source_id, rel.target_id);
+    }
+
+    // Build documents
+    const BODY_TRUNCATE = 20_000;
+    const documents = rows.map((r) => ({
+      id: r.noteId,
+      source: 'anvil',
+      source_type: r.type,
+      title: r.title,
+      body: (r.bodyText ?? '').slice(0, BODY_TRUNCATE),
+      tags: tagsMap.get(r.noteId) ?? [],
+      ...(r.status ? { status: r.status } : {}),
+      ...(r.priority ? { priority: r.priority } : {}),
+      ...(projectMap.get(r.noteId) ? { project_id: projectMap.get(r.noteId) } : {}),
+      created_at: Math.floor(new Date(r.created).getTime() / 1000),
+      modified_at: Math.floor(new Date(r.modified).getTime() / 1000),
+    }));
+
+    await client
+      .collections('horus_documents')
+      .documents()
+      .import(documents as unknown as Record<string, unknown>[], { action: 'upsert' });
+
+    process.stderr.write(
+      JSON.stringify({
+        level: 'info',
+        message: `Typesense re-index complete: ${documents.length} notes`,
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+  } catch (err) {
+    process.stderr.write(
+      JSON.stringify({
+        level: 'warn',
+        message: `Typesense re-index failed: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+  }
+}
 
 /**
  * Main entry point for the Anvil MCP server
  * 1. Loads configuration from CLI args, env vars, or config file
  * 2. Initializes core components (TypeRegistry, AnvilDatabase)
- * 3. Creates the MCP server with all tool handlers
- * 4. Sets up type watcher for hot reload
- * 5. Starts the configured transport (stdio or http)
+ * 3. Attempts Typesense bootstrap (graceful degradation to FTS5 on failure)
+ * 4. Creates the MCP server with all tool handlers
+ * 5. Sets up type watcher for hot reload
+ * 6. Starts the configured transport (stdio or http)
  */
 async function main(): Promise<void> {
   // Load configuration
@@ -59,18 +182,42 @@ async function main(): Promise<void> {
     db.upsertType(type);
   }
 
-  // Initialize search engine (FTS5 via SQLite)
-  const { engine: searchEngine, mode: searchMode } = await createSearchEngine(db.raw);
-  process.stderr.write(JSON.stringify({ level: 'info', message: `Search engine: ${searchMode}`, timestamp: new Date().toISOString() }) + '\n');
+  // Attempt Typesense bootstrap (non-fatal — degrades to FTS5)
+  const typesenseClient = await initTypesense();
+
+  // Initialize search engine
+  const { engine: searchEngine, mode: searchMode } = await createSearchEngine(
+    db.raw,
+    typesenseClient ?? undefined,
+  );
+  process.stderr.write(
+    JSON.stringify({
+      level: 'info',
+      message: `Search engine: ${searchMode}`,
+      timestamp: new Date().toISOString(),
+    }) + '\n',
+  );
 
   // Create and start note watcher (startup catchup + live file watching)
   const watcher = new AnvilWatcher({
     vaultPath: config.vault_path,
     db: db.raw,
     registry,
+    typesenseClient: typesenseClient ?? undefined,
   });
   await watcher.start();
-  process.stderr.write(JSON.stringify({ level: 'info', message: 'Note watcher started (startup catchup complete)', timestamp: new Date().toISOString() }) + '\n');
+  process.stderr.write(
+    JSON.stringify({
+      level: 'info',
+      message: 'Note watcher started (startup catchup complete)',
+      timestamp: new Date().toISOString(),
+    }) + '\n',
+  );
+
+  // Startup re-index into Typesense (SQLite is up-to-date after watcher catchup)
+  if (typesenseClient) {
+    await reindexToTypesense(db, typesenseClient);
+  }
 
   // Create tool context
   const ctx: ToolContext = {
@@ -79,6 +226,7 @@ async function main(): Promise<void> {
     db,
     watcher,
     searchEngine,
+    typesenseClient: typesenseClient ?? undefined,
   };
 
   // Set up type watcher for hot reload

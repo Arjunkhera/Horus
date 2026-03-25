@@ -9,6 +9,8 @@ import { scanVault } from './file-store.js';
 import { upsertNote, deleteNote, getAllNotePaths } from '../index/indexer.js';
 import { isAnvilError } from '../types/error.js';
 import { DEFAULT_IGNORE_PATTERNS } from '../types/config.js';
+import type { TypesenseClient } from '@horus/search';
+import { pushToTypesense, deleteFromTypesense } from '../core/search/typesense-doc.js';
 
 /**
  * Watch event type with add, change, or unlink event types
@@ -28,6 +30,7 @@ export type WatcherOptions = {
   debounceMs?: number;
   ignorePatterns?: string[];
   onError?: (err: Error) => void;
+  typesenseClient?: TypesenseClient;
 };
 
 /**
@@ -142,12 +145,18 @@ export class AnvilWatcher {
           );
           if (row) {
             deleteNote(this.options.db, row.note_id);
+            if (this.options.typesenseClient) {
+              void deleteFromTypesense(this.options.typesenseClient, row.note_id);
+            }
           }
         } else {
           // add or change — re-read and re-index
           const result = await readNote(filePath);
           if (!isAnvilError(result)) {
             upsertNote(this.options.db, result.note);
+            if (this.options.typesenseClient) {
+              void pushToTypesense(this.options.typesenseClient, result.note);
+            }
           } else {
             // Log error but continue processing other files
             console.error(`[watcher] Failed to index ${filePath}:`, result.message);
@@ -205,7 +214,12 @@ export class AnvilWatcher {
           'SELECT note_id FROM notes WHERE file_path = ?',
           [filePath]
         );
-        if (row) deleteNote(this.options.db, row.note_id);
+        if (row) {
+          deleteNote(this.options.db, row.note_id);
+          if (this.options.typesenseClient) {
+            void deleteFromTypesense(this.options.typesenseClient, row.note_id);
+          }
+        }
       }
     }
 
