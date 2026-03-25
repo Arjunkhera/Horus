@@ -57,6 +57,9 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      typesense:
+        specifier: ^2.0.0
+        version: 2.1.0(@babel/runtime@7.29.2)
       vitest:
         specifier: ^1.2.1
         version: 1.6.1(@types/node@20.19.37)
@@ -106,6 +109,9 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
+      typesense:
+        specifier: ^2.0.0
+        version: 2.1.0(@babel/runtime@7.29.2)
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.37)
