@@ -214,7 +214,12 @@ export class AnvilWatcher {
           'SELECT note_id FROM notes WHERE file_path = ?',
           [filePath]
         );
-        if (row) deleteNote(this.options.db, row.note_id);
+        if (row) {
+          deleteNote(this.options.db, row.note_id);
+          if (this.options.typesenseClient) {
+            void deleteFromTypesense(this.options.typesenseClient, row.note_id);
+          }
+        }
       }
     }
 

@@ -89,6 +89,15 @@ async function reindexToTypesense(
       tagsMap.get(row.note_id)!.push(row.tag);
     }
 
+    // Fetch project relationships per note
+    const projectRels = db.raw.getAll<{ source_id: string; target_id: string }>(
+      `SELECT source_id, target_id FROM relationships WHERE relation_type = 'project' AND target_id IS NOT NULL`,
+    );
+    const projectMap = new Map<string, string>();
+    for (const rel of projectRels ?? []) {
+      projectMap.set(rel.source_id, rel.target_id);
+    }
+
     // Build documents
     const BODY_TRUNCATE = 20_000;
     const documents = rows.map((r) => ({
@@ -100,6 +109,7 @@ async function reindexToTypesense(
       tags: tagsMap.get(r.noteId) ?? [],
       ...(r.status ? { status: r.status } : {}),
       ...(r.priority ? { priority: r.priority } : {}),
+      ...(projectMap.get(r.noteId) ? { project_id: projectMap.get(r.noteId) } : {}),
       created_at: Math.floor(new Date(r.created).getTime() / 1000),
       modified_at: Math.floor(new Date(r.modified).getTime() / 1000),
     }));
