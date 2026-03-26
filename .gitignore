@@ -12,3 +12,5 @@ package-lock.json
 # stray directories created by unexpanded tilde paths
 /~/
 **/~/
+# TypeScript build output
+**/dist/
