@@ -88,6 +88,14 @@ export const UpdateNoteOutputSchema = z.object({
 
 export const SearchInputSchema = z.object({
   query: z.string().optional().describe('Free-text search query'),
+  semantic: z
+    .string()
+    .optional()
+    .describe(
+      'Natural language query for semantic (vector) search. Requires HORUS_EMBEDDING_API_KEY. ' +
+      'When combined with query, performs hybrid search (FTS + vector). ' +
+      'When used alone, performs pure semantic search.'
+    ),
   type: z.string().optional(),
   status: z.string().optional(),
   priority: z.string().optional(),

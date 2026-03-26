@@ -12,7 +12,7 @@ import { startHttp } from './mcp/transports/http.js';
 import { createTypeWatcher } from './watcher/type-watcher.js';
 import { createSearchEngine } from './core/search/index.js';
 import { AnvilWatcher } from './storage/watcher.js';
-import { loadSearchConfig, createClient, bootstrapCollection } from '@horus/search';
+import { loadSearchConfig, loadEmbeddingConfig, createClient, bootstrapCollection } from '@horus/search';
 import type { ToolContext } from './tools/create-note.js';
 import type { TypeWatcher } from './watcher/type-watcher.js';
 import type { TypesenseClient } from '@horus/search';
@@ -20,20 +20,23 @@ import type { TypesenseClient } from '@horus/search';
 /**
  * Attempt to initialise Typesense: connect, bootstrap collection, return client.
  * Returns null if Typesense is unavailable — search will be degraded to filter-only queries.
+ * Returns `{ client, migrated }` where `migrated: true` means the collection was recreated
+ * and a full re-index should follow.
  */
-async function initTypesense(): Promise<TypesenseClient | null> {
+async function initTypesense(): Promise<{ client: TypesenseClient; migrated: boolean } | null> {
   try {
     const cfg = loadSearchConfig();
+    const embeddingConfig = loadEmbeddingConfig();
     const client = createClient(cfg);
-    await bootstrapCollection(client);
+    const { migrated } = await bootstrapCollection(client, embeddingConfig);
     process.stderr.write(
       JSON.stringify({
         level: 'info',
-        message: `Typesense connected (${cfg.host}:${cfg.port})`,
+        message: `Typesense connected (${cfg.host}:${cfg.port})${embeddingConfig ? ' — embeddings enabled' : ''}${migrated ? ' — schema migrated, re-index required' : ''}`,
         timestamp: new Date().toISOString(),
       }) + '\n',
     );
-    return client;
+    return { client, migrated };
   } catch (err) {
     process.stderr.write(
       JSON.stringify({
@@ -183,7 +186,8 @@ async function main(): Promise<void> {
   }
 
   // Attempt Typesense bootstrap (non-fatal — degrades to filter-only queries)
-  const typesenseClient = await initTypesense();
+  const typesenseResult = await initTypesense();
+  const typesenseClient = typesenseResult?.client ?? null;
 
   // Initialize search engine (Typesense only — FTS5 removed)
   const { engine: searchEngine, mode: searchMode } = await createSearchEngine(

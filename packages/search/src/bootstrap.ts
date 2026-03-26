@@ -38,57 +38,57 @@ const BASE_SCHEMA: CollectionCreateSchema = {
   default_sorting_field: 'modified_at',
 };
 
+export interface BootstrapResult {
+  /** True if the collection was freshly created or migrated — caller should re-index. */
+  migrated: boolean;
+}
+
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 
 const MAX_RETRIES = 5;
 const RETRY_INTERVAL_MS = 2000;
 
 /**
- * Ensure the horus_documents collection exists in Typesense.
- * Idempotent — skips creation if the collection already exists.
+ * Ensure the horus_documents collection exists in Typesense with the correct schema.
  *
- * When an EmbeddingConfig is provided, an auto-embedding field is appended
- * to the schema so Typesense generates vector embeddings on ingest.
+ * Migration: if the collection already exists but the embedding field state does not
+ * match the desired config (e.g. key added or removed), the collection is dropped and
+ * recreated. Caller should re-index when `migrated: true` is returned.
  *
  * Retries up to 5 times with 2 s intervals on connection errors.
  */
 export async function bootstrapCollection(
   client: TypesenseClient,
   embeddingConfig?: EmbeddingConfig | null,
-): Promise<void> {
-  const schema = structuredClone(BASE_SCHEMA);
-
-  if (embeddingConfig) {
-    schema.fields!.push({
-      name: 'embedding',
-      type: 'float[]',
-      embed: {
-        from: ['title', 'body'],
-        model_config: {
-          model_name: `${embeddingConfig.provider}/${embeddingConfig.model}`,
-          api_key: embeddingConfig.apiKey,
-        },
-      },
-    } as CollectionCreateSchema['fields'][number]);
-  }
+): Promise<BootstrapResult> {
+  const schema = buildSchema(embeddingConfig);
 
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      // Check if the collection already exists
       const collections = await client.collections().retrieve();
-      const exists = collections.some((c: { name: string }) => c.name === COLLECTION_NAME);
-      if (exists) {
-        return; // Already bootstrapped — nothing to do
+      const existing = collections.find((c: { name: string }) => c.name === COLLECTION_NAME);
+
+      if (existing) {
+        const hasEmbedding = (existing as { fields?: Array<{ name: string }> }).fields?.some(
+          (f) => f.name === 'embedding',
+        ) ?? false;
+        const wantsEmbedding = embeddingConfig != null;
+
+        if (hasEmbedding === wantsEmbedding) {
+          return { migrated: false }; // Schema matches — nothing to do
+        }
+
+        // Mismatch: drop and recreate so embedding field aligns with config
+        await client.collections(COLLECTION_NAME).delete();
       }
 
       await client.collections().create(schema);
-      return; // Success
+      return { migrated: true };
     } catch (err: unknown) {
       lastError = err;
 
-      // Only retry on connection-level errors (ECONNREFUSED, timeout, etc.)
       const isConnectionError =
         err instanceof Error &&
         (err.message.includes('ECONNREFUSED') ||
@@ -106,4 +106,24 @@ export async function bootstrapCollection(
   }
 
   throw lastError;
+}
+
+function buildSchema(embeddingConfig?: EmbeddingConfig | null): CollectionCreateSchema {
+  const schema = structuredClone(BASE_SCHEMA);
+
+  if (embeddingConfig) {
+    schema.fields!.push({
+      name: 'embedding',
+      type: 'float[]',
+      embed: {
+        from: ['title', 'body'],
+        model_config: {
+          model_name: `${embeddingConfig.provider}/${embeddingConfig.model}`,
+          api_key: embeddingConfig.apiKey,
+        },
+      },
+    } as CollectionCreateSchema['fields'][number]);
+  }
+
+  return schema;
 }
