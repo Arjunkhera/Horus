@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 def _build_store(settings: any, collection_paths: dict) -> any:
     """
-    Attempt to create a TypesenseSearchEngine; fall back to FtsSearchEngine on failure.
+    Attempt to create a TypesenseSearchEngine; fall back to FilesystemStore on failure.
 
     Returns the store instance and a bool indicating whether Typesense is active.
     """

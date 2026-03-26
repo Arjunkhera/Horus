@@ -292,6 +292,12 @@ export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman
       - PORT=8000
       - GITHUB_TOKEN=${token}
       - GITHUB_API_HOST=${apiHost}
+      - TYPESENSE_HOST=typesense
+      - TYPESENSE_PORT=8108
+      - TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
+    depends_on:
+      typesense:
+        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped

@@ -43,6 +43,12 @@ services:
       # Runtime detection — entrypoints use this to conditionally run chown/chmod
       # (needed for Podman user-namespace remapping, harmful on Docker Desktop macOS)
       - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
+      - TYPESENSE_HOST=typesense
+      - TYPESENSE_PORT=8108
+      - TYPESENSE_API_KEY=${TYPESENSE_API_KEY:-horus-local-key}
+    depends_on:
+      typesense:
+        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -84,6 +90,12 @@ services:
       - PORT=8000
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
+      - TYPESENSE_HOST=typesense
+      - TYPESENSE_PORT=8108
+      - TYPESENSE_API_KEY=${TYPESENSE_API_KEY:-horus-local-key}
+    depends_on:
+      typesense:
+        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -223,10 +235,15 @@ services:
       - FORGE_MANAGED_REPOS_PATH=/data/horus-repos
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
+      - TYPESENSE_HOST=typesense
+      - TYPESENSE_PORT=8108
+      - TYPESENSE_API_KEY=${TYPESENSE_API_KEY:-horus-local-key}
     depends_on:
       anvil:
         condition: service_healthy
       vault:
+        condition: service_healthy
+      typesense:
         condition: service_healthy
     networks:
       - horus-net

@@ -1,5 +1,5 @@
 // Sync daemon — runs as background async tasks inside the MCP server process
-// Handles: git pull loop + filesystem watcher → FTS re-index
+// Handles: git pull loop + filesystem watcher → Typesense re-index
 
 import chokidar from 'chokidar';
 import type { SimpleGit } from 'simple-git';

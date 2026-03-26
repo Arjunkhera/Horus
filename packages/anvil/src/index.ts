@@ -19,7 +19,7 @@ import type { TypesenseClient } from '@horus/search';
 
 /**
  * Attempt to initialise Typesense: connect, bootstrap collection, return client.
- * Returns null if Typesense is unavailable — Anvil will fall back to FTS5.
+ * Returns null if Typesense is unavailable — search will be degraded to filter-only queries.
  */
 async function initTypesense(): Promise<TypesenseClient | null> {
   try {
@@ -38,7 +38,7 @@ async function initTypesense(): Promise<TypesenseClient | null> {
     process.stderr.write(
       JSON.stringify({
         level: 'warn',
-        message: `Typesense unavailable — falling back to FTS5: ${err instanceof Error ? err.message : String(err)}`,
+        message: `Typesense unavailable — search degraded to filter-only: ${err instanceof Error ? err.message : String(err)}`,
         timestamp: new Date().toISOString(),
       }) + '\n',
     );
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     db.upsertType(type);
   }
 
-  // Attempt Typesense bootstrap (non-fatal — degrades to FTS5)
+  // Attempt Typesense bootstrap (non-fatal — degrades to filter-only queries)
   const typesenseClient = await initTypesense();
 
   // Initialize search engine
