@@ -263,8 +263,60 @@ export async function handleSearch(
     let searchResults: Array<{ noteId: string; score?: number; snippet?: string }> = [];
     let total = 0;
 
-    // Case 1: Query + Filters -> semantic search candidates filtered by structured criteria
-    if (input.query && hasActiveFilters) {
+    // Case S: semantic param present -> vector or hybrid search via Typesense embedding field
+    if (input.semantic) {
+      if (!ctx.typesenseClient) {
+        return makeError(
+          ERROR_CODES.SERVER_ERROR,
+          'Semantic search requires Typesense with HORUS_EMBEDDING_API_KEY configured'
+        );
+      }
+      const page = Math.floor(offset / limit) + 1;
+      // Hybrid when query also provided, pure vector otherwise
+      const queryBy = input.query ? 'title,body,embedding' : 'embedding';
+      const q = input.query ?? input.semantic;
+      try {
+        const response = await ctx.typesenseClient
+          .collections('horus_documents')
+          .documents()
+          .search({
+            q,
+            query_by: queryBy,
+            filter_by: 'source:=anvil',
+            per_page: hasActiveFilters ? limit * 5 : limit,
+            page,
+            highlight_full_fields: 'title',
+            snippet_threshold: 30,
+          });
+        const hits = (response.hits ?? []) as Array<{
+          document: { id: string };
+          text_match: number;
+          highlights?: Array<{ snippet?: string }>;
+        }>;
+        let resolved = resolveSemanticNoteIds(
+          ctx.db.raw,
+          hits.map((h) => ({ noteId: h.document.id, score: h.text_match, snippet: h.highlights?.[0]?.snippet ?? '' })),
+          ctx.vaultPath
+        );
+        if (hasActiveFilters) {
+          const filteredIds = filterNoteIds(ctx.db.raw, resolved.map((r) => r.noteId), filter);
+          const filteredSet = new Set(filteredIds);
+          resolved = resolved.filter((r) => filteredSet.has(r.noteId));
+        }
+        total = (response.found as number | undefined) ?? resolved.length;
+        searchResults = hasActiveFilters
+          ? resolved.slice(0, limit)
+          : resolved;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const hint = msg.includes('embedding') || msg.includes('field')
+          ? ' — ensure HORUS_EMBEDDING_API_KEY is set and the service has restarted'
+          : '';
+        return makeError(ERROR_CODES.SERVER_ERROR, `Semantic search failed: ${msg}${hint}`);
+      }
+    }
+    // Case 1: Query + Filters -> text search candidates filtered by structured criteria
+    else if (input.query && hasActiveFilters) {
       if (ctx.searchEngine) {
         try {
           // Fetch more candidates than needed to allow for filter attrition

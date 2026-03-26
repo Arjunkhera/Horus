@@ -121,13 +121,17 @@ export function createMcpServer(ctx: ToolContext): Server {
     {
       name: 'anvil_search',
       description:
-        'Search notes by free-text query and/or structured filters. Supports text search, type filtering, tags (AND semantics), and date ranges.',
+        'Search notes by free-text query and/or structured filters. Supports text search, type filtering, tags (AND semantics), date ranges, and semantic (vector) search when HORUS_EMBEDDING_API_KEY is configured.',
       inputSchema: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
             description: 'Free-text search query. Omit entirely for unfiltered search — do not pass "*".',
+          },
+          semantic: {
+            type: 'string',
+            description: 'Natural language query for semantic (vector) search. Requires HORUS_EMBEDDING_API_KEY. Combine with query for hybrid FTS+vector search.',
           },
           type: {
             type: 'string',
