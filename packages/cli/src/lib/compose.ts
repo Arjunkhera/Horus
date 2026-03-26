@@ -99,6 +99,7 @@ const FORGE_SERVICE = `\
       - FORGE_HOST_VAULT_URL=http://localhost:\${VAULT_MCP_PORT:-8300}
       - FORGE_HOST_FORGE_URL=http://localhost:\${FORGE_PORT:-8200}
       - FORGE_SCAN_PATHS=\${FORGE_SCAN_PATHS:-/data/repos}
+      - FORGE_SESSION_TTL_MS=\${FORGE_SESSION_TTL_MS:-1800000}
       - GITHUB_TOKEN=\${GITHUB_TOKEN:-}
       - TYPESENSE_HOST=typesense
       - TYPESENSE_PORT=8108
