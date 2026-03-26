@@ -14,9 +14,9 @@ export type ListItem = {
   due?: string;
   tags: string[];
   modified: string;
-  /** Ranking score (present for FTS search results) */
+  /** Ranking score (present for Typesense search results) */
   score?: number;
-  /** Text excerpt with match context (present for FTS search results) */
+  /** Text excerpt with match context (present for Typesense search results) */
   snippet?: string;
 };
 

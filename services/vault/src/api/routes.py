@@ -147,7 +147,7 @@ def _find_repo_profile(repo: str, store: SearchStore, doc_cache: dict) -> "PageS
                 return to_page_summary(parsed, result.file_path)
         # If filter returned no match, fall through to text search below
 
-    # --- Text search fallback (FTS5 or Typesense with no exact match) ---
+    # --- Text search fallback (Typesense keyword search with no exact match) ---
     results = store.search(repo, limit=20)
     for result in results:
         content = doc_cache.get(result.file_path)

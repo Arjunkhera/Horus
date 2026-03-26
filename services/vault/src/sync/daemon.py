@@ -156,7 +156,7 @@ class WorkspaceChangeHandler(FileSystemEventHandler):
     For TypesenseSearchEngine stores: performs per-file upsert/delete so that
     search results are updated within seconds without a full re-index.
 
-    For other stores (e.g. FtsSearchEngine): debounced full re-index (original
+    For other stores (e.g. FilesystemStore): debounced full re-index (original
     behaviour).
 
     Ignores changes in common exclude paths (.git, node_modules, etc).
@@ -256,7 +256,7 @@ class WorkspaceChangeHandler(FileSystemEventHandler):
         logger.debug("Typesense delete: %s", file_path)
 
     # ------------------------------------------------------------------
-    # Debounced full re-index (FTS5 fallback path)
+    # Debounced full re-index (FilesystemStore fallback path)
     # ------------------------------------------------------------------
 
     async def _debounced_reindex(self) -> None:
