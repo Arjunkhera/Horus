@@ -11,8 +11,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_DIR="$SCRIPT_DIR/packages/cli"
 
-echo "Building @arkhera30/cli..."
+echo "Installing dependencies..."
 cd "$SCRIPT_DIR"
+pnpm install --frozen-lockfile
+
+echo "Building @arkhera30/cli..."
 pnpm --filter @arkhera30/cli run build
 
 echo ""
