@@ -497,7 +497,7 @@ export const setupCommand = new Command('setup')
     console.log('');
     console.log(chalk.bold('Starting Horus services...'));
     try {
-      await composeStreaming(runtime, ['up', '-d']);
+      await composeStreaming(runtime, ['up', '-d', '--remove-orphans']);
     } catch (error) {
       console.log(chalk.red('Failed to start services.'));
       console.log(chalk.dim((error as Error).message));

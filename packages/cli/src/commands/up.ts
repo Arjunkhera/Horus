@@ -52,7 +52,7 @@ export const upCommand = new Command('up')
     try {
       // When images were pulled, force-recreate containers so the new image is used.
       // Without --force-recreate, Docker skips recreation if the :latest tag matches.
-      const upArgs = opts.pull ? ['up', '-d', '--force-recreate'] : ['up', '-d'];
+      const upArgs = opts.pull ? ['up', '-d', '--force-recreate', '--remove-orphans'] : ['up', '-d', '--remove-orphans'];
       await composeStreaming(runtime, upArgs);
     } catch (error) {
       console.log(chalk.red('Failed to start services.'));

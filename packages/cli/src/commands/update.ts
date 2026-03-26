@@ -178,7 +178,7 @@ export const updateCommand = new Command('update')
       console.log('');
       console.log(chalk.bold('Restarting from snapshot (using cached images)...'));
       try {
-        await composeStreaming(runtime, ['up', '-d']);
+        await composeStreaming(runtime, ['up', '-d', '--remove-orphans']);
       } catch (error) {
         console.log(chalk.red('Failed to restart services.'));
         console.log(chalk.dim((error as Error).message));
@@ -280,7 +280,7 @@ export const updateCommand = new Command('update')
     console.log('');
     console.log(chalk.bold('Restarting services...'));
     try {
-      await composeStreaming(runtime, ['up', '-d', '--force-recreate']);
+      await composeStreaming(runtime, ['up', '-d', '--force-recreate', '--remove-orphans']);
     } catch (error) {
       console.log(chalk.red('Failed to restart services.'));
       console.log(chalk.dim((error as Error).message));
