@@ -145,6 +145,9 @@ export class AnvilDatabase {
 
     const db = new AnvilDb(sqlDb);
     db.run('PRAGMA foreign_keys = ON');
+    // WAL mode improves crash recovery: readers don't block writers and the
+    // journal survives unclean shutdown better than the default DELETE mode.
+    db.run('PRAGMA journal_mode=WAL');
 
     const instance = new AnvilDatabase(db);
     instance.initialize();

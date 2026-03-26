@@ -241,6 +241,71 @@ describe('Integration: CRUD Operations', () => {
     }
   });
 
+  describe('disk fallback (post-restart self-healing)', () => {
+    it('should get a note that exists on disk but is missing from the SQLite index', async () => {
+      // Create a note normally (goes to both disk and SQLite)
+      const createResult = await handleCreateNote(
+        { type: 'note', title: 'Fallback Test Note', content: 'body content' },
+        ctx
+      );
+      expect(!isAnvilError(createResult)).toBe(true);
+      if (isAnvilError(createResult)) return;
+
+      const { noteId } = createResult;
+
+      // Simulate a stale index by deleting the row from SQLite
+      ctx.db.raw.run('DELETE FROM note_tags WHERE note_id = ?', [noteId]);
+      ctx.db.raw.run('DELETE FROM relationships WHERE source_id = ?', [noteId]);
+      ctx.db.raw.run('DELETE FROM notes WHERE note_id = ?', [noteId]);
+
+      // get_note should still succeed via disk fallback
+      const getResult = await handleGetNote({ noteId }, ctx);
+      expect(!isAnvilError(getResult)).toBe(true);
+      if (!isAnvilError(getResult)) {
+        expect(getResult.noteId).toBe(noteId);
+        expect(getResult.title).toBe('Fallback Test Note');
+      }
+
+      // Index should now be healed — a direct SQLite lookup should work too
+      const row = ctx.db.raw.getOne<{ note_id: string }>(
+        'SELECT note_id FROM notes WHERE note_id = ?',
+        [noteId]
+      );
+      expect(row).not.toBeNull();
+    });
+
+    it('should update a note that exists on disk but is missing from the SQLite index', async () => {
+      // Create a note normally
+      const createResult = await handleCreateNote(
+        { type: 'task', title: 'Fallback Update Task', fields: { status: 'open' } },
+        ctx
+      );
+      expect(!isAnvilError(createResult)).toBe(true);
+      if (isAnvilError(createResult)) return;
+
+      const { noteId } = createResult;
+
+      // Simulate stale index
+      ctx.db.raw.run('DELETE FROM note_tags WHERE note_id = ?', [noteId]);
+      ctx.db.raw.run('DELETE FROM relationships WHERE source_id = ?', [noteId]);
+      ctx.db.raw.run('DELETE FROM notes WHERE note_id = ?', [noteId]);
+
+      // update_note should succeed via disk fallback
+      const updateResult = await handleUpdateNote(
+        { noteId, fields: { status: 'in-progress' } },
+        ctx
+      );
+      expect(!isAnvilError(updateResult)).toBe(true);
+
+      // Verify the update actually persisted
+      const getResult = await handleGetNote({ noteId }, ctx);
+      expect(!isAnvilError(getResult)).toBe(true);
+      if (!isAnvilError(getResult)) {
+        expect(getResult.status).toBe('in-progress');
+      }
+    });
+  });
+
   it('should use template body when no content is provided for templated types', async () => {
     const input: CreateNoteInput = {
       type: 'story',

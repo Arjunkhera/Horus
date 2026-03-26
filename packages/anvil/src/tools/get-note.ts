@@ -6,8 +6,8 @@ import type {
   AnvilError,
 } from '../types/index.js';
 import { makeError, ERROR_CODES } from '../types/index.js';
-import { readNote } from '../storage/file-store.js';
-import { getNote, getForwardRelationships, getReverseRelationships } from '../index/indexer.js';
+import { readNote, findNoteOnDisk } from '../storage/file-store.js';
+import { getNote, upsertNote, getForwardRelationships, getReverseRelationships } from '../index/indexer.js';
 import type { ToolContext } from './create-note.js';
 
 /**
@@ -19,18 +19,28 @@ export async function handleGetNote(
   ctx: ToolContext
 ): Promise<NoteWithRelationships | AnvilError> {
   try {
-    // 1. Look up note in SQLite to get filePath
-    const noteMetadata = getNote(ctx.db.raw, input.noteId);
+    // 1. Look up note in SQLite to get filePath.
+    // If the index misses it (e.g. post-restart before catchup completes or after
+    // an unclean shutdown), fall back to a vault scan and re-index on the fly.
+    let noteMetadata = getNote(ctx.db.raw, input.noteId);
     if (!noteMetadata) {
-      return makeError(
-        ERROR_CODES.NOT_FOUND,
-        `Note not found: ${input.noteId}`
-      );
+      const diskResult = await findNoteOnDisk(ctx.vaultPath, input.noteId);
+      if (!diskResult || 'error' in diskResult) {
+        return makeError(
+          ERROR_CODES.NOT_FOUND,
+          `Note not found: ${input.noteId}`
+        );
+      }
+      upsertNote(ctx.db.raw, diskResult.note);
+      noteMetadata = getNote(ctx.db.raw, input.noteId);
+      if (!noteMetadata) {
+        return makeError(
+          ERROR_CODES.NOT_FOUND,
+          `Note not found: ${input.noteId}`
+        );
+      }
     }
 
-    // We need the filePath. If it's not in metadata, we can't proceed.
-    // The indexer stores filePath in the notes table, but we need to get it.
-    // Let's query for it directly.
     const noteRow = ctx.db.raw.getOne<{ file_path: string }>(
       `SELECT file_path FROM notes WHERE note_id = ?`,
       [input.noteId]
