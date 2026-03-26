@@ -42,6 +42,11 @@ testEnvCommand
     const dataDir = config.data_dir;
     const testCfg = loadTestEnvConfig(dataDir);
 
+    // Resolve vault names from config for slot dirs and compose env
+    const vaultNames = Object.keys(config.vaults).sort();
+    const defaultVaultEntry = Object.entries(config.vaults).find(([, v]) => v.default);
+    const defaultVaultName = defaultVaultEntry?.[0] ?? vaultNames[0] ?? 'default';
+
     const spinner = ora('Detecting runtime...').start();
     let runtime;
     try {
@@ -70,7 +75,7 @@ testEnvCommand
 
     // Create isolated data directories
     const dirSpinner = ora(`Creating slot-${slot} data directories...`).start();
-    createSlotDirs(slotDataPath);
+    createSlotDirs(slotDataPath, vaultNames);
     dirSpinner.succeed(`Data directory: ${chalk.dim(slotDataPath)}`);
 
     // Pre-seed notes dir so Anvil finds a valid git repo instead of HTTPS-cloning
@@ -97,7 +102,7 @@ testEnvCommand
     // Start shadow stack
     const upSpinner = ora(`Starting shadow stack (project ${chalk.cyan(project)})...`).start();
     try {
-      await composeUp(runtime, project, ports, slotDataPath);
+      await composeUp(runtime, project, ports, slotDataPath, defaultVaultName);
       upSpinner.succeed(`Shadow stack started`);
     } catch (error) {
       upSpinner.fail('Failed to start shadow stack');
@@ -120,7 +125,7 @@ testEnvCommand
       healthSpinner.succeed('All services healthy');
     } catch (error) {
       healthSpinner.fail('Health check failed');
-      await composeDown(runtime, project, ports, slotDataPath);
+      await composeDown(runtime, project, ports, slotDataPath, defaultVaultName);
       removeLock(dataDir, slot);
       removeSlotDirs(slotDataPath);
       console.error((error as Error).message);
@@ -166,6 +171,11 @@ testEnvCommand
     const dataDir = config.data_dir;
     const testCfg = loadTestEnvConfig(dataDir);
 
+    // Resolve default vault name from config
+    const vaultNames = Object.keys(config.vaults).sort();
+    const defaultVaultEntry = Object.entries(config.vaults).find(([, v]) => v.default);
+    const defaultVaultName = defaultVaultEntry?.[0] ?? vaultNames[0] ?? 'default';
+
     // Resolve slot
     let slot: number;
     if (opts.slot !== undefined) {
@@ -200,7 +210,7 @@ testEnvCommand
     // Stop compose
     const downSpinner = ora(`Stopping ${chalk.cyan(project)}...`).start();
     try {
-      await composeDown(runtime, project, ports, slotDataPath);
+      await composeDown(runtime, project, ports, slotDataPath, defaultVaultName);
       downSpinner.succeed('Shadow stack stopped');
     } catch {
       downSpinner.warn('Failed to stop cleanly (continuing cleanup)');

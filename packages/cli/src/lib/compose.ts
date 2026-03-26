@@ -193,17 +193,22 @@ const HORUS_UI_SERVICE = `\
       start_period: 30s
       retries: 3`;
 
-// ── Static test compose overlay ──────────────────────────────────────────────
+// ── Test compose overlay generation ──────────────────────────────────────────
 
 /**
- * Static Docker Compose override for integration testing (shadow stack).
+ * Generate Docker Compose override for integration testing (shadow stack).
  * Remaps ports and volumes to per-slot test values via TEST_PORT_* and
  * TEST_DATA_PATH env vars set by `horus test-env acquire`.
  *
- * This is written to ~/Horus/docker-compose.test.yml by `installComposeFile()`
- * so that `horus test-env acquire` can find it at runtime.
+ * The vault service name is read from config so it matches the dynamically
+ * generated base compose file.
  */
-const TEST_COMPOSE_CONTENT = `# ─────────────────────────────────────────────────────────────────────────────
+export function generateTestComposeFile(config: Config): string {
+  const vaultEntries = Object.entries(config.vaults).sort(([a], [b]) => a.localeCompare(b));
+  const defaultVaultEntry = vaultEntries.find(([, v]) => v.default);
+  const vaultName = defaultVaultEntry ? defaultVaultEntry[0] : (vaultEntries[0]?.[0] ?? 'default');
+
+  return `# ─────────────────────────────────────────────────────────────────────────────
 # Horus — Shadow Stack Overlay for Integration Testing
 # ─────────────────────────────────────────────────────────────────────────────
 # Usage (managed by \`horus test-env acquire\`):
@@ -216,9 +221,6 @@ const TEST_COMPOSE_CONTENT = `# ────────────────
 #
 # All TEST_PORT_* and TEST_DATA_PATH are set by \`horus test-env acquire\`.
 # Slot 0 defaults: ports 9100-9399, data at ~/Horus/data/test-env/slot-0/
-#
-# NOTE: vault-personal is assumed as the primary vault name. If your config
-# uses a different vault name, set TEST_VAULT_NAME accordingly.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -228,11 +230,11 @@ services:
     volumes:
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/notes:/data/notes:rw"
 
-  vault-personal:
+  vault-${vaultName}:
     ports:
       - "\${TEST_PORT_VAULT_SVC:-9101}:8000"
     volumes:
-      - "\${TEST_DATA_PATH:-/tmp/horus-test}/vaults/personal:/data/knowledge-repo:rw"
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/vaults/${vaultName}:/data/knowledge-repo:rw"
 
   vault-router:
     ports:
@@ -262,6 +264,7 @@ services:
     ports:
       - "\${TEST_PORT_UI:-9260}:8400"
 `;
+}
 
 // ── Dynamic compose generation ───────────────────────────────────────────────
 
@@ -452,7 +455,7 @@ export function installComposeFile(config: Config, runtime?: 'docker' | 'podman'
   ensureHorusDir();
   const content = generateComposeFile(config, runtime);
   writeFileSync(COMPOSE_PATH, content, 'utf-8');
-  writeFileSync(COMPOSE_TEST_PATH, TEST_COMPOSE_CONTENT, 'utf-8');
+  writeFileSync(COMPOSE_TEST_PATH, generateTestComposeFile(config), 'utf-8');
 }
 
 /**

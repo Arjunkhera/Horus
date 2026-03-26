@@ -25,7 +25,7 @@ vi.mock('./config.js', () => ({
   resolveGitHubHost: () => ({ host: 'github.com', token: 'test-token' }),
 }));
 
-import { installComposeFile, generateComposeFile } from './compose.js';
+import { installComposeFile, generateComposeFile, generateTestComposeFile } from './compose.js';
 import type { Config } from './config.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
@@ -147,6 +147,22 @@ describe('installComposeFile', () => {
     const dollarSigns = content.match(/\$/g) || [];
     const dollarBraces = content.match(/\$\{/g) || [];
     expect(dollarSigns.length).toBe(dollarBraces.length);
+  });
+
+  it('test compose vault service name matches config', () => {
+    const config = makeConfig();
+    // Default config uses vault name "personal"
+    const personalContent = generateTestComposeFile(config);
+    expect(personalContent).toContain('vault-personal:');
+    expect(personalContent).toContain('vaults/personal:');
+    expect(personalContent).not.toContain('vault-default:');
+
+    // Config with vault name "default" should produce "vault-default"
+    const altConfig = { ...config, vaults: { default: { repo: '', default: true } } };
+    const defaultContent = generateTestComposeFile(altConfig);
+    expect(defaultContent).toContain('vault-default:');
+    expect(defaultContent).toContain('vaults/default:');
+    expect(defaultContent).not.toContain('vault-personal:');
   });
 
   it('does not alter main compose file generation', () => {
