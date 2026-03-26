@@ -7,7 +7,7 @@ import type {
   Note,
 } from '../types/index.js';
 import { makeError, ERROR_CODES } from '../types/index.js';
-import { readNote, writeNote } from '../storage/file-store.js';
+import { readNote, writeNote, findNoteOnDisk } from '../storage/file-store.js';
 import { getNote, upsertNote } from '../index/indexer.js';
 import { validateNote } from '../registry/validator.js';
 import type { ToolContext } from './create-note.js';
@@ -22,13 +22,26 @@ export async function handleUpdateNote(
   ctx: ToolContext
 ): Promise<UpdateNoteOutput | AnvilError> {
   try {
-    // 1. Look up note in SQLite to get filePath
-    const noteMetadata = getNote(ctx.db.raw, input.noteId);
+    // 1. Look up note in SQLite to get filePath.
+    // If the index misses it (e.g. post-restart before catchup completes or after
+    // an unclean shutdown), fall back to a vault scan and re-index on the fly.
+    let noteMetadata = getNote(ctx.db.raw, input.noteId);
     if (!noteMetadata) {
-      return makeError(
-        ERROR_CODES.NOT_FOUND,
-        `Note not found: ${input.noteId}`
-      );
+      const diskResult = await findNoteOnDisk(ctx.vaultPath, input.noteId);
+      if (!diskResult || 'error' in diskResult) {
+        return makeError(
+          ERROR_CODES.NOT_FOUND,
+          `Note not found: ${input.noteId}`
+        );
+      }
+      upsertNote(ctx.db.raw, diskResult.note);
+      noteMetadata = getNote(ctx.db.raw, input.noteId);
+      if (!noteMetadata) {
+        return makeError(
+          ERROR_CODES.NOT_FOUND,
+          `Note not found: ${input.noteId}`
+        );
+      }
     }
 
     const noteRow = ctx.db.raw.getOne<{ file_path: string }>(

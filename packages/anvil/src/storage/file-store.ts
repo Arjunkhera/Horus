@@ -311,6 +311,27 @@ export async function* scanVault(
 }
 
 /**
+ * Scan the vault to find a note by its noteId.
+ * Used as a self-healing fallback when the SQLite index misses a note that
+ * still exists on disk (e.g. after an unclean container restart).
+ * Breaks early once the note is found — does not scan every file.
+ */
+export async function findNoteOnDisk(
+  vaultRoot: string,
+  noteId: string,
+  ignorePatterns: string[] = DEFAULT_IGNORE_PATTERNS,
+): Promise<ReadResult | null> {
+  for await (const file of scanVault(vaultRoot, ignorePatterns)) {
+    const absolutePath = join(vaultRoot, file.filePath);
+    const result = await readNote(absolutePath);
+    if (!('error' in result) && result.note.noteId === noteId) {
+      return result;
+    }
+  }
+  return null;
+}
+
+/**
  * Delete a file from disk.
  * Returns structured error if not found.
  */
