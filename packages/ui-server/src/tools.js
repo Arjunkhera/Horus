@@ -64,7 +64,24 @@ async function callMcp(baseUrl, toolName, args) {
 
 export function createTools({ anvilUrl, vaultUrl, forgeUrl }) {
   return {
-    // ── Anvil (read-only) ───────────────────────────────────────────────────
+    // ── Cross-system (preferred for queries spanning Anvil + Vault + Forge) ─
+
+    horus_search: tool({
+      description: 'Search across ALL Horus systems (Anvil + Vault + Forge) via the unified Typesense index. Prefer this over system-specific search tools for cross-system queries. Optionally scope to a single source.',
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Free-text search query' },
+          source: { type: 'string', enum: ['anvil', 'vault', 'forge'], description: 'Scope to a single source system (omit for cross-system)' },
+          limit: { type: 'number', description: 'Max results (default 20)' },
+          offset: { type: 'number', description: 'Result offset for pagination (default 0)' },
+        },
+        required: ['query'],
+      }),
+      execute: async (args) => callMcp(anvilUrl, 'horus_search', args),
+    }),
+
+    // ── Anvil (read-only — use for Anvil-specific structured queries) ───────
 
     anvil_search: tool({
       description: 'Search Anvil notes by free-text query and/or structured filters. Returns matching notes with snippets.',
