@@ -16,6 +16,7 @@ import { handleListTypes } from '../tools/list-types.js';
 import { handleGetRelated } from '../tools/get-related.js';
 import { handleSyncPull } from '../tools/sync-pull.js';
 import { handleSyncPush } from '../tools/sync-push.js';
+import { handleHorusSearch } from '../tools/horus-search.js';
 import {
   CreateNoteInputSchema,
   GetNoteInputSchema,
@@ -24,6 +25,7 @@ import {
   QueryViewInputSchema,
   SyncPullInputSchema,
   SyncPushInputSchema,
+  HorusSearchInputSchema,
   CreateNoteOutputSchema,
   UpdateNoteOutputSchema,
 } from '../types/tools.js';
@@ -300,6 +302,34 @@ export function createMcpServer(ctx: ToolContext): Server {
         required: ['message'],
       },
     },
+    {
+      name: 'horus_search',
+      description:
+        'Search across all Horus systems (Anvil + Vault + Forge) via the shared Typesense index. Use this as the preferred tool for cross-system queries. Optionally scope to a single source.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Free-text search query',
+          },
+          source: {
+            type: 'string',
+            enum: ['anvil', 'vault', 'forge'],
+            description: 'Scope results to a single source system (omit for cross-system)',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of results (default: 20, max: 100)',
+          },
+          offset: {
+            type: 'number',
+            description: 'Result offset for pagination (default: 0)',
+          },
+        },
+        required: ['query'],
+      },
+    },
   ];
 
   // Register ListTools handler
@@ -484,6 +514,18 @@ export function createMcpServer(ctx: ToolContext): Server {
         case 'anvil_sync_push': {
           const input = SyncPushInputSchema.parse(args);
           const result = await handleSyncPush(input, ctx);
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'horus_search': {
+          const input = HorusSearchInputSchema.parse(args);
+          const result = await handleHorusSearch(input, ctx);
           if (isAnvilError(result)) {
             return {
               content: [{ type: 'text', text: JSON.stringify(result) }],

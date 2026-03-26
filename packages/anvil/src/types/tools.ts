@@ -100,6 +100,18 @@ export const SearchInputSchema = z.object({
   offset: z.number().int().min(0).default(0),
 });
 
+// ─── horus_search ──────────────────────────────────────────────────────────
+
+export const HorusSearchInputSchema = z.object({
+  query: z.string().min(1).describe('Free-text search query across all Horus systems'),
+  source: z
+    .enum(['anvil', 'vault', 'forge'])
+    .optional()
+    .describe('Scope results to a single source system (omit for cross-system)'),
+  limit: z.number().int().min(1).max(100).default(20),
+  offset: z.number().int().min(0).default(0),
+});
+
 // ─── anvil_query_view ──────────────────────────────────────────────────────
 
 export const QueryViewInputSchema = z.object({
@@ -151,6 +163,7 @@ export type ListTypesInput = z.infer<typeof ListTypesInputSchema>;
 export type GetRelatedInput = z.infer<typeof GetRelatedInputSchema>;
 export type SyncPullInput = z.infer<typeof SyncPullInputSchema>;
 export type SyncPushInput = z.infer<typeof SyncPushInputSchema>;
+export type HorusSearchInput = z.infer<typeof HorusSearchInputSchema>;
 
 // ─── Output schemas for sync operations ─────────────────────────────────────
 
