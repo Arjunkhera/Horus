@@ -194,10 +194,10 @@ export function findFreeSlot(
 
 // ── Data directory management ────────────────────────────────────────────────
 
-export function createSlotDirs(slotDataPath: string): void {
+export function createSlotDirs(slotDataPath: string, vaultNames: string[] = ['default']): void {
   const dirs = [
     'notes',
-    join('vaults', 'personal'),
+    ...vaultNames.map(name => join('vaults', name)),
     'registry',
     'workspaces',
     'sessions',
@@ -249,7 +249,9 @@ export function buildComposeEnv(
   runtime: Runtime,
   ports: SlotPorts,
   slotDataPath: string,
+  defaultVaultName = 'default',
 ): Record<string, string> {
+  const vaultPortEnvVar = `VAULT_REST_PORT_${defaultVaultName.toUpperCase().replace(/-/g, '_')}`;
   return {
     ...process.env as Record<string, string>,
     HORUS_RUNTIME: runtime.name,
@@ -262,7 +264,7 @@ export function buildComposeEnv(
     FORGE_PORT:               String(ports.forge),
     VAULT_MCP_PORT:           String(ports.vault_mcp),
     VAULT_ROUTER_PORT:        String(ports.vault_router),
-    VAULT_REST_PORT_PERSONAL: String(ports.vault_svc),
+    [vaultPortEnvVar]:        String(ports.vault_svc),
     TYPESENSE_PORT:           String(ports.typesense),
     UI_PORT:                  String(ports.ui),
     // TEST_PORT_* vars for overlay reference (harmless duplicates after above fix)
@@ -281,8 +283,9 @@ export async function composeUp(
   projectName: string,
   ports: SlotPorts,
   slotDataPath: string,
+  defaultVaultName = 'default',
 ): Promise<void> {
-  const env = buildComposeEnv(runtime, ports, slotDataPath);
+  const env = buildComposeEnv(runtime, ports, slotDataPath, defaultVaultName);
   const result = await execa(
     runtime.name,
     [
@@ -306,8 +309,9 @@ export async function composeDown(
   projectName: string,
   ports: SlotPorts,
   slotDataPath: string,
+  defaultVaultName = 'default',
 ): Promise<void> {
-  const env = buildComposeEnv(runtime, ports, slotDataPath);
+  const env = buildComposeEnv(runtime, ports, slotDataPath, defaultVaultName);
   await execa(
     runtime.name,
     ['compose', '-p', projectName, 'down', '--volumes', '--remove-orphans'],

@@ -258,15 +258,22 @@ describe('loadTestEnvConfig', () => {
 // ── createSlotDirs / removeSlotDirs ─────────────────────────────────────────
 
 describe('slot data directory management', () => {
-  it('createSlotDirs creates expected subdirectories', () => {
+  it('createSlotDirs creates expected subdirectories with default vault name', () => {
     const slotPath = getSlotDataPath(testDir, 0);
     createSlotDirs(slotPath);
     const expectedDirs = ['notes', 'registry', 'workspaces', 'sessions', 'typesense-data'];
     for (const dir of expectedDirs) {
       expect(existsSync(join(slotPath, dir))).toBe(true);
     }
-    // Nested vault dir
+    // Default vault dir
+    expect(existsSync(join(slotPath, 'vaults', 'default'))).toBe(true);
+  });
+
+  it('createSlotDirs creates vault dirs from provided vault names', () => {
+    const slotPath = getSlotDataPath(testDir, 0);
+    createSlotDirs(slotPath, ['personal', 'work']);
     expect(existsSync(join(slotPath, 'vaults', 'personal'))).toBe(true);
+    expect(existsSync(join(slotPath, 'vaults', 'work'))).toBe(true);
   });
 
   it('removeSlotDirs removes directory recursively', () => {
