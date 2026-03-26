@@ -12,12 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_DIR="$SCRIPT_DIR/packages/cli"
 
 echo "Building @arkhera30/cli..."
-cd "$CLI_DIR"
-npm install --silent
-npm run build
+cd "$SCRIPT_DIR"
+pnpm --filter @arkhera30/cli run build
 
 echo ""
 echo "Publishing to npm..."
+cd "$CLI_DIR"
 npm publish
 
 echo ""
