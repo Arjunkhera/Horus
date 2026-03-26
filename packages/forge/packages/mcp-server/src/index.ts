@@ -768,7 +768,7 @@ export async function startMcpServerHttp(opts: HttpServerOptions): Promise<void>
   const { port, host, workspaceRoot = process.env.FORGE_WORKSPACE_PATH ?? process.cwd() } = opts;
 
   // Session registry: maps sessionId -> { transport, lastSeen }
-  const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  const SESSION_TTL_MS = parseInt(process.env.FORGE_SESSION_TTL_MS ?? '') || 30 * 60 * 1000; // default 30 minutes
   interface SessionEntry { transport: StreamableHTTPServerTransport; lastSeen: number; }
   const sessions = new Map<string, SessionEntry>();
 
