@@ -53,8 +53,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-list-001',
         name: 'test-workspace-1',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-123',
-        storyTitle: 'Test Story 1',
         path: '/tmp/ws-list-001',
         status: 'active',
         repos: [],
@@ -67,8 +65,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-list-002',
         name: 'test-workspace-2',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-456',
-        storyTitle: 'Test Story 2',
         path: '/tmp/ws-list-002',
         status: 'paused',
         repos: [],
@@ -93,8 +89,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-status-filter-001',
         name: 'active-workspace',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-status-1',
-        storyTitle: 'Status Test 1',
         path: '/tmp/ws-status-filter-001',
         status: 'active',
         repos: [],
@@ -107,8 +101,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-status-filter-002',
         name: 'paused-workspace',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-status-2',
-        storyTitle: 'Status Test 2',
         path: '/tmp/ws-status-filter-002',
         status: 'paused',
         repos: [],
@@ -125,7 +117,7 @@ describe('Workspace MCP tools', () => {
       expect(activeRecords[0]?.status).toBe('active');
     });
 
-    it('returns workspace linked to story', async () => {
+    it('returns workspace found by name', async () => {
       const store = new WorkspaceMetadataStore().withPath(storeDir);
       const now = new Date().toISOString();
       
@@ -133,8 +125,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-story-find-001',
         name: 'story-lookup-1',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-lookup-123',
-        storyTitle: 'Lookup Story 1',
         path: '/tmp/ws-story-find-001',
         status: 'active',
         repos: [],
@@ -147,8 +137,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-story-find-002',
         name: 'story-lookup-2',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-lookup-456',
-        storyTitle: 'Lookup Story 2',
         path: '/tmp/ws-story-find-002',
         status: 'paused',
         repos: [],
@@ -160,7 +148,7 @@ describe('Workspace MCP tools', () => {
       await store.create(mockRecord1);
       await store.create(mockRecord2);
 
-      const record = await store.findByStoryId('story-lookup-123');
+      const record = await store.findByName('story-lookup-1');
       expect(record).toBeDefined();
       expect(record?.id).toBe('ws-story-find-001');
     });
@@ -187,8 +175,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-get-full',
         name: 'status-test-workspace',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-get-789',
-        storyTitle: 'Get Test Story',
         path: '/tmp/ws-get-full',
         status: 'active',
         repos: [],
@@ -235,8 +221,6 @@ describe('Workspace MCP tools', () => {
         id: 'ws-delete-real',
         name: 'delete-test-workspace',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-delete',
-        storyTitle: 'Delete Test Story',
         path: '/tmp/ws-delete-real',
         status: 'active',
         repos: [],

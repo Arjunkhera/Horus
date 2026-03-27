@@ -41,8 +41,6 @@ describe('WorkspaceMetadataStore', () => {
         id: 'ws-12345678',
         name: 'test-workspace',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-001',
-        storyTitle: 'Setup workspace',
         path: '/home/user/workspaces/test-workspace',
         status: 'active',
         repos: [
@@ -69,8 +67,6 @@ describe('WorkspaceMetadataStore', () => {
         id: 'ws-duplicate',
         name: 'test',
         configRef: 'sdlc-default@1.0.0',
-        storyId: null,
-        storyTitle: null,
         path: '/tmp/test',
         status: 'active',
         repos: [],
@@ -90,8 +86,6 @@ describe('WorkspaceMetadataStore', () => {
         id: 'ws-update-test',
         name: 'original-name',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-001',
-        storyTitle: 'Original Title',
         path: '/home/user/workspaces/test',
         status: 'active',
         repos: [],
@@ -104,11 +98,9 @@ describe('WorkspaceMetadataStore', () => {
 
       const updated = await store.update('ws-update-test', {
         status: 'paused',
-        storyTitle: 'Updated Title',
       });
 
       expect(updated.status).toBe('paused');
-      expect(updated.storyTitle).toBe('Updated Title');
       expect(updated.name).toBe('original-name'); // preserved
       expect(updated.configRef).toBe('sdlc-default@1.0.0'); // preserved
       expect(updated.createdAt).toBe('2026-02-01T10:00:00Z'); // preserved
@@ -127,8 +119,6 @@ describe('WorkspaceMetadataStore', () => {
         id: 'ws-delete-test',
         name: 'to-delete',
         configRef: 'sdlc-default@1.0.0',
-        storyId: null,
-        storyTitle: null,
         path: '/tmp/test',
         status: 'active',
         repos: [],
@@ -157,8 +147,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-1',
           name: 'workspace-1',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws1',
           status: 'active',
           repos: [],
@@ -170,8 +158,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-2',
           name: 'workspace-2',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws2',
           status: 'paused',
           repos: [],
@@ -196,8 +182,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-active',
           name: 'workspace-active',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-active',
           status: 'active',
           repos: [],
@@ -209,8 +193,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-paused',
           name: 'workspace-paused',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-paused',
           status: 'paused',
           repos: [],
@@ -222,8 +204,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-completed',
           name: 'workspace-completed',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-completed',
           status: 'completed',
           repos: [],
@@ -252,8 +232,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-old',
           name: 'old',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-old',
           status: 'active',
           repos: [],
@@ -265,8 +243,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-new',
           name: 'new',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-new',
           status: 'active',
           repos: [],
@@ -278,8 +254,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-mid',
           name: 'mid',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-mid',
           status: 'active',
           repos: [],
@@ -300,15 +274,13 @@ describe('WorkspaceMetadataStore', () => {
     });
   });
 
-  describe('findByStoryId()', () => {
-    it('finds workspace by story ID', async () => {
+  describe('findByName()', () => {
+    it('finds workspace by name', async () => {
       const record: WorkspaceRecord = {
-        id: 'ws-story-linked',
-        name: 'story-workspace',
+        id: 'ws-name-linked',
+        name: 'my-dev-workspace',
         configRef: 'sdlc-default@1.0.0',
-        storyId: 'story-123',
-        storyTitle: 'My Story',
-        path: '/tmp/ws-story',
+        path: '/tmp/ws-name',
         status: 'active',
         repos: [],
         createdAt: new Date().toISOString(),
@@ -317,13 +289,13 @@ describe('WorkspaceMetadataStore', () => {
       };
 
       await store.create(record);
-      const found = await store.findByStoryId('story-123');
+      const found = await store.findByName('my-dev-workspace');
 
       expect(found).toEqual(record);
     });
 
-    it('returns null if story ID not found', async () => {
-      const found = await store.findByStoryId('nonexistent-story');
+    it('returns null if name not found', async () => {
+      const found = await store.findByName('nonexistent-name');
       expect(found).toBeNull();
     });
   });
@@ -335,8 +307,6 @@ describe('WorkspaceMetadataStore', () => {
         id: 'ws-touch-test',
         name: 'touch-test',
         configRef: 'sdlc-default@1.0.0',
-        storyId: null,
-        storyTitle: null,
         path: '/tmp/ws-touch',
         status: 'active',
         repos: [],
@@ -373,8 +343,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-old-active',
           name: 'old-active',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-old-active',
           status: 'active',
           repos: [],
@@ -386,8 +354,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-old-paused',
           name: 'old-paused',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-old-paused',
           status: 'paused',
           repos: [],
@@ -399,8 +365,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-old-completed',
           name: 'old-completed',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-old-completed',
           status: 'completed',
           repos: [],
@@ -412,8 +376,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-old-archived',
           name: 'old-archived',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-old-archived',
           status: 'archived',
           repos: [],
@@ -425,8 +387,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-recent-active',
           name: 'recent-active',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-recent-active',
           status: 'active',
           repos: [],
@@ -461,8 +421,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-old-completed',
           name: 'old-completed',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-old-completed',
           status: 'completed',
           repos: [],
@@ -474,8 +432,6 @@ describe('WorkspaceMetadataStore', () => {
           id: 'ws-old-archived',
           name: 'old-archived',
           configRef: 'sdlc-default@1.0.0',
-          storyId: null,
-          storyTitle: null,
           path: '/tmp/ws-old-archived',
           status: 'archived',
           repos: [],

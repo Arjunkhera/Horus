@@ -12,8 +12,6 @@ export const WorkspaceRecordSchema = z.object({
   id: z.string(),                    // "ws-{8chars}"
   name: z.string(),
   configRef: z.string(),             // "sdlc-default@1.0.0"
-  storyId: z.string().nullable(),
-  storyTitle: z.string().nullable(),
   path: z.string(),                  // absolute path to workspace folder
   status: WorkspaceStatusSchema,
   repos: z.array(WorkspaceRepoSchema),

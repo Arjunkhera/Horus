@@ -307,18 +307,16 @@ workspace
   .description('Create a new workspace from a workspace config')
   .requiredOption('-c, --config <name>', 'Workspace config artifact ID (e.g., sdlc-default)')
   .option('-v, --config-version <version>', 'Config version constraint (default: *)')
-  .option('-s, --story <id>', 'Story ID to link to the workspace')
-  .option('-t, --title <title>', 'Story title')
+  .option('-n, --name <name>', 'Human-readable workspace name (3-64 chars, alphanumeric and hyphens)')
   .option('-r, --repos <names>', 'Comma-separated list of repo names to include')
   .option('-m, --mount <path>', 'Override mount path')
-  .action(async (options: { config: string; configVersion?: string; story?: string; title?: string; repos?: string; mount?: string }) => {
+  .action(async (options: { config: string; configVersion?: string; name?: string; repos?: string; mount?: string }) => {
     const forge = new ForgeCore(program.opts().config);
     try {
       const workspaceRecord = await forge.workspaceCreate({
         configName: options.config,
         configVersion: options.configVersion,
-        storyId: options.story,
-        storyTitle: options.title,
+        name: options.name,
         repos: options.repos ? options.repos.split(',').map(r => r.trim()) : undefined,
         mountPath: options.mount,
       });
@@ -361,18 +359,16 @@ workspace
         head: [
           chalk.bold('ID'),
           chalk.bold('Name'),
-          chalk.bold('Story'),
           chalk.bold('Status'),
           chalk.bold('Last Accessed'),
           chalk.bold('Path'),
         ],
-        colWidths: [12, 25, 15, 12, 20, 50],
+        colWidths: [12, 30, 12, 20, 50],
       });
 
       for (const r of records) {
         const lastAccessed = new Date(r.lastAccessedAt).toLocaleDateString();
-        const storyDisplay = r.storyId ? `${r.storyId}` : '-';
-        table.push([r.id, r.name, storyDisplay, r.status, lastAccessed, r.path]);
+        table.push([r.id, r.name, r.status, lastAccessed, r.path]);
       }
 
       console.log(table.toString());
@@ -404,12 +400,6 @@ workspace
       console.log(`  Last Access: ${new Date(record.lastAccessedAt).toLocaleString()}`);
       if (record.completedAt) {
         console.log(`  Completed:   ${new Date(record.completedAt).toLocaleString()}`);
-      }
-      if (record.storyId) {
-        console.log(`  Story:       ${record.storyId}`);
-        if (record.storyTitle) {
-          console.log(`  Story Title: ${record.storyTitle}`);
-        }
       }
       console.log(`  Repos:       ${record.repos.length}`);
       for (const repo of record.repos) {

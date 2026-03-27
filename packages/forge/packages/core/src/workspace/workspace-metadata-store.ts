@@ -132,13 +132,13 @@ export class WorkspaceMetadataStore {
   }
 
   /**
-   * Find the first workspace linked to a story ID. Returns null if not found.
+   * Find a workspace by its name. Returns null if not found.
    */
-  async findByStoryId(storyId: string): Promise<WorkspaceRecord | null> {
+  async findByName(name: string): Promise<WorkspaceRecord | null> {
     const store = await this.load();
 
     for (const record of Object.values(store.workspaces)) {
-      if (record.storyId === storyId) {
+      if (record.name === name) {
         return record;
       }
     }
