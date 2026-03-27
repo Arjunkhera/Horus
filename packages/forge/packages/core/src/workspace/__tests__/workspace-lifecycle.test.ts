@@ -31,8 +31,6 @@ describe('WorkspaceLifecycleManager', () => {
       id: 'ws-test001',
       name: 'test-workspace',
       configRef: 'sdlc-default@1.0.0',
-      storyId: null,
-      storyTitle: null,
       path: '/tmp/test-workspace',
       status: 'active',
       repos: [],
