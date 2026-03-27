@@ -10,6 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions } from '@forge/core';
 import * as http from 'node:http';
+import { readFileSync } from 'node:fs';
 
 const startTime = Date.now();
 
@@ -776,12 +777,26 @@ export async function startMcpServerHttp(opts: HttpServerOptions): Promise<void>
     // Health check endpoint
     if (req.method === 'GET' && req.url === '/health') {
       const uptime = Math.floor((Date.now() - startTime) / 1000);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+
+      // Read sync status written by the entrypoint registry pull daemon.
+      let syncStatus: Record<string, unknown> = { ok: true, consecutive_failures: 0 };
+      try {
+        syncStatus = JSON.parse(readFileSync('/tmp/sync-status.json', 'utf-8'));
+      } catch {
+        // File not yet written — first sync cycle hasn't run.
+      }
+
+      const syncDegraded = syncStatus.ok === false &&
+        typeof syncStatus.consecutive_failures === 'number' &&
+        syncStatus.consecutive_failures >= 3;
+
+      res.writeHead(syncDegraded ? 503 : 200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        status: 'ok',
+        status: syncDegraded ? 'degraded' : 'ok',
         service: 'forge',
         version: '0.1.0',
         uptime_seconds: uptime,
+        sync: syncStatus,
       }));
       return;
     }

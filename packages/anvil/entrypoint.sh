@@ -49,14 +49,30 @@ log_err() {
   echo "{\"level\":\"error\",\"message\":\"$1\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
 }
 
+log_warn() {
+  echo "{\"level\":\"warn\",\"message\":\"$1\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
+}
+
+# Write sync status to /tmp/sync-status.json — polled by the /health endpoint.
+# Args: ok (true|false), failures (int), last_error (JSON string or null), ahead, behind
+write_sync_status() {
+  local ok="$1" failures="$2" last_error="${3:-null}" ahead="${4:-0}" behind="${5:-0}"
+  local timestamp
+  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"ok":%s,"service":"anvil","consecutive_failures":%s,"last_attempt":"%s","last_error":%s,"ahead":%s,"behind":%s}\n' \
+    "$ok" "$failures" "$timestamp" "$last_error" "$ahead" "$behind" \
+    > /tmp/sync-status.json
+}
+
 # ── Helper function for bidirectional sync ─────────────────────────────────────
 push_cycle() {
-  git -C "$NOTES_PATH" add -A 2>/dev/null
-  if ! git -C "$NOTES_PATH" diff --cached --quiet 2>/dev/null; then
+  git -C "$NOTES_PATH" add -A
+  if ! git -C "$NOTES_PATH" diff --cached --quiet; then
     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" 2>/dev/null || true
-    git -C "$NOTES_PATH" push 2>/dev/null || {
-      log_err "Final push failed"
+    git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" || true
+    PUSH_ERR=$(git -C "$NOTES_PATH" push 2>&1) || {
+      log_err "Final push failed: ${PUSH_ERR}"
+      return
     }
     log "Final push cycle complete"
   else
@@ -142,31 +158,70 @@ fi
 # Only runs when a git repository exists (indicated by .git directory presence).
 if [ -d "$NOTES_PATH/.git" ]; then
   log "Starting git sync daemon (interval: ${SYNC_INTERVAL}s)..."
+  write_sync_status "true" "0" "null" "0" "0"
 
   (
+    SYNC_FAIL_COUNT=0
+    SYNC_FAIL_THRESHOLD=3
+
     while true; do
       sleep "$SYNC_INTERVAL"
 
-      # Pull remote changes first
+      # ── Pull remote changes ──────────────────────────────────────────────────
       log "Running git pull..."
-      git -C "$NOTES_PATH" pull --ff-only 2>/dev/null || {
-        log_err "Git pull failed (will retry next cycle)"
-      }
+      # Try fast-forward first; fall back to rebase on divergence.
+      PULL_ERR=$(git -C "$NOTES_PATH" pull --ff-only 2>&1)
+      PULL_EXIT=$?
+      if [ $PULL_EXIT -ne 0 ]; then
+        log_err "git pull --ff-only failed: ${PULL_ERR}"
+        log "Retrying with --rebase..."
+        PULL_ERR=$(git -C "$NOTES_PATH" pull --rebase 2>&1)
+        PULL_EXIT=$?
+        if [ $PULL_EXIT -ne 0 ]; then
+          SYNC_FAIL_COUNT=$((SYNC_FAIL_COUNT + 1))
+          AHEAD=$(git -C "$NOTES_PATH" rev-list --count "@{u}..HEAD" 2>/dev/null || echo "?")
+          BEHIND=$(git -C "$NOTES_PATH" rev-list --count "HEAD..@{u}" 2>/dev/null || echo "?")
+          SAFE_ERR=$(echo "$PULL_ERR" | head -1 | sed 's/"/\\\"/g')
+          log_err "git pull --rebase also failed: ${PULL_ERR}"
+          write_sync_status "false" "$SYNC_FAIL_COUNT" "\"${SAFE_ERR}\"" "$AHEAD" "$BEHIND"
+          if [ "$SYNC_FAIL_COUNT" -ge "$SYNC_FAIL_THRESHOLD" ]; then
+            log_warn "SYNC STUCK: ${SYNC_FAIL_COUNT} consecutive failures — local is ${AHEAD} ahead, ${BEHIND} behind. Manual intervention may be required. Last error: ${PULL_ERR}"
+          fi
+          continue
+        fi
+      fi
 
-      # Commit and push any local changes
-      git -C "$NOTES_PATH" add -A 2>/dev/null
-      if ! git -C "$NOTES_PATH" diff --cached --quiet 2>/dev/null; then
+      # ── Commit and push local changes ────────────────────────────────────────
+      git -C "$NOTES_PATH" add -A
+      if ! git -C "$NOTES_PATH" diff --cached --quiet; then
         TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" 2>/dev/null || {
-          log_err "Git commit failed (will retry next cycle)"
+        COMMIT_ERR=$(git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" 2>&1) || {
+          log_err "Git commit failed: ${COMMIT_ERR}"
+          SYNC_FAIL_COUNT=$((SYNC_FAIL_COUNT + 1))
+          SAFE_ERR=$(echo "$COMMIT_ERR" | head -1 | sed 's/"/\\\"/g')
+          write_sync_status "false" "$SYNC_FAIL_COUNT" "\"${SAFE_ERR}\"" "?" "?"
+          continue
         }
-        git -C "$NOTES_PATH" push 2>/dev/null || {
-          log_err "Git push failed (will retry next cycle)"
-        }
+        PUSH_ERR=$(git -C "$NOTES_PATH" push 2>&1)
+        PUSH_EXIT=$?
+        if [ $PUSH_EXIT -ne 0 ]; then
+          SYNC_FAIL_COUNT=$((SYNC_FAIL_COUNT + 1))
+          SAFE_ERR=$(echo "$PUSH_ERR" | head -1 | sed 's/"/\\\"/g')
+          log_err "Git push failed: ${PUSH_ERR}"
+          write_sync_status "false" "$SYNC_FAIL_COUNT" "\"${SAFE_ERR}\"" "?" "?"
+          if [ "$SYNC_FAIL_COUNT" -ge "$SYNC_FAIL_THRESHOLD" ]; then
+            log_warn "SYNC STUCK: ${SYNC_FAIL_COUNT} consecutive push failures. Last error: ${PUSH_ERR}"
+          fi
+          continue
+        fi
         log "Sync complete: committed and pushed local changes"
       else
         log "Sync complete: no local changes to commit"
       fi
+
+      # ── Reset failure counter on a clean cycle ───────────────────────────────
+      SYNC_FAIL_COUNT=0
+      write_sync_status "true" "0" "null" "0" "0"
 
     done
   ) &
