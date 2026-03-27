@@ -98,24 +98,24 @@ export function buildQuerySql(filters: QueryFilter): {
     }
   }
 
-  // Assignee (stored in a field or as a note relationship)
+  // Assignee (filter by note ID — matches target_id in the relationships table)
   if (filters.assignee) {
     conditions.push(`EXISTS (
       SELECT 1 FROM relationships
       WHERE relationships.source_id = notes.note_id
       AND relationships.relation_type = 'assignee'
-      AND relationships.target_title = ?
+      AND relationships.target_id = ?
     )`);
     params.push(filters.assignee);
   }
 
-  // Project (stored in a field or as a note relationship)
+  // Project (filter by note ID — matches target_id in the relationships table)
   if (filters.project) {
     conditions.push(`EXISTS (
       SELECT 1 FROM relationships
       WHERE relationships.source_id = notes.note_id
       AND relationships.relation_type = 'project'
-      AND relationships.target_title = ?
+      AND relationships.target_id = ?
     )`);
     params.push(filters.project);
   }
