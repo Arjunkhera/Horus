@@ -165,6 +165,7 @@ describe('WorkspaceCreator — CLAUDE.md is context-only (no clone paths)', () =
     const creator = new WorkspaceCreator(mockForge as any);
     const record = await creator.create({
       configName: 'sdlc-default',
+      storyTitle: 'test story',
       mountPath: path.join(tmpDir, 'workspaces'),
     });
 

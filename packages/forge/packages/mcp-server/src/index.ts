@@ -250,7 +250,8 @@ const TOOLS = [
       properties: {
         config: { type: 'string', description: 'Workspace config artifact name (e.g., "sdlc-default")' },
         configVersion: { type: 'string', description: 'Version constraint (default: latest)' },
-        name: { type: 'string', description: 'Human-readable workspace name (3-64 chars, alphanumeric and hyphens). Auto-generated if omitted.' },
+        storyId: { type: 'string', description: 'Anvil work item ID to link to this workspace' },
+        storyTitle: { type: 'string', description: 'Cached story title for display' },
         repos: { type: 'array', items: { type: 'string' }, description: 'Specific repo names to include' },
       },
       required: ['config'],
@@ -258,11 +259,12 @@ const TOOLS = [
   },
   {
     name: 'forge_workspace_list',
-    description: 'List tracked workspaces with optional status filter.',
+    description: 'List tracked workspaces with optional status or story filter.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         status: { type: 'string', enum: ['active', 'paused', 'completed', 'archived'], description: 'Filter by workspace status' },
+        storyId: { type: 'string', description: 'Filter by linked story ID' },
       },
     },
   },
@@ -280,11 +282,11 @@ const TOOLS = [
   },
   {
     name: 'forge_workspace_status',
-    description: 'Get full details for a single workspace by ID or name.',
+    description: 'Get full details for a single workspace by ID.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        id: { type: 'string', description: 'Workspace ID (e.g., "ws-abc12345") or human-readable name' },
+        id: { type: 'string', description: 'Workspace ID' },
       },
       required: ['id'],
     },
@@ -614,16 +616,18 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_workspace_create': {
-          const { config, configVersion, name, repos } = args as {
+          const { config, configVersion, storyId, storyTitle, repos } = args as {
             config: string;
             configVersion?: string;
-            name?: string;
+            storyId?: string;
+            storyTitle?: string;
             repos?: string[];
           };
           const workspace = await forge.workspaceCreate({
             configName: config,
             configVersion,
-            name,
+            storyId,
+            storyTitle,
             repos,
           });
           return {
@@ -636,6 +640,7 @@ function buildServer(workspaceRoot: string): Server {
                   name: workspace.name,
                   status: workspace.status,
                   createdAt: workspace.createdAt,
+                  storyId: workspace.storyId,
                 },
               }, null, 2),
             }],
@@ -643,7 +648,11 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_workspace_list': {
-          const { status } = (args ?? {}) as { status?: string };
+          const { status, storyId } = (args ?? {}) as { status?: string; storyId?: string };
+          if (storyId) {
+            const record = await forge.workspaceFindByStory(storyId);
+            return { content: [{ type: 'text', text: JSON.stringify(record ? [record] : [], null, 2) }] };
+          }
           const records = await forge.workspaceList(status ? { status } : undefined);
           return { content: [{ type: 'text', text: JSON.stringify(records, null, 2) }] };
         }
@@ -662,11 +671,7 @@ function buildServer(workspaceRoot: string): Server {
 
         case 'forge_workspace_status': {
           const { id } = args as { id: string };
-          // Try ID lookup first, then fall back to name lookup
-          let record = await forge.workspaceStatus(id);
-          if (!record) {
-            record = await forge.workspaceFindByName(id);
-          }
+          const record = await forge.workspaceStatus(id);
           if (!record) {
             return {
               content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'WORKSPACE_NOT_FOUND', message: `Workspace '${id}' not found` }, null, 2) }],
@@ -763,7 +768,7 @@ export async function startMcpServerHttp(opts: HttpServerOptions): Promise<void>
   const { port, host, workspaceRoot = process.env.FORGE_WORKSPACE_PATH ?? process.cwd() } = opts;
 
   // Session registry: maps sessionId -> { transport, lastSeen }
-  const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  const SESSION_TTL_MS = parseInt(process.env.FORGE_SESSION_TTL_MS ?? '') || 30 * 60 * 1000; // default 30 minutes
   interface SessionEntry { transport: StreamableHTTPServerTransport; lastSeen: number; }
   const sessions = new Map<string, SessionEntry>();
 

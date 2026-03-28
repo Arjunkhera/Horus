@@ -743,11 +743,11 @@ export class ForgeCore {
   }
 
   /**
-   * Find a workspace by its name. Returns null if not found.
+   * Find the first workspace linked to a story ID. Returns null if not found.
    */
-  async workspaceFindByName(name: string): Promise<WorkspaceRecord | null> {
+  async workspaceFindByStory(storyId: string): Promise<WorkspaceRecord | null> {
     const store = await this.getMetadataStore();
-    return store.findByName(name);
+    return store.findByStoryId(storyId);
   }
 
   /**

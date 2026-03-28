@@ -214,7 +214,8 @@ test_workspace_create() {
     local params
     params=$(python3 -c "import json; print(json.dumps({
         'config': 'test-workspace',
-        'name': 'e2e-test-workspace'
+        'storyId': 'STORY-E2E-001',
+        'storyTitle': 'E2E Integration Test Workspace'
     }))")
 
     local response

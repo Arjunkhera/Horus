@@ -24,7 +24,8 @@ import type { ClaudePermissions } from '../models/global-config.js';
 export interface WorkspaceCreateOptions {
   configName: string;           // workspace config artifact ID (e.g., "sdlc-default")
   configVersion?: string;       // version constraint (default: '*')
-  name?: string;                // human-readable workspace name (optional — auto-generated if omitted)
+  storyId?: string;
+  storyTitle?: string;
   repos?: string[];             // specific repo names to include (context only — no cloning)
   mountPath?: string;           // override global workspace.mount_path
 }
@@ -132,26 +133,8 @@ export class WorkspaceCreator {
 
     // Step 3: Generate workspace name and ID
     const id = generateWorkspaceId();
-    const name = options.name ?? `${options.configName}-${id}`;
-
-    // Validate name if user-provided
-    if (options.name) {
-      if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,62}[a-zA-Z0-9]$/.test(name)) {
-        throw new WorkspaceCreateError(
-          `Invalid workspace name "${name}". Must be 3-64 characters, alphanumeric and hyphens only, cannot start or end with a hyphen.`,
-        );
-      }
-      // Check uniqueness across active workspaces
-      const metaStore = new WorkspaceMetadataStore(globalConfig.workspace.store_path);
-      const existing = await metaStore.findByName(name);
-      if (existing) {
-        throw new WorkspaceCreateError(
-          `Workspace name "${name}" is already in use by workspace ${existing.id}.`,
-          'Choose a different name or delete the existing workspace first.',
-        );
-      }
-    }
-
+    const slugPart = options.storyId ?? id;
+    const name = `${options.configName}-${slugPart}`;
     const workspacePath = path.join(mountPath, name);
 
     // Step 4: Resolve repos (context only — record localPath for reference, no cloning)
@@ -414,6 +397,9 @@ export class WorkspaceCreator {
 
 > Created: ${new Date().toISOString().slice(0, 10)} | Config: ${options.configName}
 
+## Context
+${options.storyTitle ? `Story: ${options.storyTitle} (${options.storyId})` : 'No story linked'}
+
 ## Repositories
 ${repoContexts.map(r => `- **${r.name}**: ${r.localPath}`).join('\n') || '(none)'}
 
@@ -432,6 +418,9 @@ Use \`forge_develop\` to create isolated code sessions before making changes to 
       const cursorRules = `# Workspace: ${name}
 
 > Created: ${new Date().toISOString().slice(0, 10)} | Config: ${options.configName}
+
+## Context
+${options.storyTitle ? `Story: ${options.storyTitle} (${options.storyId})` : 'No story linked'}
 
 ## Repositories
 ${repoContexts.map(r => `- **${r.name}**: ${r.localPath}`).join('\n') || '(none)'}
@@ -453,6 +442,8 @@ Use \`forge_develop\` to create isolated code sessions before making changes to 
         id,
         name,
         configRef: `${options.configName}@${configArtifact.ref.version}`,
+        storyId: options.storyId ?? null,
+        storyTitle: options.storyTitle ?? null,
         path: workspacePath,
         status: 'active',
         repos: repoContexts,
