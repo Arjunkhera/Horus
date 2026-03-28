@@ -5,7 +5,7 @@ import { existsSync, accessSync, statfsSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig, configExists } from '../lib/config.js';
 import { detectRuntime, parseComposeJson } from '../lib/runtime.js';
-import { COMPOSE_PATH, DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
+import { COMPOSE_PATH, DEFAULT_PORTS, DEFAULT_DATA_DIR, HEALTH_ENDPOINTS } from '../lib/constants.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -254,6 +254,53 @@ async function checkServices(runtime: Awaited<ReturnType<typeof detectRuntime>>)
 }
 
 
+// ── Sync health check ─────────────────────────────────────────────────────────
+// Fetches /health from a service and surfaces sync degradation as a check result.
+// Only anvil and forge have git sync daemons.
+async function checkSyncHealth(
+  serviceName: 'anvil' | 'forge',
+  ports: typeof DEFAULT_PORTS
+): Promise<CheckResult> {
+  const portMap = { anvil: ports.anvil, forge: ports.forge };
+  const port = portMap[serviceName];
+  const url = `http://localhost:${port}/health`;
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    const body = await resp.json() as Record<string, unknown>;
+    const sync = body.sync as Record<string, unknown> | undefined;
+
+    if (resp.status === 503 || body.status === 'degraded') {
+      const failures = sync?.consecutive_failures ?? '?';
+      const lastError = typeof sync?.last_error === 'string' ? sync.last_error : 'unknown';
+      const ahead = sync?.ahead ?? '?';
+      const behind = sync?.behind ?? '?';
+      return {
+        status: 'fail',
+        label: `Sync: ${serviceName}`,
+        message: `${serviceName} git sync is stuck (${failures} consecutive failures, ${ahead} ahead / ${behind} behind): ${lastError}`,
+        hint: `Run: horus logs ${serviceName}  — or manually: cd ~/Horus/data/${serviceName === 'forge' ? 'registry' : 'notes'} && git reset --hard origin/master`,
+      };
+    }
+    if (sync && sync.ok === false) {
+      const failures = sync.consecutive_failures ?? 1;
+      return {
+        status: 'warn',
+        label: `Sync: ${serviceName}`,
+        message: `${serviceName} git sync had a recent failure (${failures} consecutive) — not yet stuck`,
+        hint: `Run: horus logs ${serviceName}`,
+      };
+    }
+    return { status: 'pass', label: `Sync: ${serviceName}`, message: `${serviceName} git sync healthy` };
+  } catch {
+    return {
+      status: 'warn',
+      label: `Sync: ${serviceName}`,
+      message: `${serviceName} health endpoint not reachable — sync status unknown`,
+      hint: 'Service may not be running',
+    };
+  }
+}
+
 // ── Doctor command ────────────────────────────────────────────────────────────
 
 export const doctorCommand = new Command('doctor')
@@ -311,6 +358,14 @@ export const doctorCommand = new Command('doctor')
         });
       }
     }
+
+    // 9. Git sync health — anvil notes repo and forge registry
+    const ports = config?.ports ?? DEFAULT_PORTS;
+    const [anvilSync, forgeSync] = await Promise.all([
+      checkSyncHealth('anvil', ports),
+      checkSyncHealth('forge', ports),
+    ]);
+    allResults.push(anvilSync, forgeSync);
 
     // Print results
     for (const result of allResults) {

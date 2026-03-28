@@ -47,6 +47,20 @@ log_err() {
   echo "{\"level\":\"error\",\"message\":\"$1\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
 }
 
+log_warn() {
+  echo "{\"level\":\"warn\",\"message\":\"$1\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
+}
+
+# Write sync status to /tmp/sync-status.json — polled by the /health endpoint.
+write_sync_status() {
+  local ok="$1" failures="$2" last_error="${3:-null}" ahead="${4:-0}" behind="${5:-0}"
+  local timestamp
+  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"ok":%s,"service":"forge","consecutive_failures":%s,"last_attempt":"%s","last_error":%s,"ahead":%s,"behind":%s}\n' \
+    "$ok" "$failures" "$timestamp" "$last_error" "$ahead" "$behind" \
+    > /tmp/sync-status.json
+}
+
 # SIGTERM handler right after the log functions
 shutdown() {
   log "Shutdown signal received — cleaning up..."
@@ -184,13 +198,41 @@ fi
 # (workspaces dir already created in Step 1)
 if [ -d "${REGISTRY_PATH}/.git" ]; then
   log "Starting registry pull daemon (interval: ${FORGE_SYNC_INTERVAL}s)..."
+  write_sync_status "true" "0" "null" "0" "0"
+
   (
+    SYNC_FAIL_COUNT=0
+    SYNC_FAIL_THRESHOLD=3
+
     while true; do
       sleep "$FORGE_SYNC_INTERVAL"
       log "Running registry git pull..."
-      git -C "${REGISTRY_PATH}" pull --ff-only 2>/dev/null || {
-        log_err "Registry git pull failed (will retry next cycle)"
-      }
+
+      # Try fast-forward first; fall back to rebase on divergence.
+      PULL_ERR=$(git -C "${REGISTRY_PATH}" pull --ff-only 2>&1)
+      PULL_EXIT=$?
+      if [ $PULL_EXIT -ne 0 ]; then
+        log_err "Registry git pull --ff-only failed: ${PULL_ERR}"
+        log "Retrying with --rebase..."
+        PULL_ERR=$(git -C "${REGISTRY_PATH}" pull --rebase 2>&1)
+        PULL_EXIT=$?
+        if [ $PULL_EXIT -ne 0 ]; then
+          SYNC_FAIL_COUNT=$((SYNC_FAIL_COUNT + 1))
+          AHEAD=$(git -C "${REGISTRY_PATH}" rev-list --count "@{u}..HEAD" 2>/dev/null || echo "?")
+          BEHIND=$(git -C "${REGISTRY_PATH}" rev-list --count "HEAD..@{u}" 2>/dev/null || echo "?")
+          SAFE_ERR=$(echo "$PULL_ERR" | head -1 | sed 's/"/\\\"/g')
+          log_err "Registry git pull --rebase also failed: ${PULL_ERR}"
+          write_sync_status "false" "$SYNC_FAIL_COUNT" "\"${SAFE_ERR}\"" "$AHEAD" "$BEHIND"
+          if [ "$SYNC_FAIL_COUNT" -ge "$SYNC_FAIL_THRESHOLD" ]; then
+            log_warn "REGISTRY SYNC STUCK: ${SYNC_FAIL_COUNT} consecutive failures — local is ${AHEAD} ahead, ${BEHIND} behind. Manual intervention may be required. Last error: ${PULL_ERR}"
+          fi
+          continue
+        fi
+      fi
+
+      SYNC_FAIL_COUNT=0
+      write_sync_status "true" "0" "null" "0" "0"
+      log "Registry sync complete"
     done
   ) &
   PULL_PID=$!

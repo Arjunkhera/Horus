@@ -2,6 +2,7 @@
 // Story 017: Implements HTTP transport with health endpoint and graceful shutdown
 
 import * as http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -46,13 +47,27 @@ export async function startHttp(serverFactory: () => Server, opts: HttpOptions):
     // Handle health check endpoint
     if (req.method === 'GET' && req.url === '/health') {
       const uptime = Math.floor((Date.now() - startTime) / 1000);
+
+      // Read sync status written by the entrypoint sync daemon.
+      let syncStatus: Record<string, unknown> = { ok: true, consecutive_failures: 0 };
+      try {
+        syncStatus = JSON.parse(readFileSync('/tmp/sync-status.json', 'utf-8'));
+      } catch {
+        // File not yet written — first sync cycle hasn't run.
+      }
+
+      const syncDegraded = syncStatus.ok === false &&
+        typeof syncStatus.consecutive_failures === 'number' &&
+        syncStatus.consecutive_failures >= 3;
+
       const health = {
-        status: 'ok',
+        status: syncDegraded ? 'degraded' : 'ok',
         service: 'anvil',
         version: '2.0.0',
         uptime_seconds: uptime,
+        sync: syncStatus,
       };
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.writeHead(syncDegraded ? 503 : 200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(health));
       return;
     }

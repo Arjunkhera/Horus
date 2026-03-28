@@ -132,12 +132,16 @@ export async function emitPreToolUseHook(
   await fs.mkdir(scriptsDir, { recursive: true });
 
   const guardScript = `#!/bin/bash
-# Guard script: blocks Edit/Write on source repos, forcing forge_repo_clone usage.
+# Guard script: blocks Edit/Write/Bash on source repos, forcing forge_develop usage.
 # Emitted by Forge during workspace creation. Do not edit manually.
 #
-# Heuristic: if the target file is inside a git repo, block the edit UNLESS
-# that repo root is inside a Horus workspace directory. This is fully generic —
-# no hardcoded user paths, and it automatically covers any git repo on the machine.
+# Covers two attack surfaces:
+#   1. Edit/Write tools — checks tool_input.file_path
+#   2. Bash tool     — detects git write operations (commit, push, add, reset, ...)
+#                      and checks the target repo path via -C flag or cd commands.
+#
+# Allowed repos: anything inside $HORUS_DATA_DIR/workspaces/ (workspace clones)
+#                or $HORUS_DATA_DIR/sessions/ (forge_develop worktrees).
 
 input=$(cat)
 
@@ -147,9 +151,55 @@ if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
+HORUS_DATA_DIR="\${HORUS_DATA_DIR:-$HOME/.horus/data}"
+
+is_allowed_repo() {
+  local repo_root="$1"
+  [[ "$repo_root" == "$HORUS_DATA_DIR/workspaces/"* ]] && return 0
+  [[ "$repo_root" == "$HORUS_DATA_DIR/sessions/"* ]]   && return 0
+  return 1
+}
+
+# ── Bash tool: detect git write operations targeting source repos ─────────────
+cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
+
+if [ -n "$cmd" ]; then
+  # Detect git write verbs: commit, push, add, reset, merge, rebase, tag
+  if echo "$cmd" | grep -qE '(^|[;&|[:space:]])git[[:space:]].*[[:space:]](commit|push|add|reset|merge|rebase|tag)([[:space:]]|$)'; then
+    # Extract explicit -C path (git -C <path> <verb>)
+    target_path=$(echo "$cmd" | grep -oP '(?<=git -C )[^\s]+' | head -1)
+
+    # If no -C, look for a leading cd <path>
+    if [ -z "$target_path" ]; then
+      target_path=$(echo "$cmd" | grep -oP '(?:^|[;&|]\s*)cd\s+\K\S+' | head -1)
+    fi
+
+    if [ -n "$target_path" ]; then
+      if [[ "$target_path" != /* ]]; then
+        target_path="$(pwd)/$target_path"
+      fi
+      repo_root=$(git -C "$target_path" rev-parse --show-toplevel 2>/dev/null)
+      if [ -n "$repo_root" ] && ! is_allowed_repo "$repo_root"; then
+        repo_name=$(basename "$repo_root")
+        cat >&2 <<MSG
+BLOCKED: Cannot run git write operations in source repository '\${repo_name}' directly.
+
+Agents must not commit or push to source repos. Use forge_develop to get an
+isolated session (git worktree) and work inside the returned sessionPath.
+
+  forge_develop with repo="\${repo_name}"
+MSG
+        exit 2
+      fi
+    fi
+    # No resolvable path — can't confirm source repo. Allow but pre-commit hook will catch it.
+  fi
+  exit 0
+fi
+
+# ── Edit/Write tools: check tool_input.file_path ─────────────────────────────
 file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
 
-# If no file_path in the tool input, allow (not a file operation we care about)
 if [ -z "$file_path" ]; then
   exit 0
 fi
@@ -163,15 +213,12 @@ fi
 file_dir=$(dirname "$file_path")
 repo_root=$(git -C "$file_dir" rev-parse --show-toplevel 2>/dev/null)
 
-# Not inside a git repo — allow (not a source repo)
+# Not inside a git repo — allow
 if [ -z "$repo_root" ]; then
   exit 0
 fi
 
-# Check if the repo root is inside a Horus workspace — if so, it's a
-# workspace clone created by forge_repo_clone, so allow edits
-HORUS_DATA_DIR="\${HORUS_DATA_DIR:-$HOME/.horus/data}"
-if [[ "$repo_root" == "$HORUS_DATA_DIR/workspaces/"* ]]; then
+if is_allowed_repo "$repo_root"; then
   exit 0
 fi
 
@@ -181,10 +228,10 @@ repo_name=$(basename "$repo_root")
 cat >&2 <<MSG
 BLOCKED: Cannot edit files in source repository '\${repo_name}' directly.
 
-To get an isolated working copy, call:
-  forge_repo_clone with repoName="\${repo_name}"
+Use forge_develop to create an isolated session:
+  forge_develop with repo="\${repo_name}"
 
-Then edit files in the returned clonePath instead.
+Then edit files inside the returned sessionPath instead.
 MSG
 exit 2
 `;
@@ -211,9 +258,9 @@ exit 2
   const hooks = (settings.hooks as Record<string, unknown[]>) ?? {};
   const preToolUse = (hooks.PreToolUse as Array<Record<string, unknown>>) ?? [];
 
-  // Avoid duplicate: check if we already have this matcher
+  // Avoid duplicate: check if we already have this guard hooked (any matcher variant)
   const existing = preToolUse.find(
-    (entry) => entry.matcher === 'Edit|Write' && Array.isArray(entry.hooks) &&
+    (entry) => Array.isArray(entry.hooks) &&
       (entry.hooks as Array<Record<string, unknown>>).some(
         (h) => h.type === 'command' && typeof h.command === 'string' &&
           (h.command as string).includes('guard-source-repos.sh'),
@@ -222,7 +269,7 @@ exit 2
 
   if (!existing) {
     preToolUse.push({
-      matcher: 'Edit|Write',
+      matcher: 'Edit|Write|Bash',
       hooks: [
         {
           type: 'command',
@@ -230,6 +277,9 @@ exit 2
         },
       ],
     });
+  } else if (existing.matcher !== 'Edit|Write|Bash') {
+    // Upgrade legacy matcher that only covered Edit|Write
+    existing.matcher = 'Edit|Write|Bash';
   }
 
   hooks.PreToolUse = preToolUse;
