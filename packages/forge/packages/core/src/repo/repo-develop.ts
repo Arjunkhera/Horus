@@ -248,21 +248,27 @@ async function fixWorktreePathsForHost(
   sessionPath: string,
   hostSessionPath: string,
   worktreeBasePath: string,
-  managedReposPath: string,
-  hostManagedReposPath: string,
+  hostWorktreeBasePath: string,
   worktreeId: string,
 ): Promise<void> {
   // 1. Rewrite the .git file in the session worktree
+  // Git writes the full worktreeBasePath into the gitdir pointer, so we
+  // replace that precisely rather than just the managedReposPath prefix.
+  // This is resilient to config mismatches (e.g. /data/horus-repos vs /data/repos).
   const dotGitPath = path.join(sessionPath, '.git');
   try {
     const dotGitContent = await fs.readFile(dotGitPath, 'utf-8');
     // e.g. "gitdir: /data/horus-repos/Horus/.git/worktrees/04b527d2-horus\n"
-    const rewritten = dotGitContent.replace(managedReposPath, hostManagedReposPath);
+    const rewritten = dotGitContent.replace(worktreeBasePath, hostWorktreeBasePath);
     if (rewritten !== dotGitContent) {
       await fs.writeFile(dotGitPath, rewritten, 'utf-8');
+    } else {
+      console.warn(
+        `[forge] fixWorktreePathsForHost: .git file did not contain expected path "${worktreeBasePath}" — skipping rewrite. gitdir content: ${dotGitContent.trim()}`,
+      );
     }
-  } catch {
-    // Best-effort — don't fail session creation if rewrite fails
+  } catch (err) {
+    console.warn(`[forge] fixWorktreePathsForHost: failed to rewrite .git file at ${dotGitPath}:`, err);
   }
 
   // 2. Rewrite the backlink in the main repo's worktrees directory
@@ -280,8 +286,8 @@ async function fixWorktreePathsForHost(
     if (rewritten !== backlinkContent) {
       await fs.writeFile(backlinkPath, rewritten, 'utf-8');
     }
-  } catch {
-    // Best-effort
+  } catch (err) {
+    console.warn(`[forge] fixWorktreePathsForHost: failed to rewrite backlink at ${backlinkPath}:`, err);
   }
 }
 
@@ -571,13 +577,13 @@ export async function repoDevelop(
 
   // ── Compute host-side path (Docker path translation) ──────────────────────
   let hostSessionPath: string | undefined;
-  const hostManagedReposPath = globalConfig.workspace.host_managed_repos_path;
+  let hostDataBase: string | undefined;
   if (hostWorkspacesPath && sessionsRoot.includes('/data/')) {
     // Translate /data/sessions/... → hostWorkspacesPath/../sessions/...
     const dataIdx = sessionsRoot.indexOf('/data/');
     if (dataIdx !== -1) {
       const rel = sessionsRoot.slice(dataIdx + '/data/'.length);
-      const hostDataBase = hostWorkspacesPath.replace(/\/workspaces\/?$/, '');
+      hostDataBase = hostWorkspacesPath.replace(/\/workspaces\/?$/, '');
       const hostSessionsRoot = path.join(hostDataBase, rel);
       const sessionRelative = path.relative(sessionsRoot, sessionPath);
       hostSessionPath = path.join(hostSessionsRoot, sessionRelative);
@@ -587,15 +593,49 @@ export async function repoDevelop(
   // ── Fix git worktree pointers for host access (Docker path translation) ───
   // When Forge runs in Docker, git worktree paths are container-internal.
   // Rewrite them so git works from the host where Claude Code runs.
-  if (hostSessionPath && hostManagedReposPath) {
-    await fixWorktreePathsForHost(
-      sessionPath,
-      hostSessionPath,
-      worktreeBasePath,
-      managedReposPath,
-      hostManagedReposPath,
-      sessionDirName,
-    );
+  if (hostSessionPath) {
+    // Resolve the host-side equivalent of worktreeBasePath.
+    // Prefer the explicit host_managed_repos_path config (handles volume aliases
+    // like /data/horus-repos → ${HORUS_DATA_PATH}/repos). Fall back to the
+    // general /data/<rel> → hostDataBase/<rel> translation for cases where the
+    // managed repos path follows the standard naming convention (no alias).
+    const explicitHostManagedReposPath = globalConfig.workspace.host_managed_repos_path;
+    let hostWorktreeBasePath: string | undefined;
+
+    if (explicitHostManagedReposPath) {
+      // e.g. worktreeBasePath = /data/horus-repos/Horus
+      //      managedReposPath = /data/horus-repos
+      //      explicitHostManagedReposPath = /Users/arkhera/Horus/data/repos
+      // → hostWorktreeBasePath = /Users/arkhera/Horus/data/repos/Horus
+      const repoRelative = path.relative(managedReposPath, worktreeBasePath);
+      hostWorktreeBasePath = path.join(explicitHostManagedReposPath, repoRelative);
+    } else if (hostDataBase && worktreeBasePath.includes('/data/')) {
+      // Fallback: derive via general /data/<rel> translation.
+      // Works when managed repos path uses standard naming (no volume alias).
+      const dataIdx = worktreeBasePath.indexOf('/data/');
+      const rel = worktreeBasePath.slice(dataIdx + '/data/'.length);
+      hostWorktreeBasePath = path.join(hostDataBase, rel);
+      console.warn(
+        `[forge] host_managed_repos_path not configured — falling back to general path translation for worktree rewrite. ` +
+        `Derived: ${hostWorktreeBasePath}. Set FORGE_HOST_MANAGED_REPOS_PATH for reliable path mapping.`,
+      );
+    } else {
+      console.warn(
+        `[forge] Cannot rewrite git worktree paths for host: host_managed_repos_path is not configured ` +
+        `and worktreeBasePath "${worktreeBasePath}" does not follow /data/ convention. ` +
+        `Git commands inside the session may fail from the host.`,
+      );
+    }
+
+    if (hostWorktreeBasePath) {
+      await fixWorktreePathsForHost(
+        sessionPath,
+        hostSessionPath,
+        worktreeBasePath,
+        hostWorktreeBasePath,
+        sessionDirName,
+      );
+    }
   }
 
   // ── Build workflow snapshot ───────────────────────────────────────────────
