@@ -213,7 +213,23 @@ else
     horus_new=$(get_sha "$SCRIPT_DIR")
 
     if subdir_changed "$SCRIPT_DIR" "docker-compose.yml" "$HORUS_OLD_SHA" "$horus_new"; then
+      # Compose file changed — rebuild everything
       REBUILD="anvil vault vault-mcp forge"
+    else
+      # Check individual package subdirs
+      if subdir_changed "$SCRIPT_DIR" "packages/anvil" "$HORUS_OLD_SHA" "$horus_new"; then
+        list_contains "$REBUILD" "anvil" || REBUILD="${REBUILD:+$REBUILD }anvil"
+      fi
+      if subdir_changed "$SCRIPT_DIR" "packages/forge" "$HORUS_OLD_SHA" "$horus_new" ||
+         subdir_changed "$SCRIPT_DIR" "packages/cli"   "$HORUS_OLD_SHA" "$horus_new"; then
+        list_contains "$REBUILD" "forge" || REBUILD="${REBUILD:+$REBUILD }forge"
+      fi
+      if subdir_changed "$SCRIPT_DIR" "services/vault" "$HORUS_OLD_SHA" "$horus_new"; then
+        list_contains "$REBUILD" "vault" || REBUILD="${REBUILD:+$REBUILD }vault"
+      fi
+      if subdir_changed "$SCRIPT_DIR" "packages/vault-mcp" "$HORUS_OLD_SHA" "$horus_new"; then
+        list_contains "$REBUILD" "vault-mcp" || REBUILD="${REBUILD:+$REBUILD }vault-mcp"
+      fi
     fi
   fi
 
