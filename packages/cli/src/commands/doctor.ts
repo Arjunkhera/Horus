@@ -360,7 +360,6 @@ export const doctorCommand = new Command('doctor')
     }
 
     // 9. Git sync health — anvil notes repo and forge registry
-    const ports = config?.ports ?? DEFAULT_PORTS;
     const [anvilSync, forgeSync] = await Promise.all([
       checkSyncHealth('anvil', ports),
       checkSyncHealth('forge', ports),
