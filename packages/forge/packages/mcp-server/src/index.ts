@@ -11,6 +11,7 @@ import {
 import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions } from '@forge/core';
 import * as http from 'node:http';
 import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
 
 const startTime = Date.now();
 
@@ -53,8 +54,12 @@ const TOOLS = [
           items: { type: 'string' },
           description: 'Artifact refs to add, e.g., ["skill:developer@1.0.0", "agent:sdlc-agent"]',
         },
+        workspaceId: {
+          type: 'string',
+          description: 'Target workspace ID (e.g., "sdlc-workspace-1"). Resolves to /data/workspaces/<workspaceId>.',
+        },
       },
-      required: ['refs'],
+      required: ['refs', 'workspaceId'],
     },
   },
   {
@@ -64,6 +69,10 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
+        workspaceId: {
+          type: 'string',
+          description: 'Target workspace ID (e.g., "sdlc-workspace-1"). Resolves to /data/workspaces/<workspaceId>.',
+        },
         target: {
           type: 'string',
           enum: ['claude-code', 'cursor', 'plugin'],
@@ -74,6 +83,7 @@ const TOOLS = [
           description: 'Preview changes without writing files',
         },
       },
+      required: ['workspaceId'],
     },
   },
   {
@@ -379,13 +389,16 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_add': {
-          const { refs } = args as { refs: string[] };
-          const config = await forge.add(refs);
+          const { refs, workspaceId } = args as { refs: string[]; workspaceId: string };
+          const workspacePath = path.join('/data/workspaces', workspaceId);
+          const forgeForWorkspace = new ForgeCore(workspacePath);
+          const config = await forgeForWorkspace.add(refs);
           return {
             content: [{
               type: 'text',
               text: JSON.stringify({
                 added: refs,
+                workspaceId,
                 config: {
                   skills: Object.keys(config.artifacts.skills),
                   agents: Object.keys(config.artifacts.agents),
@@ -397,12 +410,15 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_install': {
-          const { target, dryRun } = (args ?? {}) as { target?: string; dryRun?: boolean };
-          const report = await forge.install({ target: target as any, dryRun });
+          const { workspaceId, target, dryRun } = (args ?? {}) as { workspaceId: string; target?: string; dryRun?: boolean };
+          const workspacePath = path.join('/data/workspaces', workspaceId);
+          const forgeForWorkspace = new ForgeCore(workspacePath);
+          const report = await forgeForWorkspace.install({ target: target as any, dryRun });
           return {
             content: [{
               type: 'text',
               text: JSON.stringify({
+                workspaceId,
                 installed: report.installed.map(r => `${r.type}:${r.id}@${r.version}`),
                 filesWritten: report.filesWritten,
                 conflicts: report.conflicts.length,
