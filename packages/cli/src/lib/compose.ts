@@ -95,6 +95,7 @@ const FORGE_SERVICE = `\
       - FORGE_VAULT_URL=http://vault-mcp:8300
       - FORGE_HOST_WORKSPACES_PATH=\${HORUS_DATA_PATH}/workspaces
       - FORGE_HOST_REPOS_PATH=\${HOST_REPOS_PATH}
+      - FORGE_HOST_MANAGED_REPOS_PATH=\${HORUS_DATA_PATH}/repos
       - FORGE_HOST_ANVIL_URL=http://localhost:\${ANVIL_PORT:-8100}
       - FORGE_HOST_VAULT_URL=http://localhost:\${VAULT_MCP_PORT:-8300}
       - FORGE_HOST_FORGE_URL=http://localhost:\${FORGE_PORT:-8200}
