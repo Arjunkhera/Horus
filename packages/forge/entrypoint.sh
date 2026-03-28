@@ -67,7 +67,7 @@ trap shutdown SIGTERM SIGINT
 mkdir -p "${CONFIG_DIR}"
 mkdir -p "${WORKSPACES_PATH}"
 # Create new managed data directories (repos pool, sessions, test environments)
-mkdir -p "$(dirname "${WORKSPACES_PATH}")/repos"
+mkdir -p "${MANAGED_REPOS_PATH}"
 mkdir -p "$(dirname "${WORKSPACES_PATH}")/sessions"
 mkdir -p "$(dirname "${WORKSPACES_PATH}")/test-env"
 
