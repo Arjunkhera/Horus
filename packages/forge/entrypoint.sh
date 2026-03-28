@@ -249,6 +249,8 @@ log "horus-core plugin installed"
 # Step 8: Start the Forge MCP server in HTTP mode
 log "Starting Forge MCP server in HTTP mode on ${FORGE_HOST}:${FORGE_PORT}..."
 
+export FORGE_WORKSPACE_PATH=/data/workspaces
+
 node /app/packages/cli/dist/index.js serve \
   --transport http \
   --port "${FORGE_PORT}" \
