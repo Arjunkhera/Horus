@@ -25,7 +25,7 @@ from .config.settings import load_settings
 from .layer1.typesense_engine import TypesenseSearchEngine
 from .layer1.filesystem_store import FilesystemStore
 from .layer2.schema import SchemaLoader
-from .api.routes import router, get_store, get_schema_loader, get_settings
+from .api.routes import router, get_store, get_schema_loader, get_settings, get_graph
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
 from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
 from .graph import GraphClient, GraphConnectionError
@@ -238,6 +238,14 @@ def get_settings_override(request: Request):
 
 
 app.dependency_overrides[get_settings] = get_settings_override
+
+
+def get_graph_override(request: Request):
+    """Dependency override to inject Neo4j GraphClient from app state (may be None)."""
+    return getattr(request.app.state, "graph", None)
+
+
+app.dependency_overrides[get_graph] = get_graph_override
 
 # Include API routes
 app.include_router(router, prefix="", tags=["knowledge"])
