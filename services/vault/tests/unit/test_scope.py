@@ -5,7 +5,6 @@ from src.layer2.scope import (
     resolve_scope,
     collect_operational_pages,
     _calculate_specificity,
-    _applies_to_repo,
 )
 from src.layer2.frontmatter import parse_page
 from tests.conftest import (
@@ -99,27 +98,9 @@ class TestCalculateSpecificity:
         scope = Scope(program="anvil-forge-vault", repo="some-other-repo")
         assert _calculate_specificity(page, scope) == 1
 
-    def test_applies_to_match_returns_2(self):
-        page = parse_page(CODING_STANDARDS_PROCEDURE)
-        scope = Scope(program="other", repo="anvil")
-        assert _calculate_specificity(page, scope) == 2
-
     def test_no_match_returns_0(self):
         page = parse_page(ANVIL_DEPLOYMENT_GUIDE)
         scope = Scope(program="other-program", repo="other-repo")
         assert _calculate_specificity(page, scope) == 0
 
 
-class TestAppliesToRepo:
-    def test_dict_format(self):
-        applies_to = [{"repo": "anvil"}, {"repo": "forge"}]
-        assert _applies_to_repo(applies_to, "anvil") is True
-        assert _applies_to_repo(applies_to, "vault") is False
-
-    def test_string_format(self):
-        applies_to = ["anvil", "forge"]
-        assert _applies_to_repo(applies_to, "anvil") is True
-        assert _applies_to_repo(applies_to, "vault") is False
-
-    def test_empty_list(self):
-        assert _applies_to_repo([], "anvil") is False
