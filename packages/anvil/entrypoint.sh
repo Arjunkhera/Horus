@@ -66,7 +66,7 @@ write_sync_status() {
 
 # ── Helper function for bidirectional sync ─────────────────────────────────────
 push_cycle() {
-  git -C "$NOTES_PATH" add -A
+  git -C "$NOTES_PATH" add -- '*.md' '.anvil/types/*.yaml'
   if ! git -C "$NOTES_PATH" diff --cached --quiet; then
     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" || true
@@ -192,7 +192,8 @@ if [ -d "$NOTES_PATH/.git" ]; then
       fi
 
       # ── Commit and push local changes ────────────────────────────────────────
-      git -C "$NOTES_PATH" add -A
+      # Stage only .md notes and type definitions — never binary files like index.db.
+      git -C "$NOTES_PATH" add -- '*.md' '.anvil/types/*.yaml'
       if ! git -C "$NOTES_PATH" diff --cached --quiet; then
         TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         COMMIT_ERR=$(git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" 2>&1) || {

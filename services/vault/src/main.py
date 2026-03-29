@@ -13,6 +13,7 @@ Sets up the REST API with:
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -236,10 +237,29 @@ app.include_router(router, prefix="", tags=["knowledge"])
 @app.get("/health")
 async def health_check():
     """
-    Lightweight health check — no I/O.
+    Lightweight health check.
+    Returns 503 if the git sync daemon has >= 3 consecutive failures.
     Use GET /status for full index diagnostics.
     """
-    return {"status": "ok", "service": "knowledge-service", "version": "0.1.0"}
+    sync_status: dict = {"ok": True, "consecutive_failures": 0}
+    try:
+        sync_status = json.loads(Path("/tmp/sync-status.json").read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass  # File not yet written — first sync cycle hasn't run
+
+    sync_degraded = (
+        not sync_status.get("ok", True)
+        and isinstance(sync_status.get("consecutive_failures"), int)
+        and sync_status["consecutive_failures"] >= 3
+    )
+
+    body = {
+        "status": "degraded" if sync_degraded else "ok",
+        "service": "knowledge-service",
+        "version": "0.1.0",
+        "sync": sync_status,
+    }
+    return JSONResponse(status_code=503 if sync_degraded else 200, content=body)
 
 
 @app.get("/status")
