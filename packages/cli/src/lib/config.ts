@@ -35,6 +35,8 @@ export interface Config {
     vault_router: number;
     forge: number;
     typesense: number;
+    neo4j_http: number;
+    neo4j_bolt: number;
   };
   repos: {
     anvil_notes: string;
@@ -135,6 +137,8 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
       vault_router: parsedPorts?.vault_router ?? defaults.ports.vault_router,
       forge: parsedPorts?.forge ?? defaults.ports.forge,
       typesense: parsedPorts?.typesense ?? defaults.ports.typesense,
+      neo4j_http: parsedPorts?.neo4j_http ?? defaults.ports.neo4j_http,
+      neo4j_bolt: parsedPorts?.neo4j_bolt ?? defaults.ports.neo4j_bolt,
     },
     repos: {
       anvil_notes: (repos?.anvil_notes as string | undefined) ?? defaults.repos.anvil_notes,

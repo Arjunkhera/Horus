@@ -44,6 +44,8 @@ function makeConfig(): Config {
       vault_router: 8050,
       forge: 8200,
       typesense: 8108,
+      neo4j_http: 7474,
+      neo4j_bolt: 7687,
     },
     repos: {
       anvil_notes: 'https://github.com/test/notes',
