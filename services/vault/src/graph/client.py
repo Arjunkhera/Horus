@@ -16,6 +16,17 @@ from .exceptions import GraphConnectionError
 
 logger = logging.getLogger(__name__)
 
+# Module-level import so tests can patch `src.graph.client.GraphDatabase` and
+# `src.graph.client.ServiceUnavailable` without the package being installed.
+try:
+    from neo4j import GraphDatabase  # type: ignore[import-untyped]
+    from neo4j.exceptions import ServiceUnavailable  # type: ignore[import-untyped]
+    _NEO4J_AVAILABLE = True
+except ImportError:
+    GraphDatabase = None  # type: ignore[assignment]
+    ServiceUnavailable = None  # type: ignore[assignment]
+    _NEO4J_AVAILABLE = False
+
 
 class GraphClient:
     """Manages a Neo4j driver connection and exposes a simple query interface."""
@@ -53,13 +64,10 @@ class GraphClient:
         if self._driver is not None:
             return
 
-        try:
-            from neo4j import GraphDatabase  # type: ignore[import-untyped]
-            from neo4j.exceptions import ServiceUnavailable  # type: ignore[import-untyped]
-        except ImportError as exc:
+        if GraphDatabase is None:
             raise GraphConnectionError(
                 "neo4j package is not installed. Add neo4j to requirements.txt."
-            ) from exc
+            )
 
         try:
             logger.info("Connecting to Neo4j at %s", self._uri)
@@ -113,12 +121,10 @@ class GraphClient:
         if self._driver is None:
             self.connect()
 
-        try:
-            from neo4j.exceptions import ServiceUnavailable  # type: ignore[import-untyped]
-        except ImportError as exc:
+        if ServiceUnavailable is None:
             raise GraphConnectionError(
                 "neo4j package is not installed."
-            ) from exc
+            )
 
         try:
             with self._driver.session() as session:
