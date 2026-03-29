@@ -6,6 +6,8 @@ Fan-out reads (B3):   POST /search, /resolve-context, /list-by-scope,
                       /check-duplicates, /suggest-metadata
 Routed reads (B4):    POST /get-page, /get-related, /schema
 Routed writes (B4):   POST /write-page, /validate-page, /registry/add
+Graph path:           POST /graph/edges, /graph/edges/get, /graph/edges/delete,
+                      /graph/traverse, /graph/export, /graph/import
 """
 
 import logging
