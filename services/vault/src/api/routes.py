@@ -25,6 +25,7 @@ from ..config.settings import VaultSettings
 from ..layer1.interface import SearchStore
 from ..layer2.frontmatter import parse_page, to_page_summary, to_page_full
 from ..layer2.scope import resolve_scope, collect_operational_pages
+from ..layer2.graph_resolver import resolve_context_from_graph, resolve_context_fallback
 from ..layer2.mode_filter import (
     filter_by_mode,
     filter_by_type,
@@ -87,6 +88,19 @@ def get_store() -> SearchStore:
 StoreDepends = Annotated[SearchStore, Depends(get_store)]
 
 logger = logging.getLogger(__name__)
+
+
+def get_graph() -> Any:
+    """
+    Dependency injection for Neo4j GraphClient.
+
+    Returns None by default (graph unavailable). main.py overrides this
+    via dependency_overrides when the graph client is available.
+    """
+    return None
+
+
+GraphDepends = Annotated[Any, Depends(get_graph)]
 
 
 def get_schema_loader() -> SchemaLoader:
@@ -160,13 +174,46 @@ def _find_repo_profile(repo: str, store: SearchStore, doc_cache: dict) -> "PageS
     return None
 
 
-def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore) -> ResolveContextResponse:
-    """Synchronous implementation of resolve-context."""
-    doc_cache = store.get_all_documents()
-    scope = resolve_scope(request.repo, store, doc_cache=doc_cache)
-    operational_pages_tuples = collect_operational_pages(scope, store, doc_cache=doc_cache)
+def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore, graph=None) -> ResolveContextResponse:
+    """Synchronous implementation of resolve-context.
 
+    Tries graph-based resolution first (when graph client is available),
+    then falls back to legacy path-based scope resolution.
+    """
+    doc_cache = store.get_all_documents()
     entry_point: PageSummary | None = _find_repo_profile(request.repo, store, doc_cache)
+    scope_dict: dict = {}
+
+    if graph is not None:
+        # Graph path: resolve context via Neo4j traversal
+        try:
+            ctx = resolve_context_from_graph(request.repo, graph)
+            scope_dict = {"repo": ctx.repo}
+            if ctx.repo_profile_id:
+                scope_dict["repo_profile_id"] = ctx.repo_profile_id
+
+            # Load operational pages by ID from store
+            operational_pages_tuples: list[tuple] = []
+            for page_id in ctx.related_page_ids:
+                content = doc_cache.get(page_id) or store.get_document(page_id)
+                if content:
+                    parsed = parse_page(content)
+                    operational_pages_tuples.append((parsed, page_id))
+
+        except Exception:
+            logger.warning(
+                "Graph-based resolve-context failed for '%s', falling back to legacy",
+                request.repo,
+                exc_info=True,
+            )
+            graph = None  # trigger fallback below
+
+    if graph is None:
+        # Legacy path-based fallback
+        scope, operational_pages_tuples = resolve_context_fallback(
+            request.repo, store, doc_cache=doc_cache
+        )
+        scope_dict = scope.to_dict()
 
     if request.include_full:
         operational_pages_list: list[PageFull] = [
@@ -176,25 +223,34 @@ def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore) ->
         operational_pages: list[PageSummary | PageFull] = operational_pages_list  # type: ignore[assignment]
     else:
         operational_pages = to_summaries(operational_pages_tuples)
+
     return ResolveContextResponse(
         entry_point=entry_point,
         operational_pages=operational_pages,
-        scope=scope.to_dict()
+        scope=scope_dict,
     )
 
 
 @router.post("/resolve-context", response_model=ResolveContextResponse)
-async def resolve_context(request: ResolveContextRequest, store: StoreDepends) -> ResolveContextResponse:
+async def resolve_context(
+    request: ResolveContextRequest,
+    store: StoreDepends,
+    graph: GraphDepends,
+) -> ResolveContextResponse:
     """
     Resolve the scope for a repo and return operational pages.
 
     Given a repo name:
-    1. Resolves program membership (repo → program)
+    1. Resolves program membership (repo → program) via graph if available
     2. Finds all operational pages applicable to the repo or its program
     3. Returns the repo-profile page as entry_point
     4. Returns operational pages sorted by specificity (repo-level first)
+
+    Uses Neo4j graph traversal when the graph client is available (injected
+    via get_graph dependency, wired in main.py); falls back to legacy
+    path-based scope resolution otherwise.
     """
-    return await asyncio.to_thread(_resolve_context_sync, request, store)
+    return await asyncio.to_thread(_resolve_context_sync, request, store, graph)
 
 
 def _search_sync(request: SearchRequest, store: SearchStore) -> SearchResponse:
@@ -273,8 +329,12 @@ async def get_page(request: GetPageRequest, store: StoreDepends) -> PageFull:
     return await asyncio.to_thread(_get_page_sync, request, store)
 
 
-def _get_related_sync(request: GetRelatedRequest, store: SearchStore) -> GetRelatedResponse:
-    """Synchronous implementation of get-related."""
+def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None) -> GetRelatedResponse:
+    """Synchronous implementation of get-related.
+
+    Tries graph-based edge traversal first (when graph client is available),
+    then falls back to link_navigator frontmatter-based resolution.
+    """
     content = store.get_document(request.id)
 
     if not content:
@@ -283,7 +343,39 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore) -> GetRela
     parsed = parse_page(content)
     source_summary = to_page_summary(parsed, request.id)
 
-    related_pages_tuples = get_related_pages(parsed, store)
+    related_pages_tuples: list[tuple] = []
+
+    if graph is not None:
+        try:
+            results = graph.query(
+                """
+                MATCH (p:Page {page_id: $page_id})-[r:DOCS|PART_OF|RELATED|DEPENDS_ON|CONSUMED_BY|APPLIES_TO]-(q:Page)
+                RETURN DISTINCT q.page_id AS id
+                LIMIT 50
+                """,
+                {"page_id": request.id}
+            )
+            doc_cache = store.get_all_documents()
+            for row in results:
+                page_id = row.get("id")
+                if not page_id:
+                    continue
+                page_content = doc_cache.get(page_id) or store.get_document(page_id)
+                if page_content:
+                    rel_parsed = parse_page(page_content)
+                    related_pages_tuples.append((rel_parsed, page_id))
+        except Exception:
+            logger.warning(
+                "Graph-based get-related failed for page '%s', falling back to link_navigator",
+                request.id,
+                exc_info=True,
+            )
+            graph = None  # trigger fallback
+
+    if graph is None:
+        # Legacy link_navigator fallback — follows frontmatter relationship fields
+        related_pages_tuples = get_related_pages(parsed, store)
+
     related_summaries = to_summaries(related_pages_tuples)
 
     return GetRelatedResponse(
@@ -293,9 +385,17 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore) -> GetRela
 
 
 @router.post("/get-related", response_model=GetRelatedResponse)
-async def get_related(request: GetRelatedRequest, store: StoreDepends) -> GetRelatedResponse:
-    """Follow links from a page to find related pages."""
-    return await asyncio.to_thread(_get_related_sync, request, store)
+async def get_related(
+    request: GetRelatedRequest,
+    store: StoreDepends,
+    graph: GraphDepends,
+) -> GetRelatedResponse:
+    """Follow links from a page to find related pages.
+
+    Uses Neo4j graph edge traversal when the graph client is available;
+    falls back to link_navigator (frontmatter-based) otherwise.
+    """
+    return await asyncio.to_thread(_get_related_sync, request, store, graph)
 
 
 def _list_by_scope_sync(request: ListByScopeRequest, store: SearchStore) -> ListByScopeResponse:

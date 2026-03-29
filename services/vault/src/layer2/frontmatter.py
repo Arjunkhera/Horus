@@ -33,13 +33,14 @@ class ParsedPage:
     
     # Relationship fields
     related: list = field(default_factory=list)
-    depends_on: list = field(default_factory=list)
-    consumed_by: list = field(default_factory=list)
-    applies_to: list = field(default_factory=list)
-    
+
     # Metadata
     owner: Optional[str] = None
     last_verified: Optional[str] = None
+
+    # Content quality signals (Part B: #f457727c)
+    confidence: Optional[int] = None  # 1-5 scale, set by scanner
+    auto_generated: bool = False       # True for LLM-generated content
 
     # Git hosting and workflow (repo-profile specific)
     hosting: dict = field(default_factory=dict)
@@ -94,13 +95,12 @@ def parse_page(content: str) -> ParsedPage:
         mode=metadata.get("mode", "reference"),
         tags=[str(t) for t in metadata.get("tags", [])],
         related=metadata.get("related", []),
-        depends_on=metadata.get("depends-on", []),  # Note: YAML uses hyphens
-        consumed_by=metadata.get("consumed-by", []),
-        applies_to=metadata.get("applies-to", []),
         owner=metadata.get("owner"),
         last_verified=metadata.get("last-verified"),
         hosting=metadata.get("hosting", {}),
         workflow=metadata.get("workflow", {}),
+        confidence=metadata.get("confidence"),
+        auto_generated=metadata.get("auto-generated", False),
         body=post.content  # Body content without frontmatter
     )
 
@@ -128,7 +128,9 @@ def to_page_summary(parsed: ParsedPage, file_path: str, score: float = 0.0) -> P
         mode=parsed.mode,
         scope=parsed.scope,
         tags=parsed.tags,
-        relevance_score=score if score > 0 else None
+        relevance_score=score if score > 0 else None,
+        confidence=parsed.confidence,
+        auto_generated=parsed.auto_generated,
     )
 
 
@@ -165,9 +167,8 @@ def to_page_full(parsed: ParsedPage, file_path: str) -> PageFull:
         relevance_score=None,
         body=parsed.body,
         related=parsed.related,
-        depends_on=parsed.depends_on,
-        consumed_by=parsed.consumed_by,
-        applies_to=parsed.applies_to,
         owner=parsed.owner,
         last_verified=last_verified_str,
+        confidence=parsed.confidence,
+        auto_generated=parsed.auto_generated,
     )

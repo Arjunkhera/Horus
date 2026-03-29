@@ -1,8 +1,9 @@
 """
 Link navigator for following relationships between knowledge pages.
 
-Follows wiki-links and relationship fields (related, depends_on, consumed_by, applies_to)
-to discover connected pages in the knowledge graph.
+Follows wiki-links and the `related` field to discover connected pages.
+This is the legacy fallback path used when the Neo4j graph client is unavailable.
+Edge fields (depends_on, consumed_by, applies_to) have been migrated to the graph (#968f4051).
 """
 
 import re
@@ -15,13 +16,10 @@ from .frontmatter import ParsedPage, parse_page
 def get_related_pages(page: ParsedPage, store: SearchStore) -> list[tuple[ParsedPage, str]]:
     """
     Follow links from a page to find all related pages.
-    
+
     Strategy:
-    1. Collect all references from the page's relationship fields:
+    1. Collect references from the page's relationship fields:
        - related: explicitly linked pages
-       - depends_on: upstream dependencies
-       - consumed_by: downstream consumers
-       - applies_to: cross-cutting references
     2. Extract reference text from various formats:
        - Wiki-links: [[Page Title]] → "Page Title"
        - Dict refs: {"repo": "name"} → "name"
@@ -29,30 +27,30 @@ def get_related_pages(page: ParsedPage, store: SearchStore) -> list[tuple[Parsed
     3. Search for each reference in the store
     4. Parse and verify matches
     5. Return deduplicated list of (ParsedPage, file_path) tuples
-    
+
+    Note: depends_on, consumed_by, and applies_to were edge fields that have
+    been migrated to the Neo4j graph (#968f4051). This fallback now follows
+    only the `related` frontmatter field.
+
     Args:
         page: Source ParsedPage to follow links from
         store: SearchStore instance for searching
-        
+
     Returns:
         List of (ParsedPage, file_path) tuples for all related pages found
         Deduplicated by file_path.
-        
+
     Example:
         >>> page = ParsedPage(
         ...     title="Document Service",
         ...     related=["[[Search Service]]", {"repo": "auth-service"}],
-        ...     depends_on=["Redis", "PostgreSQL"]
         ... )
         >>> related = get_related_pages(page, store)
-        >>> # Returns pages for Search Service, auth-service, Redis, PostgreSQL
+        >>> # Returns pages for Search Service, auth-service
     """
     # Collect all reference fields into a single list
     all_references = []
     all_references.extend(page.related)
-    all_references.extend(page.depends_on)
-    all_references.extend(page.consumed_by)
-    all_references.extend(page.applies_to)
     
     # Extract reference text from each item
     reference_texts = []
