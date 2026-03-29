@@ -24,15 +24,18 @@ export class RepoIndexQuery {
 
   /**
    * Search repositories by partial name or path match.
+   * Space-separated terms are OR-matched: a repo is included if ANY term matches
+   * its name, localPath, or remoteUrl (case-insensitive).
    */
   search(query: string): RepoIndexEntry[] {
-    const q = query.toLowerCase();
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     return this.repos
-      .filter(r =>
-        r.name.toLowerCase().includes(q) ||
-        r.localPath.toLowerCase().includes(q) ||
-        (r.remoteUrl?.toLowerCase().includes(q) ?? false)
-      )
+      .filter(r => {
+        const name = r.name.toLowerCase();
+        const path = r.localPath.toLowerCase();
+        const url = r.remoteUrl?.toLowerCase() ?? '';
+        return terms.some(t => name.includes(t) || path.includes(t) || url.includes(t));
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
