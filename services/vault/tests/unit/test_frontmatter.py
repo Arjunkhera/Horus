@@ -38,15 +38,6 @@ class TestParsePage:
         page = parse_page(ANVIL_REPO_PROFILE)
         assert len(page.related) >= 2
 
-    def test_parses_depends_on(self):
-        page = parse_page(ANVIL_REPO_PROFILE)
-        assert len(page.depends_on) >= 1
-        assert page.depends_on[0] == {"repo": "forge"}
-
-    def test_parses_applies_to(self):
-        page = parse_page(CODING_STANDARDS_PROCEDURE)
-        assert len(page.applies_to) == 2
-
     def test_parses_owner(self):
         page = parse_page(ANVIL_REPO_PROFILE)
         assert page.owner == "arjun"
@@ -78,10 +69,10 @@ title: Minimal
         assert page.title == "Untitled"
         assert page.type == "concept"
 
-    def test_no_auto_generated_field(self):
-        """ParsedPage should not have auto_generated field."""
+    def test_auto_generated_defaults_false(self):
+        """ParsedPage.auto_generated should default to False for user-authored pages."""
         page = parse_page(ANVIL_REPO_PROFILE)
-        assert not hasattr(page, "auto_generated")
+        assert page.auto_generated is False
 
     def test_no_source_field(self):
         """ParsedPage should not have source field."""
@@ -165,13 +156,12 @@ class TestToPageFull:
         page = parse_page(ANVIL_REPO_PROFILE)
         full = to_page_full(page, "repos/anvil.md")
         assert len(full.related) >= 2
-        assert len(full.depends_on) >= 1
 
-    def test_auto_generated_is_none(self):
-        """PageFull.auto_generated should be None (internal field not set for user pages)."""
+    def test_auto_generated_is_false(self):
+        """PageFull.auto_generated should be False for user-authored pages."""
         page = parse_page(ANVIL_REPO_PROFILE)
         full = to_page_full(page, "repos/anvil.md")
-        assert full.auto_generated is None
+        assert full.auto_generated is False
 
     def test_source_is_none(self):
         """PageFull.source should be None (internal field not set for user pages)."""
