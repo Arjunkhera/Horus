@@ -131,6 +131,40 @@ const FORGE_SERVICE = `\
       retries: 3`;
 
 
+const NEO4J_SERVICE = `\
+  # ── Neo4j ─────────────────────────────────────────────────────────────────
+  # Graph database for relationship-aware knowledge queries.
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "\${NEO4J_HTTP_PORT:-7474}:7474"
+      - "\${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/horus-neo4j
+      - NEO4J_server_memory_heap_initial__size=256m
+      - NEO4J_server_memory_heap_max__size=512m
+      - NEO4J_server_memory_pagecache_size=256m
+      - NEO4J_PLUGINS=[]
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7474"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3`;
+
 const TYPESENSE_SERVICE = `\
   # ── Typesense ────────────────────────────────────────────────────────────
   # Full-text and vector search engine for unified Horus Search.
@@ -266,6 +300,14 @@ services:
   horus-ui:
     ports:
       - "\${TEST_PORT_UI:-9260}:8400"
+
+  neo4j:
+    ports:
+      - "\${TEST_PORT_NEO4J_HTTP:-9474}:7474"
+      - "\${TEST_PORT_NEO4J_BOLT:-9687}:7687"
+    volumes:
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/neo4j-data:/data"
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/neo4j-logs:/logs"
 `;
 }
 
@@ -312,8 +354,13 @@ export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman
       - TYPESENSE_HOST=typesense
       - TYPESENSE_PORT=8108
       - TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=horus-neo4j
     depends_on:
       typesense:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     networks:
       - horus-net
@@ -403,7 +450,11 @@ ${vaultRouterDependsOn}
       retries: 3`;
 
   // Build volumes section
-  const vaultVolumeEntries = vaultEntries.map(([name]) => `  vault-${name}-workspace:`).join('\n');
+  const vaultVolumeEntries = [
+    ...vaultEntries.map(([name]) => `  vault-${name}-workspace:`),
+    '  neo4j-data:',
+    '  neo4j-logs:',
+  ].join('\n');
 
   const sections: string[] = [
     '# ─────────────────────────────────────────────────────────────────────────────',
@@ -422,6 +473,8 @@ ${vaultRouterDependsOn}
     vaultMcpService,
     '',
     FORGE_SERVICE,
+    '',
+    NEO4J_SERVICE,
     '',
     TYPESENSE_SERVICE,
     '',

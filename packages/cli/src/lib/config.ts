@@ -298,6 +298,8 @@ export function generateEnv(config: Config): string {
     `VAULT_ROUTER_PORT=${config.ports.vault_router}`,
     `FORGE_PORT=${config.ports.forge}`,
     `TYPESENSE_PORT=${config.ports.typesense}`,
+    `NEO4J_HTTP_PORT=${config.ports.neo4j_http}`,
+    `NEO4J_BOLT_PORT=${config.ports.neo4j_bolt}`,
     '',
     '# Search',
     `TYPESENSE_API_KEY=${config.search.api_key}`,
