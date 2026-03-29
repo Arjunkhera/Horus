@@ -283,6 +283,99 @@ const TOOLS: Tool[] = [
       required: ["path", "content"],
     },
   },
+  {
+    name: "knowledge_create_edge",
+    description:
+      "Create a directed edge between two knowledge pages in the Neo4j graph. " +
+      "Nodes are created automatically if they do not exist (MERGE semantics). " +
+      "Use this to model relationships such as DEPENDS_ON, PART_OF, SENDS_TO, DOCS, or RELATED.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source_id: { type: "string", description: "Page ID of the source node (e.g. file path)" },
+        target_id: { type: "string", description: "Page ID of the target node" },
+        edge_type: {
+          type: "string",
+          enum: ["PART_OF", "DEPENDS_ON", "SENDS_TO", "DOCS", "RELATED"],
+          description: "Type of relationship between the two pages",
+        },
+        properties: {
+          type: "object",
+          properties: {
+            mechanism: { type: "string", description: "Optional: e.g. queue name, npm package" },
+            role: { type: "string", description: "Optional: e.g. producer, consumer" },
+          },
+          description: "Optional edge metadata",
+        },
+      },
+      required: ["source_id", "target_id", "edge_type"],
+    },
+  },
+  {
+    name: "knowledge_get_edges",
+    description:
+      "Get all edges for a knowledge page in the Neo4j graph. " +
+      "Returns edges in both directions (outgoing and incoming). " +
+      "Optionally filter by edge type.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        page_id: { type: "string", description: "Page ID to retrieve edges for" },
+        edge_type: {
+          type: "string",
+          enum: ["PART_OF", "DEPENDS_ON", "SENDS_TO", "DOCS", "RELATED"],
+          description: "Optional: filter results to this edge type only",
+        },
+      },
+      required: ["page_id"],
+    },
+  },
+  {
+    name: "knowledge_delete_edge",
+    description:
+      "Delete a specific directed edge between two knowledge pages in the Neo4j graph. " +
+      "The source and target page nodes are preserved; only the relationship is removed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source_id: { type: "string", description: "Page ID of the source node" },
+        target_id: { type: "string", description: "Page ID of the target node" },
+        edge_type: {
+          type: "string",
+          enum: ["PART_OF", "DEPENDS_ON", "SENDS_TO", "DOCS", "RELATED"],
+          description: "Type of the edge to delete",
+        },
+      },
+      required: ["source_id", "target_id", "edge_type"],
+    },
+  },
+  {
+    name: "knowledge_traverse_graph",
+    description:
+      "Traverse the knowledge graph from a starting page up to a configurable depth. " +
+      "Returns all reachable pages within the depth limit. " +
+      "Optionally filter traversal to specific edge types.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        start_page_id: { type: "string", description: "Page ID to start traversal from" },
+        edge_types: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["PART_OF", "DEPENDS_ON", "SENDS_TO", "DOCS", "RELATED"],
+          },
+          description: "Optional: restrict traversal to these edge types only",
+        },
+        max_depth: {
+          type: "number",
+          description: "Maximum number of hops to traverse (1–10, default: 3)",
+          default: 3,
+        },
+      },
+      required: ["start_page_id"],
+    },
+  },
 ];
 
 // ── Server factory ────────────────────────────────────────────────────────────
@@ -369,6 +462,34 @@ function buildServer(): Server {
             commit_message: toolArgs.commit_message,
             pr_title: toolArgs.pr_title,
             pr_body: toolArgs.pr_body,
+          });
+          break;
+        case "knowledge_create_edge":
+          result = await callKnowledgeAPI("/graph/edges", {
+            source_id: toolArgs.source_id,
+            target_id: toolArgs.target_id,
+            edge_type: toolArgs.edge_type,
+            properties: toolArgs.properties ?? {},
+          });
+          break;
+        case "knowledge_get_edges":
+          result = await callKnowledgeAPI("/graph/edges/get", {
+            page_id: toolArgs.page_id,
+            edge_type: toolArgs.edge_type,
+          });
+          break;
+        case "knowledge_delete_edge":
+          result = await callKnowledgeAPI("/graph/edges/delete", {
+            source_id: toolArgs.source_id,
+            target_id: toolArgs.target_id,
+            edge_type: toolArgs.edge_type,
+          });
+          break;
+        case "knowledge_traverse_graph":
+          result = await callKnowledgeAPI("/graph/traverse", {
+            start_page_id: toolArgs.start_page_id,
+            edge_types: toolArgs.edge_types,
+            max_depth: toolArgs.max_depth ?? 3,
           });
           break;
         default:
