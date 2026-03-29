@@ -465,7 +465,7 @@ function buildServer(): Server {
           });
           break;
         case "knowledge_get_schema":
-          result = await callKnowledgeAPIGet("/schema");
+          result = await callKnowledgeAPI("/schema", {});
           break;
         case "knowledge_registry_add":
           result = await callKnowledgeAPI("/registry/add", {

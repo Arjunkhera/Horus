@@ -17,6 +17,7 @@ jobs:
     outputs:
       anvil: ${{ steps.filter.outputs.anvil }}
       vault: ${{ steps.filter.outputs.vault }}
+      vault-router: ${{ steps.filter.outputs.vault-router }}
       vault-mcp: ${{ steps.filter.outputs.vault-mcp }}
       forge: ${{ steps.filter.outputs.forge }}
       horus-ui: ${{ steps.filter.outputs.horus-ui }}
