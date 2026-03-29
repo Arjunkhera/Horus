@@ -310,3 +310,21 @@ class WritePageResponse(BaseModel):
     branch: str = Field(..., description="Branch name created")
     commit_sha: str = Field(..., description="SHA of the commit")
     path: str = Field(..., description="Relative file path written")
+
+
+# ============================================================================
+# Graph Export/Import Operations
+# ============================================================================
+
+class GraphExportResponse(BaseModel):
+    """Result of exporting the knowledge graph to the knowledge-base repo."""
+    nodes: int = Field(..., description="Number of nodes exported")
+    edges: int = Field(..., description="Number of edges exported")
+    path: str = Field(..., description="Absolute path of the written export file")
+
+
+class GraphImportResponse(BaseModel):
+    """Result of importing/seeding Neo4j from the knowledge-base repo export file."""
+    nodes: int = Field(..., description="Number of nodes imported")
+    edges: int = Field(..., description="Number of edges imported")
+    skipped: bool = Field(..., description="True if no export file was found and import was skipped")
