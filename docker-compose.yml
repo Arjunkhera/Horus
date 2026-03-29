@@ -93,8 +93,13 @@ services:
       - TYPESENSE_HOST=typesense
       - TYPESENSE_PORT=8108
       - TYPESENSE_API_KEY=${TYPESENSE_API_KEY:-horus-local-key}
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=horus-neo4j
     depends_on:
       typesense:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     networks:
       - horus-net
@@ -263,6 +268,39 @@ services:
       retries: 3
 
 
+  # ── Neo4j ─────────────────────────────────────────────────────────────────
+  # Graph database for relationship-aware knowledge queries.
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/horus-neo4j
+      - NEO4J_server_memory_heap_initial__size=256m
+      - NEO4J_server_memory_heap_max__size=512m
+      - NEO4J_server_memory_pagecache_size=256m
+      - NEO4J_PLUGINS=[]
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7474"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
   # ── Typesense ─────────────────────────────────────────────────────────────
   # Full-text and vector search engine for unified Horus Search.
   typesense:
@@ -332,3 +370,7 @@ networks:
 volumes:
   # Vault write-path staging workspace
   vault-workspace:
+  # Neo4j graph database data
+  neo4j-data:
+  # Neo4j logs
+  neo4j-logs:

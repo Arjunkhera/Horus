@@ -29,6 +29,7 @@ from .layer2.schema import SchemaLoader
 from .api.routes import router, get_store, get_schema_loader, get_settings
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
 from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
+from .graph import GraphClient, GraphConnectionError
 
 
 # Configure logging
@@ -125,6 +126,14 @@ async def lifespan(app: FastAPI):
 
     app.state.schema_loader = schema_loader
 
+    # Initialise Neo4j graph client
+    graph_client = GraphClient(settings)
+    try:
+        graph_client.connect()
+    except GraphConnectionError as exc:
+        logger.warning("Neo4j unavailable at startup (non-fatal): %s", exc)
+    app.state.graph = graph_client
+
     # Start sync daemon (git pull loop + workspace watcher)
     logger.info("Starting sync daemon...")
     git_pull_task, workspace_observer = await start_sync_daemon(
@@ -150,6 +159,7 @@ async def lifespan(app: FastAPI):
         git_pull_task=app.state.git_pull_task,
         workspace_observer=app.state.workspace_observer
     )
+    app.state.graph.close()
     logger.info("Vault Knowledge Service shutdown complete")
 
 

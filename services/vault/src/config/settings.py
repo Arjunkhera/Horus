@@ -34,6 +34,9 @@ class VaultSettings:
     github_token: str = ""
     github_repo: str = ""
     github_base_branch: str = "master"
+    neo4j_uri: str = "bolt://neo4j:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "horus-neo4j"
 
     def log_sources(self, sources: dict[str, str]) -> None:
         """Log which source each value came from."""
@@ -46,6 +49,8 @@ class VaultSettings:
             "log_level",
             "github_repo",
             "github_base_branch",
+            "neo4j_uri",
+            "neo4j_user",
         ]:
             value = getattr(self, field_name)
             source = sources.get(field_name, "unknown")
@@ -55,6 +60,15 @@ class VaultSettings:
         token_source = sources.get("github_token", "unknown")
         token_set = bool(self.github_token)
         logger.info("  github_token: %s (from %s)", "set" if token_set else "not set", token_source)
+
+        # Log neo4j_password presence without exposing value
+        neo4j_password_source = sources.get("neo4j_password", "unknown")
+        neo4j_password_set = bool(self.neo4j_password)
+        logger.info(
+            "  neo4j_password: %s (from %s)",
+            "set" if neo4j_password_set else "not set",
+            neo4j_password_source,
+        )
 
 
 def load_settings(
@@ -82,6 +96,9 @@ def load_settings(
         "github_token": "default",
         "github_repo": "default",
         "github_base_branch": "default",
+        "neo4j_uri": "default",
+        "neo4j_user": "default",
+        "neo4j_password": "default",
     }
 
     # Layer 1: Config file
@@ -110,6 +127,9 @@ def load_settings(
                     "github_token": str,
                     "github_repo": str,
                     "github_base_branch": str,
+                    "neo4j_uri": str,
+                    "neo4j_user": str,
+                    "neo4j_password": str,
                 }
                 for field_name, type_fn in field_map.items():
                     if field_name in file_config:
@@ -151,6 +171,9 @@ def load_settings(
         "GITHUB_TOKEN": ("github_token", str),
         "GITHUB_REPO": ("github_repo", str),
         "GITHUB_BASE_BRANCH": ("github_base_branch", str),
+        "NEO4J_URI": ("neo4j_uri", str),
+        "NEO4J_USER": ("neo4j_user", str),
+        "NEO4J_PASSWORD": ("neo4j_password", str),
     }
     for env_key, (field_name, type_fn) in env_map.items():
         val = os.getenv(env_key)
