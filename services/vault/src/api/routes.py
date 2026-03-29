@@ -25,7 +25,7 @@ Graph path (4 operations):
 import asyncio
 import logging
 from fastapi import APIRouter, Depends
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 from ..config.settings import VaultSettings
 from ..layer1.interface import SearchStore
@@ -44,7 +44,8 @@ from ..layer2.schema import SchemaLoader, PageValidator, RegistryEntry
 from ..layer2.suggester import MetadataSuggester
 from ..layer2.dedup import DuplicateChecker
 from ..layer2.git_writer import GitWriter
-from ..errors import not_found, parse_error, schema_not_loaded, internal_error, registry_not_found, duplicate_entry, validation_error
+from ..layer2.graph_export import export_graph, import_graph
+from ..errors import not_found, parse_error, schema_not_loaded, internal_error, registry_not_found, duplicate_entry, validation_error, VaultError, ErrorCode
 from .graph_models import (
     CreateEdgeRequest,
     EdgeResponse,
@@ -81,6 +82,8 @@ from .models import (
     RegistryEntryModel,
     WritePageRequest,
     WritePageResponse,
+    GraphExportResponse,
+    GraphImportResponse,
 )
 
 
@@ -142,17 +145,18 @@ def get_settings() -> VaultSettings:
 SettingsDepends = Annotated[VaultSettings, Depends(get_settings)]
 
 
-def get_graph() -> Any:
+def get_graph() -> Optional[Any]:
     """
-    Dependency injection for GraphClient.
+    Dependency injection for the Neo4j graph client.
 
-    Returns None when Neo4j is not available (Wave 1 not merged yet).
-    Placeholder replaced via dependency_overrides in main.py when graph is configured.
+    Placeholder replaced via dependency_overrides in main.py when Neo4j is
+    available. Returns None if the graph client is not configured, allowing
+    routes to return 503 gracefully.
     """
     return None
 
 
-GraphDepends = Annotated[Any, Depends(get_graph)]
+GraphDepends = Annotated[Optional[Any], Depends(get_graph)]
 
 
 # ============================================================================
@@ -916,3 +920,46 @@ async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDe
     if graph is None:
         return _graph_unavailable_response()
     return await asyncio.to_thread(_traverse_graph_sync, request, graph)
+
+
+# ============================================================================
+# Graph Export/Import Operations
+# ============================================================================
+
+def _service_unavailable(resource: str) -> VaultError:
+    return VaultError(ErrorCode.SERVICE_UNAVAILABLE, f"{resource} is not available")
+
+
+@router.post("/graph/export", response_model=GraphExportResponse)
+async def graph_export(graph: GraphDepends, settings: SettingsDepends) -> GraphExportResponse:
+    """
+    Export all Neo4j graph nodes and edges to the knowledge-base repo as a JSON file.
+
+    The export is written to ``_graph/edges.json`` inside the knowledge-base repo,
+    enabling git-backed cloud sync and bootstrapping of new instances.
+
+    Returns export stats (node count, edge count, file path).
+    Returns 503 if the graph client is not available.
+    """
+    if graph is None:
+        raise _service_unavailable("Graph client")
+    stats = await asyncio.to_thread(export_graph, graph, settings.knowledge_repo_path)
+    return GraphExportResponse(**stats)
+
+
+@router.post("/graph/import", response_model=GraphImportResponse)
+async def graph_import(graph: GraphDepends, settings: SettingsDepends) -> GraphImportResponse:
+    """
+    Import/seed Neo4j from the JSON export file in the knowledge-base repo.
+
+    Reads ``_graph/edges.json`` and MERGEs all nodes and edges into Neo4j.
+    Idempotent — safe to call multiple times.
+
+    Returns import stats. If the export file does not exist, returns
+    ``skipped: true`` with zero counts rather than raising an error.
+    Returns 503 if the graph client is not available.
+    """
+    if graph is None:
+        raise _service_unavailable("Graph client")
+    stats = await asyncio.to_thread(import_graph, graph, settings.knowledge_repo_path)
+    return GraphImportResponse(**stats)

@@ -376,6 +376,24 @@ const TOOLS: Tool[] = [
       required: ["start_page_id"],
     },
   },
+  {
+    name: "knowledge_export_graph",
+    description:
+      "Export the Neo4j knowledge graph (all nodes and edges) to a JSON file in the " +
+      "knowledge-base repo (_graph/edges.json). Enables git-backed cloud sync and " +
+      "bootstrapping of new instances. Returns export stats (node count, edge count, file path). " +
+      "Returns an error if the graph client is unavailable.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "knowledge_import_graph",
+    description:
+      "Import/seed Neo4j from the graph export file in the knowledge-base repo " +
+      "(_graph/edges.json). Idempotent — uses MERGE so it is safe to call multiple times. " +
+      "Returns import stats. If the export file does not exist, returns skipped: true " +
+      "with zero counts. Returns an error if the graph client is unavailable.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 // ── Server factory ────────────────────────────────────────────────────────────
@@ -491,6 +509,12 @@ function buildServer(): Server {
             edge_types: toolArgs.edge_types,
             max_depth: toolArgs.max_depth ?? 3,
           });
+          break;
+        case "knowledge_export_graph":
+          result = await callKnowledgeAPI("/graph/export", {});
+          break;
+        case "knowledge_import_graph":
+          result = await callKnowledgeAPI("/graph/import", {});
           break;
         default:
           throw new Error(`Unknown tool: ${name}`);
