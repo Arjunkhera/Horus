@@ -106,8 +106,13 @@ async function fetchLatestVersion(): Promise<string | null> {
 export const updateCommand = new Command('update')
   .description('Update Horus to the latest version')
   .option('--rollback', 'Roll back to the previous version')
+  .option('--build [services...]', 'Build services from source instead of pulling images (e.g. --build vault-router)')
   .option('-y, --yes', 'Skip confirmation prompts')
   .action(async (opts) => {
+    const buildServices: string[] | true | undefined = opts.build;
+    const isBuild = buildServices !== undefined;
+    const serviceList: string[] = Array.isArray(buildServices) ? buildServices : [];
+
     console.log('');
     console.log(chalk.bold(opts.rollback ? 'Horus Rollback' : 'Horus Update'));
     console.log(chalk.dim('──────────────────────────────────────'));
@@ -237,16 +242,23 @@ export const updateCommand = new Command('update')
       console.log(chalk.dim('  Could not reach GitHub to check latest version.'));
     }
     console.log('');
-    console.log(chalk.dim('  Note: this updates the Horus container services only.'));
-    console.log(chalk.dim('  To update the Horus CLI itself, run:'));
-    console.log(`    ${chalk.cyan('npm install -g @arkhera30/cli@latest')}`);
+    if (isBuild) {
+      const target = serviceList.length > 0 ? serviceList.join(', ') : 'all services';
+      console.log(chalk.dim(`  Build mode: rebuilding ${chalk.cyan(target)} from source.`));
+    } else {
+      console.log(chalk.dim('  Note: this updates the Horus container services only.'));
+      console.log(chalk.dim('  To update the Horus CLI itself, run:'));
+      console.log(`    ${chalk.cyan('npm install -g @arkhera30/cli@latest')}`);
+    }
     console.log('');
 
     if (!opts.yes) {
-      const confirmed = await confirm({
-        message: 'Pull latest images and restart services?',
-        default: true,
-      });
+      const action = isBuild
+        ? serviceList.length > 0
+          ? `Build ${serviceList.join(', ')} from source and restart?`
+          : 'Build all services from source and restart?'
+        : 'Pull latest images and restart services?';
+      const confirmed = await confirm({ message: action, default: true });
       if (!confirmed) {
         console.log(chalk.dim('Update cancelled.'));
         return;
@@ -264,27 +276,41 @@ export const updateCommand = new Command('update')
       console.log(chalk.dim((error as Error).message));
     }
 
-    // Pull latest images (non-fatal — images may not be published yet)
-    console.log('');
-    console.log(chalk.bold('Pulling latest images...'));
-    try {
-      await composeStreaming(runtime, runtime.name === 'podman' ? ['pull'] : ['pull', '--ignore-pull-failures']);
-    } catch {
-      console.log(chalk.yellow('Some images could not be pulled.'));
-      console.log(chalk.dim('Continuing — services will be built from source if build contexts are available.'));
-    }
+    if (isBuild) {
+      // Build from source — skip image pull
+      console.log('');
+      console.log(chalk.bold(serviceList.length > 0 ? `Building ${serviceList.join(', ')}...` : 'Building all services...'));
+      const upArgs = ['up', '--build', '-d', '--force-recreate', '--remove-orphans', ...serviceList];
+      try {
+        await composeStreaming(runtime, upArgs);
+      } catch (error) {
+        console.log(chalk.red('Build failed.'));
+        console.log(chalk.dim((error as Error).message));
+        process.exit(1);
+      }
+    } else {
+      // Pull latest images (non-fatal — images may not be published yet)
+      console.log('');
+      console.log(chalk.bold('Pulling latest images...'));
+      try {
+        await composeStreaming(runtime, runtime.name === 'podman' ? ['pull'] : ['pull', '--ignore-pull-failures']);
+      } catch {
+        console.log(chalk.yellow('Some images could not be pulled.'));
+        console.log(chalk.dim('Continuing — services will be built from source if build contexts are available.'));
+      }
 
-    // Restart changed services (--force-recreate ensures containers are replaced
-    // even when the :latest tag didn't change locally — the pull step above fetched
-    // the new image, but `up -d` alone would skip recreation if the tag matches)
-    console.log('');
-    console.log(chalk.bold('Restarting services...'));
-    try {
-      await composeStreaming(runtime, ['up', '-d', '--force-recreate', '--remove-orphans']);
-    } catch (error) {
-      console.log(chalk.red('Failed to restart services.'));
-      console.log(chalk.dim((error as Error).message));
-      process.exit(1);
+      // Restart changed services (--force-recreate ensures containers are replaced
+      // even when the :latest tag didn't change locally — the pull step above fetched
+      // the new image, but `up -d` alone would skip recreation if the tag matches)
+      console.log('');
+      console.log(chalk.bold('Restarting services...'));
+      try {
+        await composeStreaming(runtime, ['up', '-d', '--force-recreate', '--remove-orphans']);
+      } catch (error) {
+        console.log(chalk.red('Failed to restart services.'));
+        console.log(chalk.dim((error as Error).message));
+        process.exit(1);
+      }
     }
 
     // Wait for health
