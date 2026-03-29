@@ -36,6 +36,8 @@ export const DEFAULT_PORTS = {
   ui: 8400,          // horus-ui — user-facing web interface
   forge: 8200,
   typesense: 8108,   // Typesense search engine
+  neo4j_http: 7474,  // Neo4j Browser / HTTP API
+  neo4j_bolt: 7687,  // Neo4j Bolt protocol
 } as const;
 
 // ── Default repository URLs ─────────────────────────────────────────────────
@@ -56,6 +58,7 @@ export const SERVICES = [
   'forge',
   'horus-ui',
   'typesense',
+  'neo4j',
 ] as const;
 
 export type ServiceName = (typeof SERVICES)[number];
@@ -68,6 +71,7 @@ export const HEALTH_ENDPOINTS: Record<ServiceName, { port: number; path: string 
   'forge': { port: 8200, path: '/health' },
   'horus-ui': { port: 8400, path: '/api/health' },
   'typesense': { port: 8108, path: '/health' },
+  'neo4j': { port: 7474, path: '/' },
 };
 
 // ── Config version ──────────────────────────────────────────────────────────
