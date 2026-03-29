@@ -73,21 +73,22 @@ class PageSummary(BaseModel):
     scope: dict = Field(default_factory=dict, description="Scope dict with optional keys: program, repo")
     tags: list[str] = Field(default_factory=list)
     relevance_score: Optional[float] = Field(None, description="Search relevance score (0-1)")
+    confidence: Optional[int] = Field(None, description="Content confidence score (1-5 scale, set by scanner)")
+    auto_generated: bool = Field(False, description="True if content was LLM-generated")
 
 
 class PageFull(PageSummary):
     """
     Full page content including body and all relationship fields.
     Extends PageSummary with the complete page data.
+
+    Edge fields (depends_on, consumed_by, applies_to) have been removed —
+    graph relationships are now managed in Neo4j (#968f4051).
     """
     body: str = Field(..., description="Full markdown content without frontmatter")
     related: list = Field(default_factory=list, description="Links to related knowledge pages")
-    depends_on: list = Field(default_factory=list, description="Upstream dependencies")
-    consumed_by: list = Field(default_factory=list, description="Downstream consumers")
-    applies_to: list = Field(default_factory=list, description="Cross-cutting: repos this applies to")
     owner: Optional[str] = None
     last_verified: Optional[str] = None
-    auto_generated: Optional[bool] = None
     source: Optional[str] = None
 
 

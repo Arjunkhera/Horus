@@ -95,8 +95,10 @@ def collect_operational_pages(
 
     A page is applicable if:
     - scope.repo matches (specificity=2), OR
-    - scope.program matches (specificity=1), OR
-    - applies_to references scope.repo (specificity=2)
+    - scope.program matches (specificity=1)
+
+    Note: applies_to cross-cutting match was migrated to the Neo4j graph
+    (#968f4051) and is no longer performed here.
 
     Returns list of (ParsedPage, file_path) tuples sorted by
     specificity descending (repo-level first, program-level second).
@@ -139,16 +141,16 @@ def _calculate_specificity(page: ParsedPage, scope: Scope) -> int:
     Calculate how specifically a page applies to the scope.
 
     Returns:
-        2 — page applies at repo level (direct match or applies-to)
+        2 — page applies at repo level (direct match)
         1 — page applies at program level
         0 — page does not apply
+
+    Note: applies_to cross-cutting match was removed when edge fields were
+    migrated to the Neo4j graph (#968f4051). Repo-level matching now relies
+    solely on scope.repo in the page's scope dict.
     """
     # Repo-level match (highest specificity)
     if scope.repo and page.scope.get("repo") == scope.repo:
-        return 2
-
-    # Cross-cutting applies-to match (treated as repo-level)
-    if scope.repo and _applies_to_repo(page.applies_to, scope.repo):
         return 2
 
     # Program-level match
@@ -158,13 +160,3 @@ def _calculate_specificity(page: ParsedPage, scope: Scope) -> int:
     return 0
 
 
-def _applies_to_repo(applies_to: list[Any], repo: str) -> bool:
-    """Check if the applies_to field references the given repo."""
-    for item in applies_to:
-        if isinstance(item, dict):
-            if item.get("repo") == repo:
-                return True
-        elif isinstance(item, str):
-            if item == repo:
-                return True
-    return False
