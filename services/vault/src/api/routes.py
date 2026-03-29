@@ -14,6 +14,12 @@ Write path (5 operations):
 8. POST /check-duplicates - Score content similarity against existing KB pages
 9. GET  /schema - Return full schema definition + registries
 10. POST /registry/add - Add a new entry to a registry
+
+Graph path (4 operations):
+11. POST /graph/edges - Create an edge between two pages
+12. POST /graph/edges/get - Get all edges for a page
+13. POST /graph/edges/delete - Delete an edge between two pages
+14. POST /graph/traverse - Traverse graph from a starting page
 """
 
 import asyncio
@@ -39,6 +45,15 @@ from ..layer2.suggester import MetadataSuggester
 from ..layer2.dedup import DuplicateChecker
 from ..layer2.git_writer import GitWriter
 from ..errors import not_found, parse_error, schema_not_loaded, internal_error, registry_not_found, duplicate_entry, validation_error
+from .graph_models import (
+    CreateEdgeRequest,
+    EdgeResponse,
+    GetEdgesRequest,
+    GetEdgesResponse,
+    DeleteEdgeRequest,
+    TraverseGraphRequest,
+    TraverseGraphResponse,
+)
 from .models import (
     ResolveContextRequest,
     ResolveContextResponse,
@@ -125,6 +140,19 @@ def get_settings() -> VaultSettings:
 
 
 SettingsDepends = Annotated[VaultSettings, Depends(get_settings)]
+
+
+def get_graph() -> Any:
+    """
+    Dependency injection for GraphClient.
+
+    Returns None when Neo4j is not available (Wave 1 not merged yet).
+    Placeholder replaced via dependency_overrides in main.py when graph is configured.
+    """
+    return None
+
+
+GraphDepends = Annotated[Any, Depends(get_graph)]
 
 
 # ============================================================================
@@ -742,3 +770,149 @@ async def write_page(
     Requires GitHub configuration (GITHUB_TOKEN, GITHUB_REPO).
     """
     return await asyncio.to_thread(_write_page_sync, request, loader, settings)
+
+
+# ============================================================================
+# Graph Path Operations (Neo4j-backed)
+# These routes require the GraphClient (Wave 1). When the graph is not
+# available (graph is None), they return HTTP 503.
+# ============================================================================
+
+try:
+    from ..layer2.graph_edges import (
+        Edge,
+        EdgeType,
+        EdgeProperties,
+        create_edge as _create_edge,
+        get_edges as _get_edges,
+        delete_edge as _delete_edge,
+        traverse_graph as _traverse_graph,
+    )
+    _GRAPH_EDGES_AVAILABLE = True
+except ImportError:
+    _GRAPH_EDGES_AVAILABLE = False
+
+
+_GRAPH_UNAVAILABLE_DETAIL = {
+    "reason": "Neo4j GraphClient is not configured. "
+              "Ensure the graph layer (Wave 1) is deployed and GRAPH_URI is set."
+}
+
+
+def _graph_unavailable_response():
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=503,
+        content={"error": True, "code": "SERVICE_UNAVAILABLE", "message": "Graph service is not available", "details": _GRAPH_UNAVAILABLE_DETAIL},
+    )
+
+
+def _create_edge_sync(request: CreateEdgeRequest, graph: Any) -> EdgeResponse:
+    """Synchronous implementation of POST /graph/edges."""
+    edge_type = EdgeType.from_str(request.edge_type)
+    props = EdgeProperties(
+        mechanism=request.properties.mechanism,
+        role=request.properties.role,
+    )
+    edge = Edge(
+        source_id=request.source_id,
+        target_id=request.target_id,
+        edge_type=edge_type,
+        properties=props,
+    )
+    _create_edge(graph, edge)
+    return EdgeResponse(
+        source_id=request.source_id,
+        target_id=request.target_id,
+        edge_type=edge_type.value,
+        properties=props.to_dict(),
+    )
+
+
+@router.post("/graph/edges", response_model=EdgeResponse)
+async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends) -> Any:
+    """
+    Create a directed edge between two knowledge pages in Neo4j.
+
+    Nodes (Pages) are created if they do not already exist (MERGE semantics).
+    Requires Neo4j GraphClient — returns 503 if graph is unavailable.
+    """
+    if graph is None:
+        return _graph_unavailable_response()
+    return await asyncio.to_thread(_create_edge_sync, request, graph)
+
+
+def _get_edges_sync(request: GetEdgesRequest, graph: Any) -> GetEdgesResponse:
+    """Synchronous implementation of POST /graph/edges/get."""
+    edge_type: "EdgeType | None" = None
+    if request.edge_type:
+        edge_type = EdgeType.from_str(request.edge_type)
+    raw_edges = _get_edges(graph, request.page_id, edge_type)
+    edges = [
+        EdgeResponse(
+            source_id=request.page_id,
+            target_id=e["target_id"],
+            edge_type=e["edge_type"],
+            properties=e.get("properties", {}),
+        )
+        for e in raw_edges
+    ]
+    return GetEdgesResponse(page_id=request.page_id, edges=edges)
+
+
+@router.post("/graph/edges/get", response_model=GetEdgesResponse)
+async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends) -> Any:
+    """
+    Get all edges for a page, optionally filtered by edge type.
+
+    Returns edges in both directions (outgoing and incoming).
+    Requires Neo4j GraphClient — returns 503 if graph is unavailable.
+    """
+    if graph is None:
+        return _graph_unavailable_response()
+    return await asyncio.to_thread(_get_edges_sync, request, graph)
+
+
+def _delete_edge_sync(request: DeleteEdgeRequest, graph: Any) -> dict:
+    """Synchronous implementation of POST /graph/edges/delete."""
+    edge_type = EdgeType.from_str(request.edge_type)
+    _delete_edge(graph, request.source_id, request.target_id, edge_type)
+    return {"deleted": True, "source_id": request.source_id, "target_id": request.target_id, "edge_type": edge_type.value}
+
+
+@router.post("/graph/edges/delete")
+async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends) -> Any:
+    """
+    Delete a specific directed edge between two pages.
+
+    Requires Neo4j GraphClient — returns 503 if graph is unavailable.
+    """
+    if graph is None:
+        return _graph_unavailable_response()
+    return await asyncio.to_thread(_delete_edge_sync, request, graph)
+
+
+def _traverse_graph_sync(request: TraverseGraphRequest, graph: Any) -> TraverseGraphResponse:
+    """Synchronous implementation of POST /graph/traverse."""
+    edge_types: "list[EdgeType] | None" = None
+    if request.edge_types:
+        edge_types = [EdgeType.from_str(et) for et in request.edge_types]
+    pages = _traverse_graph(graph, request.start_page_id, edge_types, request.max_depth)
+    return TraverseGraphResponse(
+        start_page_id=request.start_page_id,
+        pages=pages,
+        depth=request.max_depth,
+    )
+
+
+@router.post("/graph/traverse", response_model=TraverseGraphResponse)
+async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDepends) -> Any:
+    """
+    Traverse the knowledge graph from a starting page up to max_depth hops.
+
+    Returns all reachable pages within the depth limit. Optionally filter
+    by edge type(s). Requires Neo4j GraphClient — returns 503 if unavailable.
+    """
+    if graph is None:
+        return _graph_unavailable_response()
+    return await asyncio.to_thread(_traverse_graph_sync, request, graph)
