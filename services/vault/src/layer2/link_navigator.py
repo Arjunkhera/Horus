@@ -1,8 +1,9 @@
 """
 Link navigator for following relationships between knowledge pages.
 
-Follows wiki-links and relationship fields (related, depends_on, consumed_by, applies_to)
-to discover connected pages in the knowledge graph.
+Follows wiki-links and the `related` field to discover connected pages.
+This is the legacy fallback path used when the Neo4j graph client is unavailable.
+Edge fields (depends_on, consumed_by, applies_to) have been migrated to the graph (#968f4051).
 """
 
 import re

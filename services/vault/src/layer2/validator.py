@@ -163,9 +163,6 @@ def _extract_field_values(page: ParsedPage) -> dict:
         "owner": page.owner,
         "last-verified": page.last_verified,
         "related": page.related if page.related else None,
-        "depends-on": page.depends_on if page.depends_on else None,
-        "consumed-by": page.consumed_by if page.consumed_by else None,
-        "applies-to": page.applies_to if page.applies_to else None,
         "hosting": page.hosting if page.hosting else None,
         "workflow": page.workflow if page.workflow else None,
     }
