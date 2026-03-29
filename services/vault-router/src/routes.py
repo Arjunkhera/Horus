@@ -486,3 +486,102 @@ async def registry_add(
         return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Upstream vault '{vault_name}' error: {e}")
+
+
+# ── Graph Path endpoints ──────────────────────────────────────────────────────
+# Graph operations are backed by a single Neo4j instance shared across vaults.
+# All graph routes forward to the default vault (or an explicit vault= in body).
+
+
+def _resolve_vault_for_graph(body: dict[str, Any], settings: "VaultRouterSettings") -> str:
+    """Determine which vault to route a graph request to.
+
+    Defaults to the configured default vault. An explicit ``vault`` key in the
+    request body overrides this.
+    """
+    vault = body.get("vault")
+    if vault and isinstance(vault, str):
+        return vault
+    return settings.vault_default
+
+
+async def _proxy_graph(
+    path: str,
+    request: Request,
+    settings: "VaultRouterSettings",
+    vault_client: "VaultClient",
+) -> dict[str, Any]:
+    """Forward a graph request to the appropriate upstream vault."""
+    body = await request.json()
+    vault_name = _resolve_vault_for_graph(body, settings)
+    base_url = settings.vault_endpoints.get(vault_name)
+    if not base_url:
+        raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
+
+    url = f"{base_url.rstrip('/')}{path}"
+    try:
+        response = await vault_client.post(url, json=body)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Upstream vault '{vault_name}' error: {e}")
+
+
+@router.post("/graph/edges")
+async def graph_create_edge(
+    request: Request,
+    settings: SettingsDepends,
+    vault_client: ClientDepends,
+) -> dict[str, Any]:
+    """Create a directed edge between two knowledge pages in Neo4j."""
+    return await _proxy_graph("/graph/edges", request, settings, vault_client)
+
+
+@router.post("/graph/edges/get")
+async def graph_get_edges(
+    request: Request,
+    settings: SettingsDepends,
+    vault_client: ClientDepends,
+) -> dict[str, Any]:
+    """Get all edges for a knowledge page, optionally filtered by edge type."""
+    return await _proxy_graph("/graph/edges/get", request, settings, vault_client)
+
+
+@router.post("/graph/edges/delete")
+async def graph_delete_edge(
+    request: Request,
+    settings: SettingsDepends,
+    vault_client: ClientDepends,
+) -> dict[str, Any]:
+    """Delete a specific directed edge between two knowledge pages."""
+    return await _proxy_graph("/graph/edges/delete", request, settings, vault_client)
+
+
+@router.post("/graph/traverse")
+async def graph_traverse(
+    request: Request,
+    settings: SettingsDepends,
+    vault_client: ClientDepends,
+) -> dict[str, Any]:
+    """Traverse the knowledge graph from a starting page up to max_depth hops."""
+    return await _proxy_graph("/graph/traverse", request, settings, vault_client)
+
+
+@router.post("/graph/export")
+async def graph_export(
+    request: Request,
+    settings: SettingsDepends,
+    vault_client: ClientDepends,
+) -> dict[str, Any]:
+    """Export all Neo4j graph nodes and edges to the knowledge-base repo."""
+    return await _proxy_graph("/graph/export", request, settings, vault_client)
+
+
+@router.post("/graph/import")
+async def graph_import(
+    request: Request,
+    settings: SettingsDepends,
+    vault_client: ClientDepends,
+) -> dict[str, Any]:
+    """Import/seed Neo4j from the graph export file in the knowledge-base repo."""
+    return await _proxy_graph("/graph/import", request, settings, vault_client)
