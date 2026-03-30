@@ -42,6 +42,9 @@ class ParsedPage:
     confidence: Optional[int] = None  # 1-5 scale, set by scanner
     auto_generated: bool = False       # True for LLM-generated content
 
+    # Alternative names for resolution (repo-profile specific)
+    aliases: list[str] = field(default_factory=list)  # e.g. sub-service names for monorepo
+
     # Git hosting and workflow (repo-profile specific)
     hosting: dict = field(default_factory=dict)
     workflow: dict = field(default_factory=dict)
@@ -101,6 +104,7 @@ def parse_page(content: str) -> ParsedPage:
         workflow=metadata.get("workflow", {}),
         confidence=metadata.get("confidence"),
         auto_generated=metadata.get("auto-generated", False),
+        aliases=[str(a) for a in metadata.get("aliases", [])],
         body=post.content  # Body content without frontmatter
     )
 
@@ -131,6 +135,7 @@ def to_page_summary(parsed: ParsedPage, file_path: str, score: float = 0.0) -> P
         relevance_score=score if score > 0 else None,
         confidence=parsed.confidence,
         auto_generated=parsed.auto_generated,
+        aliases=parsed.aliases,
     )
 
 
@@ -171,4 +176,5 @@ def to_page_full(parsed: ParsedPage, file_path: str) -> PageFull:
         last_verified=last_verified_str,
         confidence=parsed.confidence,
         auto_generated=parsed.auto_generated,
+        aliases=parsed.aliases,
     )
