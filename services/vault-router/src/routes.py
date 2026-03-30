@@ -187,6 +187,7 @@ async def resolve_context(
 
     best_entry: Optional[dict[str, Any]] = None
     best_score: float = -1.0
+    best_match_type: str = "none"
     all_operational: list[dict[str, Any]] = []
     merged_scope: dict[str, Any] = {}
 
@@ -199,15 +200,20 @@ async def resolve_context(
             if score > best_score:
                 best_score = score
                 best_entry = {**entry, "source_vault": vault_name}
+                best_match_type = data.get("match_type", "none")
         for page in data.get("operational_pages", []):
             all_operational.append({**page, "source_vault": vault_name})
         if data.get("scope"):
             merged_scope.update(data["scope"])
+        # If no entry_point but pages found, still capture match_type
+        if not entry and data.get("operational_pages") and best_match_type == "none":
+            best_match_type = data.get("match_type", "none")
 
     return {
         "entry_point": best_entry,
         "operational_pages": all_operational,
         "scope": merged_scope,
+        "match_type": best_match_type,
     }
 
 
