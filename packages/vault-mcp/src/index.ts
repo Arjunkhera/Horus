@@ -105,6 +105,13 @@ const TOOLS: Tool[] = [
           description: "If true, return full page content. If false (default), return summaries only.",
           default: false,
         },
+        mode: {
+          type: "string",
+          enum: ["search", "exact"],
+          description:
+            "Resolution mode. 'search' (default): relevance-ranked Typesense query — use when the exact scope.repo is not known (e.g. sub-service names). 'exact': scope.repo exact match — use only when the canonical repo name is known with certainty.",
+          default: "search",
+        },
       },
       required: ["repo"],
     },
@@ -422,6 +429,7 @@ function buildServer(): Server {
           result = await callKnowledgeAPI("/resolve-context", {
             repo: toolArgs.repo,
             include_full: toolArgs.include_full ?? false,
+            mode: toolArgs.mode ?? "search",
           });
           break;
         case "knowledge_search":
