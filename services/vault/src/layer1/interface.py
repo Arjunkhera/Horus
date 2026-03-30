@@ -134,12 +134,16 @@ class SearchStore(ABC):
         pass
     
     @abstractmethod
-    def reindex(self) -> None:
+    def reindex(self) -> dict:
         """
         Trigger a full re-index of all collections.
-        
+
         This rebuilds the search index and vector embeddings.
         Called by the sync daemon when changes are detected.
+
+        Returns:
+            dict with at minimum ``indexed`` (int) and ``errors`` (int) counts.
+            Implementations may include additional keys such as ``duration_ms``.
         """
         pass
     

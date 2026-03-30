@@ -375,14 +375,19 @@ class TypesenseSearchEngine(SearchStore):
     # SearchStore interface — index operations
     # ------------------------------------------------------------------
 
-    def reindex(self) -> None:
+    def reindex(self) -> dict:
         """
         Full re-index: scan all collection paths and upsert every .md file into Typesense.
 
         Files starting with '_' are skipped (schema directory).
         Failures on individual files are logged but do not abort the re-index.
+
+        Returns:
+            dict with keys ``indexed`` (int), ``errors`` (int), and ``duration_ms`` (float).
         """
         from ..layer2.frontmatter import parse_page
+
+        start = time.time()
 
         # Purge stale vault documents before re-indexing
         try:
@@ -416,9 +421,12 @@ class TypesenseSearchEngine(SearchStore):
                     errors += 1
                     logger.warning("Failed to index %s: %s", md_file, exc)
 
+        duration_ms = (time.time() - start) * 1000
         logger.info(
-            "Typesense re-index complete: %d documents upserted, %d errors", count, errors
+            "Typesense re-index complete: %d documents upserted, %d errors, %.1f ms",
+            count, errors, duration_ms,
         )
+        return {"indexed": count, "errors": errors, "duration_ms": duration_ms}
 
     def status(self) -> dict[str, Any]:
         """Return Typesense engine status."""
