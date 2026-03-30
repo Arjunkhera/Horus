@@ -14,7 +14,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, call
 
-from src.layer2.graph_export import export_graph, import_graph, EXPORT_FILE_RELATIVE
+from src.layer2.graph_export import export_graph, import_graph, commit_graph_export, EXPORT_FILE_RELATIVE
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -279,3 +279,64 @@ class TestRoundTrip:
 
         edge_call = import_mock.query.call_args_list[-1]  # last call is the edge MERGE
         assert "DOCS" in edge_call[0][0]
+
+
+class TestCommitGraphExport:
+    def test_commit_skips_when_no_changes(self, tmp_path):
+        """commit_graph_export returns skipped=True when file is unchanged in git."""
+        import subprocess
+        # Init a git repo
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@test"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], capture_output=True, check=True)
+        # Create and commit the export file
+        export_file = tmp_path / EXPORT_FILE_RELATIVE
+        export_file.parent.mkdir(parents=True, exist_ok=True)
+        export_file.write_text('{"version":"1","nodes":[],"edges":[]}')
+        subprocess.run(["git", "-C", str(tmp_path), "add", EXPORT_FILE_RELATIVE], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "init"], capture_output=True, check=True)
+
+        # No changes — should skip
+        result = commit_graph_export(str(tmp_path))
+        assert result.get("skipped") is True
+        assert result["committed"] is False
+
+    def test_commit_succeeds_when_file_changed(self, tmp_path):
+        """commit_graph_export commits when _graph/edges.json has new content."""
+        import subprocess
+        # Init a git repo with initial commit
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@test"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], capture_output=True, check=True)
+        readme = tmp_path / "README.md"
+        readme.write_text("# test")
+        subprocess.run(["git", "-C", str(tmp_path), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "init"], capture_output=True, check=True)
+
+        # Write a new export file (untracked)
+        export_file = tmp_path / EXPORT_FILE_RELATIVE
+        export_file.parent.mkdir(parents=True, exist_ok=True)
+        export_file.write_text('{"version":"1","nodes":[{"page_id":"p1"}],"edges":[]}')
+
+        # Should commit (push will fail since no remote, but commit succeeds)
+        result = commit_graph_export(str(tmp_path))
+        assert result["committed"] is True
+        assert "sha" in result
+
+    def test_commit_detects_content_change(self, tmp_path):
+        """commit_graph_export detects when file content changes after initial commit."""
+        import subprocess
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@test"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], capture_output=True, check=True)
+        export_file = tmp_path / EXPORT_FILE_RELATIVE
+        export_file.parent.mkdir(parents=True, exist_ok=True)
+        export_file.write_text('{"version":"1","nodes":[],"edges":[]}')
+        subprocess.run(["git", "-C", str(tmp_path), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "init"], capture_output=True, check=True)
+
+        # Modify the file
+        export_file.write_text('{"version":"1","nodes":[{"page_id":"new"}],"edges":[]}')
+
+        result = commit_graph_export(str(tmp_path))
+        assert result["committed"] is True

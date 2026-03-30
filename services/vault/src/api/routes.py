@@ -44,7 +44,7 @@ from ..layer2.schema import SchemaLoader, PageValidator, RegistryEntry
 from ..layer2.suggester import MetadataSuggester
 from ..layer2.dedup import DuplicateChecker
 from ..layer2.git_writer import GitWriter
-from ..layer2.graph_export import export_graph, import_graph
+from ..layer2.graph_export import export_graph, import_graph, commit_graph_export
 from ..errors import not_found, parse_error, schema_not_loaded, internal_error, registry_not_found, duplicate_entry, validation_error, VaultError, ErrorCode
 from .graph_models import (
     CreateEdgeRequest,
@@ -944,6 +944,11 @@ async def graph_export(graph: GraphDepends, settings: SettingsDepends) -> GraphE
     if graph is None:
         raise _service_unavailable("Graph client")
     stats = await asyncio.to_thread(export_graph, graph, settings.knowledge_repo_path)
+    # Auto-commit and push the export to git
+    commit_result = await asyncio.to_thread(
+        commit_graph_export, settings.knowledge_repo_path, settings.github_base_branch
+    )
+    stats["git"] = commit_result
     return GraphExportResponse(**stats)
 
 

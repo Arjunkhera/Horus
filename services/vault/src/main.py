@@ -30,6 +30,7 @@ from .api.routes import router, get_store, get_schema_loader, get_settings, get_
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
 from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
 from .graph import GraphClient, GraphConnectionError
+from .layer2.graph_export import import_graph
 
 
 # Configure logging
@@ -130,6 +131,17 @@ async def lifespan(app: FastAPI):
     graph_client = GraphClient(settings)
     try:
         graph_client.connect()
+        # Bootstrap graph from committed _graph/edges.json if available
+        import_stats = await asyncio.to_thread(
+            import_graph, graph_client, settings.knowledge_repo_path
+        )
+        if import_stats.get("skipped"):
+            logger.info("No graph export file found — skipping graph bootstrap")
+        else:
+            logger.info(
+                "Graph bootstrapped: %d nodes, %d edges",
+                import_stats["nodes"], import_stats["edges"],
+            )
     except GraphConnectionError as exc:
         logger.warning("Neo4j unavailable at startup (non-fatal): %s", exc)
     app.state.graph = graph_client
