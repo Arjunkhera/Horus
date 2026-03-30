@@ -54,6 +54,13 @@ export const RepoIndexEntrySchema = z.object({
   lastScannedAt: z.string(),    // ISO date string
   /** Confirmed workflow metadata (optional — absent until user confirms) */
   workflow: RepoIndexWorkflowSchema.optional(),
+  /**
+   * The remote name to fetch from and use as the worktree base branch.
+   * e.g. "origin", "upstream". Set explicitly to avoid ambiguity when
+   * multiple remotes are configured (e.g. team forks for code review).
+   * Populated via forge_develop resolution chain: registry → Vault → user prompt.
+   */
+  default_remote: z.string().optional(),
 });
 
 export const RepoIndexSchema = z.object({

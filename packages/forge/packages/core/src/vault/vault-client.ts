@@ -16,6 +16,8 @@ export interface VaultRepoProfile {
     'default-branch'?: string;
     'pr-target'?: string;
     'branch-convention'?: string;
+    /** Remote name to fetch from and use as worktree base, e.g. "origin" or "upstream" */
+    'default-remote'?: string;
   };
 }
 

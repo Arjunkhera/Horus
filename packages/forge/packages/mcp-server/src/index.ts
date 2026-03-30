@@ -206,7 +206,8 @@ const TOOLS = [
     description:
       'Start or resume a code session for a work item on a repository. Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/. ' +
       'Implements 3-tier repo resolution: (1) local repo index, (2) managed pool, (3) error with guidance. ' +
-      'Returns "needs_workflow_confirmation" when the repo has no saved workflow configuration — call again with the workflow parameter to confirm. ' +
+      'Returns "needs_workflow_confirmation" when the repo has no saved workflow — call again with the workflow parameter to confirm. ' +
+      'Returns "needs_remote_confirmation" when no default remote is configured and the repo has multiple remotes — call again with the defaultRemote parameter (e.g. "origin" or "upstream"). ' +
       'If a session already exists for this workItem+repo it is resumed. A second concurrent agent gets a separate slot ("-2" suffix).',
     inputSchema: {
       type: 'object' as const,
@@ -222,6 +223,11 @@ const TOOLS = [
         branch: {
           type: 'string',
           description: 'Feature branch name (optional — auto-generated from workItem if omitted)',
+        },
+        defaultRemote: {
+          type: 'string',
+          description: 'Remote name to fetch from and use as the worktree base (e.g. "origin", "upstream"). ' +
+            'Required when responding to a needs_remote_confirmation response. Saved to the repo registry for future calls.',
         },
         workflow: {
           type: 'object',
@@ -575,10 +581,11 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_develop': {
-          const { repo, workItem, branch, workflow } = (args ?? {}) as {
+          const { repo, workItem, branch, defaultRemote, workflow } = (args ?? {}) as {
             repo: string;
             workItem: string;
             branch?: string;
+            defaultRemote?: string;
             workflow?: {
               type: 'owner' | 'fork' | 'contributor';
               upstream?: string;
@@ -599,8 +606,11 @@ function buildServer(workspaceRoot: string): Server {
               isError: true,
             };
           }
-          const developResult = await forge.repoDevelop({ repo, workItem, branch, workflow });
-          if (developResult.status === 'needs_workflow_confirmation') {
+          const developResult = await forge.repoDevelop({ repo, workItem, branch, defaultRemote, workflow });
+          if (
+            developResult.status === 'needs_workflow_confirmation' ||
+            developResult.status === 'needs_remote_confirmation'
+          ) {
             return {
               content: [{
                 type: 'text',
