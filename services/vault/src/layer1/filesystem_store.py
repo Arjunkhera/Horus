@@ -32,11 +32,18 @@ class FilesystemStore(SearchStore):
         self._collection_paths = collection_paths
         self._indexed_paths: list[tuple[str, str]] = []  # (file_path, collection)
 
-    def reindex(self) -> None:
-        """Scan filesystem and build the in-memory document list."""
+    def reindex(self) -> dict:
+        """Scan filesystem and build the in-memory document list.
+
+        Returns:
+            dict with keys ``indexed`` (int), ``errors`` (int), and ``duration_ms`` (float).
+        """
+        import time
+        start = time.time()
         self._indexed_paths = []
 
         count = 0
+        errors = 0
         for coll_name, root_path in self._collection_paths.items():
             root = Path(root_path)
             if not root.exists():
@@ -50,9 +57,12 @@ class FilesystemStore(SearchStore):
                     self._indexed_paths.append((file_path, coll_name))
                     count += 1
                 except Exception as e:
+                    errors += 1
                     logger.warning("Failed to index %s: %s", md_file, e)
 
-        logger.info("Filesystem index built: %d pages indexed", count)
+        duration_ms = (time.time() - start) * 1000
+        logger.info("Filesystem index built: %d pages indexed, %d errors, %.1f ms", count, errors, duration_ms)
+        return {"indexed": count, "errors": errors, "duration_ms": duration_ms}
 
     def search(self, query: str, collection: Optional[str] = None, limit: int = 10) -> list[SearchResult]:
         """Text search is not available without an external search engine."""

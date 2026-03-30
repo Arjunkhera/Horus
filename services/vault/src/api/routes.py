@@ -20,6 +20,9 @@ Graph path (4 operations):
 12. POST /graph/edges/get - Get all edges for a page
 13. POST /graph/edges/delete - Delete an edge between two pages
 14. POST /graph/traverse - Traverse graph from a starting page
+
+Admin path (1 operation):
+15. POST /reindex - Trigger a full re-index of all collections
 """
 
 import asyncio
@@ -968,3 +971,42 @@ async def graph_import(graph: GraphDepends, settings: SettingsDepends) -> GraphI
         raise _service_unavailable("Graph client")
     stats = await asyncio.to_thread(import_graph, graph, settings.knowledge_repo_path)
     return GraphImportResponse(**stats)
+
+
+# ============================================================================
+# Admin Operations
+# ============================================================================
+
+def _reindex_sync(store: SearchStore) -> dict:
+    """Synchronous implementation of POST /reindex."""
+    return store.reindex()
+
+
+@router.post("/reindex")
+async def reindex(store: StoreDepends) -> dict:
+    """
+    Trigger a full re-index of all vault collections.
+
+    Scans all collection paths and rebuilds the search index from the filesystem.
+    Returns a summary of how many documents were indexed and how many errors occurred.
+
+    Returns 501 if the configured store does not support reindexing.
+    """
+    if not hasattr(store, "reindex") or not callable(getattr(store, "reindex")):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=501,
+            content={"error": True, "code": "NOT_IMPLEMENTED", "message": "This store does not support reindexing"},
+        )
+    result = await asyncio.to_thread(_reindex_sync, store)
+    logger.info(
+        "Reindex complete: indexed=%d errors=%d duration_ms=%.1f",
+        result.get("indexed", 0),
+        result.get("errors", 0),
+        result.get("duration_ms", 0.0),
+    )
+    return {
+        "indexed": result.get("indexed", 0),
+        "errors": result.get("errors", 0),
+        "duration_ms": result.get("duration_ms", 0.0),
+    }

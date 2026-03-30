@@ -8,6 +8,7 @@ Routed reads (B4):    POST /get-page, /get-related, /schema
 Routed writes (B4):   POST /write-page, /validate-page, /registry/add
 Graph path:           POST /graph/edges, /graph/edges/get, /graph/edges/delete,
                       /graph/traverse, /graph/export, /graph/import
+Admin path:           POST /reindex
 """
 
 import logging
@@ -587,3 +588,64 @@ async def graph_import(
 ) -> dict[str, Any]:
     """Import/seed Neo4j from the graph export file in the knowledge-base repo."""
     return await _proxy_graph("/graph/import", request, settings, vault_client)
+
+
+# ── Admin endpoints ───────────────────────────────────────────────────────────
+
+@router.post("/reindex")
+async def reindex(
+    request: Request,
+    settings: SettingsDepends,
+    vault_client: ClientDepends,
+) -> dict[str, Any]:
+    """
+    Trigger a full re-index on all (or filtered) vault instances.
+
+    Fan-out to every configured vault (or only those matching an optional
+    ``vault`` filter in the request body). Merges ``indexed``, ``errors``,
+    and ``duration_ms`` totals from all responses.
+
+    Returns 200 with merged summary JSON:
+      ``{ "indexed": int, "errors": int, "duration_ms": float, "vaults": {...} }``
+    """
+    # Accept an empty body (curl -X POST with no JSON payload)
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        body = {}
+
+    vault_filter = _parse_vault_filter(body)
+    results = await fan_out(vault_client, settings.vault_endpoints, "/reindex", body, vault_filter)
+
+    total_indexed = 0
+    total_errors = 0
+    total_duration_ms = 0.0
+    per_vault: dict[str, Any] = {}
+
+    for vault_name, data in results.items():
+        if "error" in data:
+            per_vault[vault_name] = data
+            continue
+        vault_indexed = data.get("indexed", 0)
+        vault_errors = data.get("errors", 0)
+        vault_duration_ms = data.get("duration_ms", 0.0)
+        total_indexed += vault_indexed
+        total_errors += vault_errors
+        total_duration_ms += vault_duration_ms
+        per_vault[vault_name] = {
+            "indexed": vault_indexed,
+            "errors": vault_errors,
+            "duration_ms": vault_duration_ms,
+        }
+
+    logger.info(
+        "Router reindex complete: indexed=%d errors=%d duration_ms=%.1f vaults=%s",
+        total_indexed, total_errors, total_duration_ms, list(per_vault.keys()),
+    )
+
+    return {
+        "indexed": total_indexed,
+        "errors": total_errors,
+        "duration_ms": total_duration_ms,
+        "vaults": per_vault,
+    }
