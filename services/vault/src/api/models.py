@@ -18,7 +18,7 @@ Write path (5 operations):
 - registry/add: Add a new entry to a registry
 """
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -101,6 +101,7 @@ class ResolveContextRequest(BaseModel):
     """Request to resolve the scope for a repo and return operational pages."""
     repo: str = Field(..., description="Repository name to resolve context for")
     include_full: bool = Field(False, description="If True, return PageFull objects; if False, return PageSummary objects")
+    mode: Literal["search", "exact"] = Field("search", description="Resolution mode: search (default, relevance-ranked Typesense query) or exact (scope.repo == repo match)")
 
 
 class ResolveContextResponse(BaseModel):
@@ -108,6 +109,7 @@ class ResolveContextResponse(BaseModel):
     entry_point: Optional[PageSummary] = Field(None, description="The repo-profile page for the given repo")
     operational_pages: list[PageSummary | PageFull] = Field(default_factory=list, description="All operational pages applicable to the scope")
     scope: dict = Field(default_factory=dict, description="Resolved scope: program, repo")
+    match_type: Literal["exact", "search", "none"] = Field("none", description="How the context was resolved: exact (scope match), search (Typesense relevance), or none (no results)")
 
 
 # ============================================================================
