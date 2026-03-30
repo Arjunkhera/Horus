@@ -87,7 +87,7 @@ export async function bootstrapCollection(
         } else {
           // Check for missing optional fields and add them via alter API
           const missingFields = schema.fields!.filter(
-            (f) => !existingFieldNames.has(f.name) && f.name !== 'embedding',
+            (f) => !existingFieldNames.has(f.name) && f.name !== 'embedding' && f.name !== 'id',
           );
           if (missingFields.length > 0) {
             await client.collections(COLLECTION_NAME).update({ fields: missingFields } as Parameters<ReturnType<TypesenseClient['collections']>['update']>[0]);
