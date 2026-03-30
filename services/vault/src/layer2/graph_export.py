@@ -5,6 +5,7 @@ for git-backed cloud sync and new instance bootstrapping.
 """
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -105,3 +106,47 @@ def import_graph(graph: Any, knowledge_repo_path: str) -> dict:
 
     logger.info("Graph imported: %d nodes, %d edges from %s", node_count, edge_count, export_path)
     return {"nodes": node_count, "edges": edge_count, "skipped": False}
+
+
+def commit_graph_export(knowledge_repo_path: str, base_branch: str = "master") -> dict:
+    """
+    Commit and push _graph/edges.json to the base branch if it has changed.
+    Returns commit stats or {"skipped": True} if nothing changed.
+    """
+    export_rel = EXPORT_FILE_RELATIVE
+
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", knowledge_repo_path] + list(args),
+            capture_output=True, text=True,
+        )
+
+    # Stage the export file
+    result = _git("add", export_rel)
+    if result.returncode != 0:
+        logger.error("git add failed: %s", result.stderr)
+        return {"committed": False, "error": result.stderr}
+
+    # Check if there are staged changes for this file
+    result = _git("diff", "--cached", "--quiet", "--", export_rel)
+    if result.returncode == 0:
+        logger.info("Graph export unchanged — skipping commit")
+        return {"committed": False, "skipped": True}
+
+    # Commit
+    result = _git("commit", "-m", "chore: update graph export (edges.json)")
+    if result.returncode != 0:
+        logger.error("git commit failed: %s", result.stderr)
+        return {"committed": False, "error": result.stderr}
+
+    commit_sha = _git("rev-parse", "HEAD").stdout.strip()
+    logger.info("Graph export committed: %s", commit_sha)
+
+    # Push
+    result = _git("push", "origin", base_branch)
+    if result.returncode != 0:
+        logger.error("git push failed: %s", result.stderr)
+        return {"committed": True, "pushed": False, "sha": commit_sha, "error": result.stderr}
+
+    logger.info("Graph export pushed to %s", base_branch)
+    return {"committed": True, "pushed": True, "sha": commit_sha}

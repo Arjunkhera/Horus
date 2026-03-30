@@ -321,6 +321,7 @@ class GraphExportResponse(BaseModel):
     nodes: int = Field(..., description="Number of nodes exported")
     edges: int = Field(..., description="Number of edges exported")
     path: str = Field(..., description="Absolute path of the written export file")
+    git: Optional[dict] = Field(None, description="Git commit/push result (None if git sync disabled)")
 
 
 class GraphImportResponse(BaseModel):
