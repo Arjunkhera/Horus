@@ -75,6 +75,7 @@ class PageSummary(BaseModel):
     relevance_score: Optional[float] = Field(None, description="Search relevance score (0-1)")
     confidence: Optional[int] = Field(None, description="Content confidence score (1-5 scale, set by scanner)")
     auto_generated: bool = Field(False, description="True if content was LLM-generated")
+    aliases: list[str] = Field(default_factory=list, description="Alternative names, e.g. sub-service names for monorepo repo-profiles")
 
 
 class PageFull(PageSummary):
