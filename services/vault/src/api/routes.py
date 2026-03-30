@@ -206,12 +206,71 @@ def _find_repo_profile(repo: str, store: SearchStore, doc_cache: dict) -> "PageS
     return None
 
 
+_SEARCH_THRESHOLD = 0.3   # minimum relevance score for search-mode results
+_SEARCH_LIMIT = 5         # max operational pages returned in search mode
+_KNOWLEDGE_PAGE_TYPES = {"repo-profile", "guide", "procedure", "concept", "learning", "keystone"}
+
+
+def _resolve_context_search_sync(request: ResolveContextRequest, store: SearchStore) -> ResolveContextResponse:
+    """Search-mode implementation: Typesense text query ranked by relevance."""
+    search_results = store.search(request.repo, limit=(_SEARCH_LIMIT + 1) * 3)
+    doc_cache = store.get_all_documents()
+
+    entry_point: "PageSummary | None" = None
+    op_page_tuples: list[tuple] = []  # (parsed, path, score)
+
+    for result in search_results:
+        if result.score < _SEARCH_THRESHOLD:
+            continue
+
+        content = doc_cache.get(result.file_path)
+        if not content:
+            continue
+
+        parsed = parse_page(content)
+        if parsed.type not in _KNOWLEDGE_PAGE_TYPES:
+            continue
+
+        if parsed.type == "repo-profile" and entry_point is None:
+            entry_point = to_page_summary(parsed, result.file_path, result.score)
+        elif parsed.type != "repo-profile" and len(op_page_tuples) < _SEARCH_LIMIT:
+            op_page_tuples.append((parsed, result.file_path, result.score))
+
+    scores: dict[str, float] = {path: score for _, path, score in op_page_tuples}
+    pages_for_summaries = [(parsed, path) for parsed, path, _ in op_page_tuples]
+
+    if request.include_full:
+        operational_pages: "list[PageSummary | PageFull]" = [
+            to_page_full(parsed, path) for parsed, path in pages_for_summaries
+        ]
+    else:
+        operational_pages = to_summaries(pages_for_summaries, scores)
+
+    scope_dict: dict = {"repo": request.repo}
+    if entry_point and entry_point.scope:
+        scope_dict = entry_point.scope
+
+    match_type = "search" if (entry_point or operational_pages) else "none"
+    return ResolveContextResponse(
+        entry_point=entry_point,
+        operational_pages=operational_pages,
+        scope=scope_dict,
+        match_type=match_type,
+    )
+
+
 def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore, graph=None) -> ResolveContextResponse:
     """Synchronous implementation of resolve-context.
 
-    Tries graph-based resolution first (when graph client is available),
-    then falls back to legacy path-based scope resolution.
+    Dispatches to search mode (default) or exact mode based on request.mode.
+
+    Search mode: Typesense text query on repo name, ranked by relevance.
+    Exact mode: scope.repo exact match via graph traversal or legacy fallback.
     """
+    if request.mode == "search":
+        return _resolve_context_search_sync(request, store)
+
+    # exact mode — scope.repo == repo match (current behavior)
     doc_cache = store.get_all_documents()
     entry_point: PageSummary | None = _find_repo_profile(request.repo, store, doc_cache)
     scope_dict: dict = {}
@@ -256,10 +315,12 @@ def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore, gr
     else:
         operational_pages = to_summaries(operational_pages_tuples)
 
+    match_type = "exact" if (entry_point or operational_pages) else "none"
     return ResolveContextResponse(
         entry_point=entry_point,
         operational_pages=operational_pages,
         scope=scope_dict,
+        match_type=match_type,
     )
 
 
