@@ -26,6 +26,10 @@ const BASE_SCHEMA: CollectionCreateSchema = {
     { name: 'scope_program', type: 'string', facet: true, optional: true },
     { name: 'scope_context', type: 'string', facet: true, optional: true },
     { name: 'vault_name', type: 'string', facet: true, optional: true },
+    // Vault content quality signals (optional — Anvil/Forge documents are unaffected)
+    { name: 'confidence', type: 'int32', optional: true },
+    { name: 'auto_generated', type: 'bool', facet: true, optional: true },
+    { name: 'aliases', type: 'string[]', facet: true, optional: true },
     // Forge-specific fields (optional — Anvil/Vault documents are unaffected)
     { name: 'local_path', type: 'string', optional: true },
     { name: 'remote_url', type: 'string', optional: true },
@@ -71,17 +75,26 @@ export async function bootstrapCollection(
       const existing = collections.find((c: { name: string }) => c.name === COLLECTION_NAME);
 
       if (existing) {
-        const hasEmbedding = (existing as { fields?: Array<{ name: string }> }).fields?.some(
-          (f) => f.name === 'embedding',
-        ) ?? false;
+        const existingFields = (existing as { fields?: Array<{ name: string }> }).fields ?? [];
+        const existingFieldNames = new Set(existingFields.map((f) => f.name));
+
+        const hasEmbedding = existingFieldNames.has('embedding');
         const wantsEmbedding = embeddingConfig != null;
 
-        if (hasEmbedding === wantsEmbedding) {
+        if (hasEmbedding !== wantsEmbedding) {
+          // Embedding mismatch: drop and recreate (embedding changes require full rebuild)
+          await client.collections(COLLECTION_NAME).delete();
+        } else {
+          // Check for missing optional fields and add them via alter API
+          const missingFields = schema.fields!.filter(
+            (f) => !existingFieldNames.has(f.name) && f.name !== 'embedding',
+          );
+          if (missingFields.length > 0) {
+            await client.collections(COLLECTION_NAME).update({ fields: missingFields } as Parameters<ReturnType<TypesenseClient['collections']>['update']>[0]);
+            return { migrated: true };
+          }
           return { migrated: false }; // Schema matches — nothing to do
         }
-
-        // Mismatch: drop and recreate so embedding field aligns with config
-        await client.collections(COLLECTION_NAME).delete();
       }
 
       await client.collections().create(schema);

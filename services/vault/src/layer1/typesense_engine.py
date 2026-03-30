@@ -118,7 +118,7 @@ class TypesenseSearchEngine(SearchStore):
             except Exception:
                 pass
 
-        return {
+        doc: dict = {
             "id": file_path,
             "source": SOURCE,
             "source_type": parsed.type or "concept",
@@ -131,7 +131,14 @@ class TypesenseSearchEngine(SearchStore):
             "mode": parsed.mode or "reference",
             "created_at": created_at,
             "modified_at": modified_at,
+            "auto_generated": bool(getattr(parsed, "auto_generated", False)),
+            "aliases": [str(a) for a in (getattr(parsed, "aliases", None) or [])],
         }
+        # confidence is optional — omit key entirely when absent to avoid Typesense int32 null issues
+        confidence = getattr(parsed, "confidence", None)
+        if confidence is not None:
+            doc["confidence"] = int(confidence)
+        return doc
 
     def _upsert_raw(self, doc: dict) -> None:
         """Fire-and-forget Typesense upsert. Logs failures, never raises."""
@@ -192,7 +199,7 @@ class TypesenseSearchEngine(SearchStore):
 
             params: dict[str, Any] = {
                 "q": query or "*",
-                "query_by": "title,body,tags",
+                "query_by": "title,body,tags,aliases",
                 "filter_by": filter_by,
                 "per_page": limit if not collection else limit * 3,
                 "sort_by": "_text_match:desc",
