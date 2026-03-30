@@ -9,6 +9,7 @@ import type { GlobalConfig } from '../models/global-config.js';
 import { SessionStoreManager } from '../session/session-store.js';
 import { ForgeError } from '../adapters/errors.js';
 import { installEnforcementHooks } from './git-enforcement.js';
+import { VaultClient } from '../vault/vault-client.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -40,6 +41,11 @@ export interface RepoDevelopOptions {
    * If omitted AND repo has no saved workflow, returns needs_workflow_confirmation.
    */
   workflow?: WorkflowInput;
+  /**
+   * Inline default remote — provided by the caller when responding to a
+   * needs_remote_confirmation response. Saved to the repo index for future calls.
+   */
+  defaultRemote?: string;
 }
 
 /** Session created or resumed successfully */
@@ -74,7 +80,22 @@ export interface RepoDevelopNeedsConfirmation {
   message: string;
 }
 
-export type RepoDevelopResponse = RepoDevelopResult | RepoDevelopNeedsConfirmation;
+/**
+ * Default remote not yet configured for this repo.
+ * The caller should present availableRemotes to the user, collect their choice,
+ * and re-call forge_develop with the defaultRemote parameter set.
+ * The chosen remote will be saved to the repo index for future calls.
+ */
+export interface RepoDevelopNeedsRemoteConfirmation {
+  status: 'needs_remote_confirmation';
+  availableRemotes: string[];
+  message: string;
+}
+
+export type RepoDevelopResponse =
+  | RepoDevelopResult
+  | RepoDevelopNeedsConfirmation
+  | RepoDevelopNeedsRemoteConfirmation;
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
@@ -184,6 +205,73 @@ async function fetchRemotes(repoPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * List remote names configured in a repo (e.g. ["origin", "upstream"]).
+ * Returns an empty array if git is unavailable or the repo has no remotes.
+ */
+async function getAvailableRemotes(repoPath: string): Promise<string[]> {
+  try {
+    const out = await runGit(['remote'], repoPath, 5000);
+    return out.split('\n').map(r => r.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve which remote to use as the worktree fetch base.
+ *
+ * Resolution chain (first match wins):
+ * 1. Forge repo registry — repoEntry.default_remote
+ * 2. Vault repo profile — workflow.default-remote field
+ * 3. Derive from confirmed workflow:
+ *    - owner/contributor → workflow.pushTo (is both push and fetch remote)
+ *    - fork → match workflow.upstream URL against remotesSnapshot to find remote name
+ * 4. null — caller should ask the user and re-call with defaultRemote set
+ */
+async function resolveDefaultRemote(
+  repoEntry: RepoIndexEntry,
+  vaultBaseUrl: string | undefined,
+  confirmedWorkflow: RepoIndexWorkflow | WorkflowInput | null,
+): Promise<string | null> {
+  // 1. Forge registry
+  if (repoEntry.default_remote) return repoEntry.default_remote;
+
+  // 2. Vault repo profile
+  if (vaultBaseUrl) {
+    try {
+      const client = new VaultClient(vaultBaseUrl);
+      const profile = await client.fetchRepoProfile(repoEntry.name);
+      const vaultRemote = profile?.workflow?.['default-remote'];
+      if (vaultRemote) return vaultRemote;
+    } catch {
+      // Vault unreachable — degrade gracefully
+    }
+  }
+
+  // 3. Derive from confirmed workflow
+  if (confirmedWorkflow) {
+    if (confirmedWorkflow.type !== 'fork') {
+      // owner/contributor: pushTo is the single remote for both push and fetch
+      return confirmedWorkflow.pushTo;
+    }
+    // fork: the fetch remote is the upstream, not the fork.
+    // Use remotesSnapshot (if saved) to map the upstream URL to its remote name.
+    const snapshot = 'remotesSnapshot' in confirmedWorkflow
+      ? confirmedWorkflow.remotesSnapshot
+      : undefined;
+    if (snapshot && confirmedWorkflow.upstream) {
+      const remoteName = Object.entries(snapshot)
+        .find(([, url]) => url === confirmedWorkflow.upstream)?.[0];
+      if (remoteName) return remoteName;
+    }
+    // fork without a usable snapshot — fall through to ask the user
+  }
+
+  // 4. Not found — caller will prompt the user
+  return null;
 }
 
 /**
@@ -483,6 +571,38 @@ export async function repoDevelop(
   // ── Git fetch (best-effort) ───────────────────────────────────────────────
   await fetchRemotes(worktreeBasePath);
 
+  // ── Resolve default remote ────────────────────────────────────────────────
+  // Resolution chain: Forge registry → Vault repo profile → ask user.
+  // A hardcoded "origin" is not safe when multiple remotes exist (e.g. team
+  // forks added for code review). The resolved remote is used both to verify
+  // the tracking ref exists and as the worktree base.
+  const vaultBaseUrl = globalConfig.mcp_endpoints?.vault?.url;
+  let resolvedRemote = await resolveDefaultRemote(repoEntry, vaultBaseUrl, effectiveWorkflow);
+
+  if (resolvedRemote === null) {
+    if (opts.defaultRemote) {
+      // User provided it inline — save to registry so future calls skip this step
+      resolvedRemote = opts.defaultRemote;
+      const updatedEntry: RepoIndexEntry = { ...repoEntry, default_remote: resolvedRemote };
+      const updatedRepos = repoIndex
+        ? repoIndex.repos.map(r => r.name === repoName ? updatedEntry : r)
+        : [updatedEntry];
+      await saveRepoIndexFn(updatedRepos);
+      repoEntry = updatedEntry;
+    } else {
+      // Ask the user which remote to use
+      const availableRemotes = await getAvailableRemotes(worktreeBasePath);
+      return {
+        status: 'needs_remote_confirmation',
+        availableRemotes,
+        message:
+          `Repository "${repoName}" has multiple remotes or no default remote configured. ` +
+          `Call forge_develop again with the 'defaultRemote' parameter set to the remote you want to fetch from ` +
+          `(e.g. "origin" or "upstream"). It will be saved for future sessions.`,
+      };
+    }
+  }
+
   // ── Create git worktree ───────────────────────────────────────────────────
   await fs.mkdir(sessionsRoot, { recursive: true });
 
@@ -495,14 +615,14 @@ export async function repoDevelop(
     // Doesn't exist — good
   }
 
-  // Determine the tracking ref for the worktree base
-  // Prefer origin/<baseBranch> if available, else local baseBranch
+  // Determine the tracking ref for the worktree base.
+  // Prefer <resolvedRemote>/<baseBranch> if available, else fall back to local baseBranch.
   let worktreeBase = baseBranch;
   try {
-    await runGit(['rev-parse', '--verify', `origin/${baseBranch}`], worktreeBasePath, 5000);
-    worktreeBase = `origin/${baseBranch}`;
+    await runGit(['rev-parse', '--verify', `${resolvedRemote}/${baseBranch}`], worktreeBasePath, 5000);
+    worktreeBase = `${resolvedRemote}/${baseBranch}`;
   } catch {
-    // No origin/<baseBranch> — use local branch
+    // Remote tracking ref not available — use local branch
   }
 
   try {
