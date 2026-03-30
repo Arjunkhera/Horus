@@ -248,7 +248,8 @@ const TOOLS: Tool[] = [
     name: "knowledge_registry_add",
     description:
       "Add a new entry to a registry (tags, repos, or programs). Use when validation " +
-      "rejects a value that should be added rather than corrected.",
+      "rejects a value that should be added rather than corrected. Set via_pr=true to " +
+      "write the updated registry to a git branch and open a PR instead of editing in-place.",
     inputSchema: {
       type: "object",
       properties: {
@@ -259,8 +260,13 @@ const TOOLS: Tool[] = [
             id: { type: "string" },
             description: { type: "string" },
             aliases: { type: "array", items: { type: "string" } },
+            scope_program: { type: "string" },
           },
           required: ["id"],
+        },
+        via_pr: {
+          type: "boolean",
+          description: "If true, write the updated registry to a git branch and open a GitHub PR. Requires GitHub token and repo to be configured.",
         },
       },
       required: ["registry", "entry"],
@@ -471,6 +477,7 @@ function buildServer(): Server {
           result = await callKnowledgeAPI("/registry/add", {
             registry: toolArgs.registry,
             entry: toolArgs.entry,
+            via_pr: toolArgs.via_pr ?? false,
           });
           break;
         case "knowledge_write_page":

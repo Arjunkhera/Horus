@@ -282,6 +282,7 @@ class RegistryAddRequest(BaseModel):
     """Add a new entry to a named registry."""
     registry: str = Field(..., description="Registry name: tags, services, teams, or orgs")
     entry: RegistryEntryModel
+    via_pr: bool = Field(False, description="If true, write the updated registry to a git branch and open a PR instead of editing the file in-place")
 
 
 class RegistryAddResponse(BaseModel):
@@ -290,6 +291,7 @@ class RegistryAddResponse(BaseModel):
     registry: str
     entry: RegistryEntryModel
     total_entries: int
+    pr_url: Optional[str] = Field(None, description="GitHub PR URL (only set when via_pr=True)")
 
 
 # ============================================================================

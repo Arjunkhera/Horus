@@ -237,9 +237,8 @@ class SchemaLoader:
             self._registries[name] = entries
             logger.info("Registry '%s' loaded: %d entries", name, len(entries))
 
-    def _persist_registry(self, name: str) -> None:
-        """Write a registry back to its YAML file."""
-        reg_file = self._schema_dir / "registries" / f"{name}.yaml"
+    def _serialize_registry(self, name: str) -> str:
+        """Serialize a registry to its YAML string without writing to disk."""
         entries = self._registries.get(name, [])
         data: dict[str, Any] = {
             name: [
@@ -249,9 +248,18 @@ class SchemaLoader:
                 for e in entries
             ]
         }
+        import io
+        buf = io.StringIO()
+        yaml.dump(data, buf, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        return buf.getvalue()
+
+    def _persist_registry(self, name: str) -> None:
+        """Write a registry back to its YAML file."""
+        reg_file = self._schema_dir / "registries" / f"{name}.yaml"
+        content = self._serialize_registry(name)
         with open(reg_file, "w") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-        logger.info("Registry '%s' persisted (%d entries)", name, len(entries))
+            f.write(content)
+        logger.info("Registry '%s' persisted (%d entries)", name, len(self._registries.get(name, [])))
 
 
 # ---------------------------------------------------------------------------
