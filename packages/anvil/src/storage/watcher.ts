@@ -138,10 +138,12 @@ export class AnvilWatcher {
     for (const [filePath, eventType] of events) {
       try {
         if (eventType === 'unlink') {
-          // Find note in DB by filePath and delete
+          // Find note in DB by filePath and delete.
+          // Normalize with path.resolve() to handle any format differences between
+          // the chokidar-reported path and what was stored in the index at creation time.
           const row = this.options.db.getOne<{ note_id: string }>(
             'SELECT note_id FROM notes WHERE file_path = ?',
-            [filePath]
+            [path.resolve(filePath)]
           );
           if (row) {
             deleteNote(this.options.db, row.note_id);
@@ -177,8 +179,11 @@ export class AnvilWatcher {
    * Handles new files, modified files, and deleted files.
    */
   private async startupCatchup(): Promise<void> {
+    // Normalize all stored paths with path.resolve() so comparisons are format-agnostic.
+    // Stored paths may differ from scanned paths due to symlinks, vault path aliases, or
+    // notes created before a path convention change.
     const indexedPaths = new Map(
-      getAllNotePaths(this.options.db).map((row) => [row.filePath, row.modified])
+      getAllNotePaths(this.options.db).map((row) => [path.resolve(row.filePath), row.modified])
     );
 
     const toReindex: string[] = [];
@@ -189,8 +194,7 @@ export class AnvilWatcher {
       this.options.vaultPath,
       this.buildIgnorePatternsArray()
     )) {
-      // Convert relative path to absolute path for consistency
-      const absolutePath = path.join(this.options.vaultPath, file.filePath);
+      const absolutePath = path.resolve(path.join(this.options.vaultPath, file.filePath));
       currentPaths.add(absolutePath);
       const indexedModified = indexedPaths.get(absolutePath);
 

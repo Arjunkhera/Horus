@@ -17,6 +17,7 @@ import { handleGetRelated } from '../tools/get-related.js';
 import { handleSyncPull } from '../tools/sync-pull.js';
 import { handleSyncPush } from '../tools/sync-push.js';
 import { handleHorusSearch } from '../tools/horus-search.js';
+import { handleDeleteNote } from '../tools/delete-note.js';
 import {
   CreateNoteInputSchema,
   GetNoteInputSchema,
@@ -334,6 +335,26 @@ export function createMcpServer(ctx: ToolContext): Server {
         required: ['query'],
       },
     },
+    {
+      name: 'anvil_delete_note',
+      description:
+        'Delete a note by ID. Removes the backing file and index entry. Use force=true to remove orphaned index entries whose backing file is already missing.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          noteId: {
+            type: 'string',
+            description: 'UUID of the note to delete',
+          },
+          force: {
+            type: 'boolean',
+            description:
+              'If true, removes the index entry even when the backing file is missing (default: false)',
+          },
+        },
+        required: ['noteId'],
+      },
+    },
   ];
 
   // Register ListTools handler
@@ -518,6 +539,18 @@ export function createMcpServer(ctx: ToolContext): Server {
         case 'anvil_sync_push': {
           const input = SyncPushInputSchema.parse(args);
           const result = await handleSyncPush(input, ctx);
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_delete_note': {
+          const input = args as { noteId: string; force?: boolean };
+          const result = await handleDeleteNote(input, ctx);
           if (isAnvilError(result)) {
             return {
               content: [{ type: 'text', text: JSON.stringify(result) }],
