@@ -16,7 +16,7 @@ const PORT = process.env.PORT ?? 8400
 const ANVIL_URL  = process.env.ANVIL_URL  ?? 'http://anvil:8100'
 const VAULT_URL  = process.env.VAULT_URL  ?? 'http://vault-mcp:8300'
 const FORGE_URL  = process.env.FORGE_URL  ?? 'http://forge:8200'
-const SEARCH_URL = process.env.SEARCH_URL ?? 'http://typesense:8108'
+const SEARCH_URL = process.env.SEARCH_URL ?? 'http://search:8108'
 
 // ─── File helpers (atomic write) ─────────────────────────────────────────────
 
@@ -40,6 +40,41 @@ const DEFAULTS = {
   dashboards:  { dashboards: [] },
 }
 
+// ─── Service config ───────────────────────────────────────────────────────────
+
+/**
+ * Default service list. Used when services.json does not exist or is empty.
+ * Each entry: { name: string, url: string }
+ */
+const DEFAULT_SERVICES = [
+  { name: 'anvil',  url: ANVIL_URL  },
+  { name: 'vault',  url: VAULT_URL  },
+  { name: 'forge',  url: FORGE_URL  },
+  { name: 'search', url: SEARCH_URL },
+]
+
+/**
+ * Read the service list from services.json.
+ * Supports both the legacy object format ({ anvil: { url }, ... }) and the
+ * new array format ([{ name, url }, ...]). Always returns an array.
+ */
+async function readServiceList(path) {
+  const raw = await readJsonFile(path, null)
+  if (!raw) return DEFAULT_SERVICES
+
+  // New array format
+  if (Array.isArray(raw)) {
+    return raw.length > 0 ? raw : DEFAULT_SERVICES
+  }
+
+  // Legacy object format — migrate on the fly
+  const entries = Object.entries(raw).map(([name, cfg]) => ({
+    name,
+    url: typeof cfg === 'string' ? cfg : (cfg?.url ?? ''),
+  }))
+  return entries.length > 0 ? entries : DEFAULT_SERVICES
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function probeHealth(name, url) {
@@ -58,23 +93,14 @@ app.use(express.json())
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
-/** Load the configured service list (saved config merged over defaults). */
-async function loadServices() {
-  const saved = await readJsonFile(SVCCONFIG, {})
-  return { ...DEFAULT_SERVICES(), ...saved }
-}
-
 app.get('/api/health', async (_req, res) => {
-  const svcMap = await loadServices()
+  const serviceList = await readServiceList(SVCCONFIG)
   const checkedAt = new Date().toISOString()
-  const results = await Promise.all(
-    Object.entries(svcMap).map(([name, cfg]) => probeHealth(name, cfg.url))
-  )
-  const services = results.map(s => ({ ...s, checkedAt }))
-  const overall = services.every(s => s.status === 'healthy') ? 'healthy'
-    : services.some(s => s.status === 'healthy')               ? 'degraded'
+  const results = await Promise.all(serviceList.map(svc => probeHealth(svc.name, svc.url)))
+  const overall = results.every(s => s.status === 'healthy') ? 'healthy'
+    : results.some(s => s.status === 'healthy')              ? 'degraded'
     : 'unhealthy'
-  res.json({ overall, services, checkedAt })
+  res.json({ overall, services: results, checkedAt })
 })
 
 // ─── Proxy routes ─────────────────────────────────────────────────────────────
@@ -121,17 +147,25 @@ app.put('/api/config/dashboards', async (req, res) => {
   res.json(req.body)
 })
 
-const DEFAULT_SERVICES = () => ({
-  anvil:  { url: ANVIL_URL },
-  vault:  { url: VAULT_URL },
-  forge:  { url: FORGE_URL },
-  search: { url: SEARCH_URL },
+/**
+ * GET /api/config/services
+ * Returns the current service list as an array: [{ name, url }]
+ */
+app.get('/api/config/services', async (_req, res) => {
+  res.json(await readServiceList(SVCCONFIG))
 })
 
-app.get('/api/config/services', async (_req, res) => {
-  // Merge saved config over defaults so new services appear automatically
-  const saved = await readJsonFile(SVCCONFIG, {})
-  res.json({ ...DEFAULT_SERVICES(), ...saved })
+/**
+ * PUT /api/config/services
+ * Replace the entire service list. Body: [{ name, url }]
+ */
+app.put('/api/config/services', async (req, res) => {
+  const list = req.body
+  if (!Array.isArray(list)) {
+    return res.status(400).json({ error: 'Body must be an array of { name, url } objects' })
+  }
+  await writeJsonAtomic(SVCCONFIG, list)
+  res.json(list)
 })
 
 // ─── Chat (Phase 2) ──────────────────────────────────────────────────────────
@@ -155,16 +189,14 @@ mountConversationRoutes(app)
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 app.get('/api/setup/status', async (_req, res) => {
-  const svcMap = await loadServices()
-  const results = await Promise.all(
-    Object.entries(svcMap).map(([name, cfg]) => probeHealth(name, cfg.url))
-  )
+  const serviceList = await readServiceList(SVCCONFIG)
+  const results = await Promise.all(serviceList.map(svc => probeHealth(svc.name, svc.url)))
   const reachable = results.filter(s => s.status === 'healthy').map(s => s.name)
-  const all = Object.keys(svcMap)
+  const allNames  = serviceList.map(s => s.name)
   res.json({
-    ready: reachable.length === all.length,
+    ready: reachable.length === allNames.length,
     reachable,
-    missing: all.filter(n => !reachable.includes(n)),
+    missing: allNames.filter(n => !reachable.includes(n)),
   })
 })
 
