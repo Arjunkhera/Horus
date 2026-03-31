@@ -53,7 +53,11 @@ async function callMcp(baseUrl, toolName, args) {
     }),
   })
   const json = await res.json()
-  if (json.error) throw new Error(json.error.message ?? 'MCP call failed')
+  if (json.error) {
+    // Clear the stale session so the next call re-initializes
+    sessions.delete(baseUrl)
+    throw new Error(json.error.message ?? 'MCP call failed')
+  }
   // MCP tool results come as content array — extract text
   const content = json.result?.content ?? []
   const text = content.find(c => c.type === 'text')
@@ -234,7 +238,9 @@ Always call this tool after retrieving data to present it visually.`,
         },
         required: ['primitive', 'title', 'items'],
       }),
-      // No execute — this tool is intercepted by the frontend via onToolCall
+      // Intercepted by the frontend via onToolCall; no-op execute satisfies AI SDK
+      // requirement that all tools with inputSchema have an execute function.
+      execute: async () => ({ rendered: true }),
     }),
   }
 }
