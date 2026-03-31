@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
-const TABS = ['Services', 'LLM', 'Setup']
+// Step 5: Updated TABS array — Preferences added
+const TABS = ['Services', 'LLM', 'Preferences', 'Setup']
 
 const SETUP_STEPS = [
   { id: 'runtime',   label: 'Container Runtime',   endpoint: '/api/setup/detect-runtime' },
@@ -10,6 +11,13 @@ const SETUP_STEPS = [
   { id: 'clients',   label: 'Connect AI Clients',   endpoint: '/api/setup/connect-clients' },
   { id: 'llm',       label: 'LLM Key',             endpoint: '/api/setup/verify-llm' },
 ]
+
+const DOT_COLOR = {
+  healthy:   'var(--status-green)',
+  degraded:  'var(--status-yellow)',
+  unhealthy: 'var(--status-red)',
+  unknown:   'var(--text-muted)',
+}
 
 function TabBar({ active, setActive }) {
   return (
@@ -35,7 +43,64 @@ function Field({ label, hint, value, onChange, type = 'text' }) {
       <input type={type} value={value} onChange={e => onChange(e.target.value)} style={{
         width: '100%', background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
         borderRadius: '5px', color: 'var(--text-primary)', fontSize: '13px', padding: '7px 10px',
+        boxSizing: 'border-box',
       }} />
+    </div>
+  )
+}
+
+// Step 2: ServicesHealthPanel — fetches /api/health and shows live service rows
+function ServicesHealthPanel() {
+  const [health, setHealth] = useState({ overall: 'unknown', services: [], loading: true, error: null })
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/health', { signal: AbortSignal.timeout(5000) })
+      const data = await res.json()
+      setHealth({ overall: data.overall, services: data.services ?? [], loading: false, error: null })
+    } catch (err) {
+      setHealth(s => ({ ...s, loading: false, error: err.message }))
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+    const id = setInterval(refresh, 30000)
+    return () => clearInterval(id)
+  }, [refresh])
+
+  return (
+    <div style={{ marginBottom: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+        <label style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>Live Service Status</label>
+        <button onClick={refresh} style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: '11px', color: 'var(--text-muted)', padding: '2px 6px',
+        }}>Refresh</button>
+      </div>
+      {health.loading
+        ? <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '8px 0' }}>Checking services…</div>
+        : health.error
+          ? <div style={{ fontSize: '12px', color: 'var(--status-red)', padding: '8px 0' }}>Error: {health.error}</div>
+          : health.services.length === 0
+            ? <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '8px 0' }}>No services reported.</div>
+            : health.services.map(svc => (
+                <div key={svc.name} style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '8px 12px', background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)', borderRadius: '6px', marginBottom: '6px',
+                }}>
+                  <span style={{
+                    width: '8px', height: '8px', borderRadius: '50%',
+                    background: DOT_COLOR[svc.status] ?? 'var(--text-muted)', flexShrink: 0,
+                  }} />
+                  <span style={{ flex: 1, fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{svc.name}</span>
+                  {svc.url && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{svc.url.split(':').pop()}</span>}
+                  <span style={{ fontSize: '11px', color: DOT_COLOR[svc.status] ?? 'var(--text-muted)' }}>{svc.status}</span>
+                  {svc.latency != null && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{svc.latency}ms</span>}
+                </div>
+              ))
+      }
     </div>
   )
 }
@@ -44,7 +109,10 @@ function ServicesTab({ prefs, setPrefs, saved, onSave, onReset }) {
   const svc = prefs.services ?? {}
   const set = (k, v) => setPrefs(p => ({ ...p, services: { ...(p.services ?? {}), [k]: v } }))
   return (
-    <div style={{ maxWidth: '480px' }}>
+    <div>
+      {/* Step 2: Live stack values panel */}
+      <ServicesHealthPanel />
+
       <Field label="Horus Data Root" hint="Absolute path to HORUS_DATA_PATH" value={svc.dataRoot ?? ''} onChange={v => set('dataRoot', v)} />
       <Field label="Anvil Notes Path" hint="Usually {dataRoot}/notes" value={svc.anvilNotes ?? ''} onChange={v => set('anvilNotes', v)} />
       <Field label="Vault KB Path" hint="Usually {dataRoot}/vault" value={svc.vaultKb ?? ''} onChange={v => set('vaultKb', v)} />
@@ -77,7 +145,7 @@ function LLMTab({ prefs, setPrefs, saved, onSave }) {
   const [showKey, setShowKey] = useState(false)
   const provider = llm.provider ?? 'none'
   return (
-    <div style={{ maxWidth: '480px' }}>
+    <div>
       <div style={{ marginBottom: '16px' }}>
         <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Provider</label>
         <select value={provider} onChange={e => set('provider', e.target.value)} style={{
@@ -112,6 +180,25 @@ function LLMTab({ prefs, setPrefs, saved, onSave }) {
   )
 }
 
+// Step 3: Preferences tab with user.name edit
+function PreferencesTab({ prefs, setPrefs, saved, onSave }) {
+  const user = prefs.user ?? {}
+  const set = (k, v) => setPrefs(p => ({ ...p, user: { ...(p.user ?? {}), [k]: v } }))
+  return (
+    <div>
+      <Field
+        label="Display Name"
+        hint="Your name, shown in the UI and passed to the assistant as context."
+        value={user.name ?? ''}
+        onChange={v => set('name', v)}
+      />
+      <button onClick={onSave} style={{ padding: '7px 18px', background: 'var(--accent)', border: 'none', borderRadius: '5px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>
+        {saved ? '✓ Saved' : 'Save'}
+      </button>
+    </div>
+  )
+}
+
 function SetupTab({ prefs, setPrefs }) {
   const progress = prefs.settings?.setupProgress ?? {}
   const [running, setRunning] = useState(null)
@@ -131,7 +218,7 @@ function SetupTab({ prefs, setPrefs }) {
 
   let foundActive = false
   return (
-    <div style={{ maxWidth: '480px' }}>
+    <div>
       {SETUP_STEPS.map((step, i) => {
         const done = !!progress[step.id]
         const isActive = !done && !foundActive; if (isActive) foundActive = true
@@ -159,9 +246,14 @@ export function SettingsView() {
   const [prefs, setPrefs] = useState({})
   const [saved, setSaved] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // Step 1: Loading state guard
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/config/preferences').then(r => r.json()).then(setPrefs).catch(() => {})
+    fetch('/api/config/preferences')
+      .then(r => r.json())
+      .then(data => { setPrefs(data); setLoading(false) })
+      .catch(() => setLoading(false))
   }, [])
 
   const wrappedSetPrefs = (fn) => { setPrefs(fn); setDirty(true); setSaved(false) }
@@ -174,13 +266,25 @@ export function SettingsView() {
 
   const reset = () => { setPrefs(p => ({ ...p, services: {} })); setDirty(true) }
 
+  // Step 4: Fixed layout — full-width container with padding, maxWidth on inner content only
   return (
-    <div style={{ maxWidth: '600px' }}>
-      <h1 style={{ fontSize: '18px', color: 'var(--text-primary)', marginBottom: '20px' }}>Settings</h1>
-      <TabBar active={tab} setActive={t => { if (dirty && !confirm('Unsaved changes — leave anyway?')) return; setTab(t); setDirty(false) }} />
-      {tab === 'Services' && <ServicesTab prefs={prefs} setPrefs={wrappedSetPrefs} saved={saved} onSave={save} onReset={reset} />}
-      {tab === 'LLM'      && <LLMTab prefs={prefs} setPrefs={wrappedSetPrefs} saved={saved} onSave={save} />}
-      {tab === 'Setup'    && <SetupTab prefs={prefs} setPrefs={wrappedSetPrefs} />}
+    <div style={{ padding: '24px 32px', width: '100%', boxSizing: 'border-box' }}>
+      <h1 style={{ fontSize: '18px', color: 'var(--text-primary)', marginBottom: '20px', fontWeight: 600 }}>Settings</h1>
+
+      {/* Step 1: Loading guard — don't flash empty tabs */}
+      {loading
+        ? <div style={{ fontSize: '13px', color: 'var(--text-muted)', paddingTop: '8px' }}>Loading…</div>
+        : <>
+            <TabBar active={tab} setActive={t => { if (dirty && !confirm('Unsaved changes — leave anyway?')) return; setTab(t); setDirty(false) }} />
+            {/* Step 4: maxWidth scoped to tab content area */}
+            <div style={{ maxWidth: '520px' }}>
+              {tab === 'Services'    && <ServicesTab prefs={prefs} setPrefs={wrappedSetPrefs} saved={saved} onSave={save} onReset={reset} />}
+              {tab === 'LLM'         && <LLMTab prefs={prefs} setPrefs={wrappedSetPrefs} saved={saved} onSave={save} />}
+              {tab === 'Preferences' && <PreferencesTab prefs={prefs} setPrefs={wrappedSetPrefs} saved={saved} onSave={save} />}
+              {tab === 'Setup'       && <SetupTab prefs={prefs} setPrefs={wrappedSetPrefs} />}
+            </div>
+          </>
+      }
     </div>
   )
 }
