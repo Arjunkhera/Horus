@@ -13,9 +13,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = process.env.PORT ?? 8400
 
-const ANVIL_URL = process.env.ANVIL_URL ?? 'http://anvil:8100'
-const VAULT_URL = process.env.VAULT_URL ?? 'http://vault-mcp:8300'
-const FORGE_URL = process.env.FORGE_URL ?? 'http://forge:8200'
+const ANVIL_URL  = process.env.ANVIL_URL  ?? 'http://anvil:8100'
+const VAULT_URL  = process.env.VAULT_URL  ?? 'http://vault-mcp:8300'
+const FORGE_URL  = process.env.FORGE_URL  ?? 'http://forge:8200'
+const SEARCH_URL = process.env.SEARCH_URL ?? 'http://typesense:8108'
 
 // ─── File helpers (atomic write) ─────────────────────────────────────────────
 
@@ -57,17 +58,23 @@ app.use(express.json())
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
+/** Load the configured service list (saved config merged over defaults). */
+async function loadServices() {
+  const saved = await readJsonFile(SVCCONFIG, {})
+  return { ...DEFAULT_SERVICES(), ...saved }
+}
+
 app.get('/api/health', async (_req, res) => {
-  const [anvil, vault, forge] = await Promise.all([
-    probeHealth('anvil', ANVIL_URL),
-    probeHealth('vault', VAULT_URL),
-    probeHealth('forge', FORGE_URL),
-  ])
-  const services = [anvil, vault, forge]
+  const svcMap = await loadServices()
+  const checkedAt = new Date().toISOString()
+  const results = await Promise.all(
+    Object.entries(svcMap).map(([name, cfg]) => probeHealth(name, cfg.url))
+  )
+  const services = results.map(s => ({ ...s, checkedAt }))
   const overall = services.every(s => s.status === 'healthy') ? 'healthy'
-    : services.some(s => s.status === 'healthy')              ? 'degraded'
+    : services.some(s => s.status === 'healthy')               ? 'degraded'
     : 'unhealthy'
-  res.json({ overall, services })
+  res.json({ overall, services, checkedAt })
 })
 
 // ─── Proxy routes ─────────────────────────────────────────────────────────────
@@ -114,12 +121,17 @@ app.put('/api/config/dashboards', async (req, res) => {
   res.json(req.body)
 })
 
+const DEFAULT_SERVICES = () => ({
+  anvil:  { url: ANVIL_URL },
+  vault:  { url: VAULT_URL },
+  forge:  { url: FORGE_URL },
+  search: { url: SEARCH_URL },
+})
+
 app.get('/api/config/services', async (_req, res) => {
-  res.json(await readJsonFile(SVCCONFIG, {
-    anvil: { url: ANVIL_URL },
-    vault: { url: VAULT_URL },
-    forge: { url: FORGE_URL },
-  }))
+  // Merge saved config over defaults so new services appear automatically
+  const saved = await readJsonFile(SVCCONFIG, {})
+  res.json({ ...DEFAULT_SERVICES(), ...saved })
 })
 
 // ─── Chat (Phase 2) ──────────────────────────────────────────────────────────
@@ -143,17 +155,16 @@ mountConversationRoutes(app)
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 app.get('/api/setup/status', async (_req, res) => {
-  const [anvil, vault, forge] = await Promise.all([
-    probeHealth('anvil', ANVIL_URL),
-    probeHealth('vault', VAULT_URL),
-    probeHealth('forge', FORGE_URL),
-  ])
-  const all = [anvil, vault, forge]
-  const reachable = all.filter(s => s.status === 'healthy').map(s => s.name)
+  const svcMap = await loadServices()
+  const results = await Promise.all(
+    Object.entries(svcMap).map(([name, cfg]) => probeHealth(name, cfg.url))
+  )
+  const reachable = results.filter(s => s.status === 'healthy').map(s => s.name)
+  const all = Object.keys(svcMap)
   res.json({
-    ready: reachable.length === 3,
+    ready: reachable.length === all.length,
     reachable,
-    missing: ['anvil', 'vault', 'forge'].filter(n => !reachable.includes(n)),
+    missing: all.filter(n => !reachable.includes(n)),
   })
 })
 
@@ -169,7 +180,8 @@ if (existsSync(PUBLIC_DIR)) {
 
 app.listen(PORT, () => {
   console.log(`@horus/ui-server listening on :${PORT}`)
-  console.log(`  anvil → ${ANVIL_URL}`)
-  console.log(`  vault → ${VAULT_URL}`)
-  console.log(`  forge → ${FORGE_URL}`)
+  console.log(`  anvil  → ${ANVIL_URL}`)
+  console.log(`  vault  → ${VAULT_URL}`)
+  console.log(`  forge  → ${FORGE_URL}`)
+  console.log(`  search → ${SEARCH_URL}`)
 })
