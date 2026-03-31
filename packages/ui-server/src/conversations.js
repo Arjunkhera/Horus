@@ -108,6 +108,27 @@ export function mountConversationRoutes(app) {
     }
   })
 
+  // Rename a conversation (title-only update)
+  app.patch('/api/conversations/:id', async (req, res) => {
+    try {
+      const title = (req.body.title ?? '').trim()
+      if (!title) return res.status(400).json({ error: 'empty_title', message: 'title must not be empty' })
+      let existing
+      try {
+        existing = JSON.parse(await readFile(convPath(req.params.id), 'utf8'))
+      } catch (err) {
+        if (err.code === 'ENOENT') return res.status(404).json({ error: 'not_found' })
+        throw err
+      }
+      const modified = new Date().toISOString()
+      const updated = { ...existing, title, modified }
+      await writeAtomic(convPath(existing.id), updated)
+      res.json({ id: existing.id, title, modified })
+    } catch (err) {
+      res.status(500).json({ error: 'rename_failed', message: err.message })
+    }
+  })
+
   // Delete a conversation
   app.delete('/api/conversations/:id', async (req, res) => {
     try {
