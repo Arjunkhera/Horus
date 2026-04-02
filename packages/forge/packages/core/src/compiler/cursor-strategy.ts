@@ -94,6 +94,14 @@ export class CursorStrategy implements EmitStrategy {
         sourceRef: ref,
         operation: 'create',
       });
+    } else if (ref.type === 'persona') {
+      // Personas: .cursor/personas/{id}/PERSONA.md (workspace-scoped, no rule needed)
+      operations.push({
+        path: `.cursor/personas/${ref.id}/PERSONA.md`,
+        content: bundle.content,
+        sourceRef: ref,
+        operation: 'create',
+      });
     } else if (ref.type === 'plugin') {
       // Plugins: emit all contained skills and agents
       // Nothing to emit directly — dependencies handle it

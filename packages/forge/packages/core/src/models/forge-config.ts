@@ -52,6 +52,7 @@ export const ForgeConfigSchema = z.object({
     skills: z.record(z.string(), z.string()).default({}),
     agents: z.record(z.string(), z.string()).default({}),
     plugins: z.record(z.string(), z.string()).default({}),
+    personas: z.record(z.string(), z.string()).default({}),
     'workspace-configs': z.record(z.string(), z.string()).default({}),
   }).default({}),
   outputDir: z.string().default('.'),

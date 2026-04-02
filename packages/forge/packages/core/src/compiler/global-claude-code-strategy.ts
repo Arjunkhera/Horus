@@ -58,6 +58,7 @@ export class GlobalClaudeCodeStrategy implements EmitStrategy {
         operation: 'create',
       });
     }
+    // Personas: no-op for global strategy — personas are workspace-scoped
     // Plugins: dependencies handle skill/agent emission
   }
 }

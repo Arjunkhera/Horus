@@ -213,6 +213,9 @@ export class WorkspaceCreator {
           plugins: Object.fromEntries(
             workspaceConfigMeta.plugins.map(p => [p, '*']),
           ),
+          personas: Object.fromEntries(
+            (workspaceConfigMeta.personas ?? []).map(p => [p, '*']),
+          ),
           'workspace-configs': {},
         },
       };

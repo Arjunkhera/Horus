@@ -30,7 +30,7 @@ export class Registry {
    * @param type - Optional artifact type filter
    */
   async search(query: string, type?: ArtifactType): Promise<SearchResult[]> {
-    const types: ArtifactType[] = type ? [type] : ['skill', 'agent', 'plugin', 'workspace-config'];
+    const types: ArtifactType[] = type ? [type] : ['skill', 'agent', 'plugin', 'persona', 'workspace-config'];
     const lowerQuery = query.toLowerCase();
     const results: SearchResult[] = [];
 
@@ -64,7 +64,7 @@ export class Registry {
    * Returns lightweight summaries (no content).
    */
   async list(type?: ArtifactType): Promise<ArtifactSummary[]> {
-    const types: ArtifactType[] = type ? [type] : ['skill', 'agent', 'plugin', 'workspace-config'];
+    const types: ArtifactType[] = type ? [type] : ['skill', 'agent', 'plugin', 'persona', 'workspace-config'];
     const summaries: ArtifactSummary[] = [];
 
     for (const t of types) {

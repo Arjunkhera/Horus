@@ -12,6 +12,9 @@ export { AgentMetaSchema, type AgentMeta } from './agent-meta.js';
 // Plugin Meta
 export { PluginMetaSchema, type PluginMeta } from './plugin-meta.js';
 
+// Persona Meta
+export { PersonaMetaSchema, type PersonaMeta } from './persona-meta.js';
+
 // Workspace Config Meta
 export {
   WorkspaceConfigMetaSchema,

@@ -35,7 +35,7 @@ const TOOLS = [
         query: { type: 'string', description: 'Search query (e.g., "developer", "testing")' },
         type: {
           type: 'string',
-          enum: ['skill', 'agent', 'plugin'],
+          enum: ['skill', 'agent', 'plugin', 'persona'],
           description: 'Filter by artifact type (optional)',
         },
       },
@@ -375,7 +375,7 @@ function buildServer(workspaceRoot: string): Server {
     try {
       switch (name) {
         case 'forge_search': {
-          const { query, type } = args as { query: string; type?: 'skill' | 'agent' | 'plugin' };
+          const { query, type } = args as { query: string; type?: 'skill' | 'agent' | 'plugin' | 'persona' };
           const results = await forge.search(query, type);
           return {
             content: [{
