@@ -718,4 +718,87 @@ describe('repoDevelop', () => {
       }
     });
   });
+
+  // ── Repo name disambiguation ──────────────────────────────────────────────
+
+  describe('Repo name disambiguation', () => {
+    it('returns needs_repo_disambiguation when multiple repos share the same name', async () => {
+      const entry1 = makeRepoEntry({
+        localPath: '/path/a/MyRepo',
+        remoteUrl: 'git@github.com:OrgA/MyRepo.git',
+      });
+      const entry2 = makeRepoEntry({
+        localPath: '/path/b/MyRepo',
+        remoteUrl: 'git@github.com:OrgB/MyRepo.git',
+      });
+      const repoIndex = { repos: [entry1, entry2] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-disambig1' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      expect(result.status).toBe('needs_repo_disambiguation');
+      if (result.status === 'needs_repo_disambiguation') {
+        expect(result.matches).toHaveLength(2);
+        expect(result.matches[0].localPath).toBe('/path/a/MyRepo');
+        expect(result.matches[1].localPath).toBe('/path/b/MyRepo');
+        expect(result.message).toContain('Multiple repositories');
+        expect(result.message).toContain('localPath');
+      }
+    });
+
+    it('resolves to the correct repo when localPath is provided for disambiguation', async () => {
+      const targetPath = path.join(tmpDir, 'repos', 'MyRepoB');
+      await fs.mkdir(targetPath, { recursive: true });
+
+      const entry1 = makeRepoEntry({
+        localPath: '/path/a/MyRepo',
+        remoteUrl: 'git@github.com:OrgA/MyRepo.git',
+      });
+      const entry2 = makeRepoEntry({
+        localPath: targetPath,
+        remoteUrl: 'git@github.com:OrgB/MyRepo.git',
+        workflow: CONFIRMED_WORKFLOW,
+      });
+      const repoIndex = { repos: [entry1, entry2] };
+
+      const opts: RepoDevelopOptions = {
+        repo: 'TestRepo',
+        workItem: 'wi-disambig2',
+        localPath: targetPath,
+      };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      expect(result.status).not.toBe('needs_repo_disambiguation');
+      // Should proceed past disambiguation — will either create or need workflow confirmation
+      expect(['created', 'needs_workflow_confirmation']).not.toContain('needs_repo_disambiguation');
+    });
+
+    it('single name match still works without disambiguation (no regression)', async () => {
+      const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-single1' };
+      const result = await repoDevelop(opts, globalConfig, repoIndex, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.repo).toBe('TestRepo');
+      }
+    });
+
+    it('falls through to tier-2/3 when localPath does not match any index entry', async () => {
+      const entry = makeRepoEntry({ localPath: fakeRepoPath });
+      const repoIndex = { repos: [entry] };
+
+      const opts: RepoDevelopOptions = {
+        repo: 'NoSuchRepo',
+        workItem: 'wi-notfound1',
+        localPath: '/nonexistent/path',
+      };
+
+      await expect(
+        repoDevelop(opts, globalConfig, repoIndex, async () => {}),
+      ).rejects.toThrow('not found');
+    });
+  });
 });

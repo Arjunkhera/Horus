@@ -46,6 +46,11 @@ export interface RepoDevelopOptions {
    * needs_remote_confirmation response. Saved to the repo index for future calls.
    */
   defaultRemote?: string;
+  /**
+   * Local path to disambiguate when multiple repos share the same name.
+   * Provided by the caller when responding to a needs_repo_disambiguation response.
+   */
+  localPath?: string;
 }
 
 /** Session created or resumed successfully */
@@ -92,10 +97,27 @@ export interface RepoDevelopNeedsRemoteConfirmation {
   message: string;
 }
 
+/**
+ * Multiple repos share the same name in the index.
+ * The caller should present matches to the user, collect their choice,
+ * and re-call forge_develop with the localPath parameter set.
+ */
+export interface RepoDevelopNeedsRepoDisambiguation {
+  status: 'needs_repo_disambiguation';
+  matches: Array<{
+    name: string;
+    localPath: string;
+    remoteUrl: string | null;
+    defaultBranch: string;
+  }>;
+  message: string;
+}
+
 export type RepoDevelopResponse =
   | RepoDevelopResult
   | RepoDevelopNeedsConfirmation
-  | RepoDevelopNeedsRemoteConfirmation;
+  | RepoDevelopNeedsRemoteConfirmation
+  | RepoDevelopNeedsRepoDisambiguation;
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
@@ -399,7 +421,7 @@ export async function repoDevelop(
   saveRepoIndexFn: (repos: RepoIndexEntry[]) => Promise<void>,
 ): Promise<RepoDevelopResponse> {
 
-  const { repo: repoName, workItem, branch: requestedBranch, workflow: inlineWorkflow } = opts;
+  const { repo: repoName, workItem, branch: requestedBranch, workflow: inlineWorkflow, localPath } = opts;
 
   const sessionsPath = globalConfig.workspace.sessions_path;
   const managedReposPath = globalConfig.workspace.managed_repos_path;
@@ -413,7 +435,30 @@ export async function repoDevelop(
   let repoSource: RepoSource = 'user';
 
   if (repoIndex) {
-    repoEntry = repoIndex.repos.find(r => r.name.toLowerCase() === repoName.toLowerCase()) ?? null;
+    if (localPath) {
+      // Disambiguation re-call: resolve by exact path
+      repoEntry = repoIndex.repos.find(r => r.localPath === localPath) ?? null;
+    } else {
+      // Name-based lookup with collision detection
+      const matches = repoIndex.repos.filter(
+        r => r.name.toLowerCase() === repoName.toLowerCase(),
+      );
+      if (matches.length > 1) {
+        return {
+          status: 'needs_repo_disambiguation',
+          matches: matches.map(m => ({
+            name: m.name,
+            localPath: m.localPath,
+            remoteUrl: m.remoteUrl,
+            defaultBranch: m.defaultBranch,
+          })),
+          message:
+            `Multiple repositories named "${repoName}" found in the index. ` +
+            `Re-call forge_develop with the localPath parameter set to the desired repo's path.`,
+        };
+      }
+      repoEntry = matches[0] ?? null;
+    }
   }
 
   // ── Tier-2: Check managed pool ────────────────────────────────────────────

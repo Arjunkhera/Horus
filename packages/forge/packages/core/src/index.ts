@@ -6,6 +6,7 @@ export {
   type GlobalPluginInfo,
   type AutoDetectedWorkflow,
   type RepoWorkflowResult,
+  type RepoResolveResult,
 } from './core.js';
 export { Registry } from './registry/registry.js';
 
@@ -32,7 +33,7 @@ export { scan } from './repo/repo-scanner.js';
 export { saveRepoIndex, loadRepoIndex } from './repo/repo-index-store.js';
 export { RepoIndexQuery } from './repo/repo-index-query.js';
 export { normalizeGitUrl } from './repo/url-utils.js';
-export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type RepoDevelopResult, type RepoDevelopNeedsConfirmation, type WorkflowInput } from './repo/repo-develop.js';
+export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type RepoDevelopResult, type RepoDevelopNeedsConfirmation, type RepoDevelopNeedsRepoDisambiguation, type WorkflowInput } from './repo/repo-develop.js';
 
 // Search
 export { ForgeSearchClient, type ForgeSearchHit } from './search/forge-search-client.js';

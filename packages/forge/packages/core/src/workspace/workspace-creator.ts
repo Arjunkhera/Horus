@@ -167,14 +167,21 @@ export class WorkspaceCreator {
 
       const query = new RepoIndexQuery(repoIndex.repos);
       for (const repoName of options.repos) {
-        const repo = query.findByName(repoName);
-        if (!repo) {
+        const matches = query.findAllByName(repoName);
+        if (matches.length === 0) {
           throw new WorkspaceCreateError(
             `Repository "${repoName}" not found in local index`,
             'Run: forge repo scan',
           );
         }
-        resolvedRepos.push(repo);
+        if (matches.length > 1) {
+          const paths = matches.map(m => `  - ${m.localPath}`).join('\n');
+          throw new WorkspaceCreateError(
+            `Multiple repositories named "${repoName}" found in the index:\n${paths}`,
+            'Use the full repo path or remoteUrl to disambiguate.',
+          );
+        }
+        resolvedRepos.push(matches[0]);
       }
     }
 

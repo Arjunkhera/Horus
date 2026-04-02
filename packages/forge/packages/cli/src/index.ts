@@ -257,7 +257,16 @@ repo
   .action(async (name: string) => {
     const forge = new ForgeCore(program.opts().config);
     try {
-      const entry = await forge.repoResolve({ name });
+      const result = await forge.repoResolve({ name });
+      if (result.ambiguous) {
+        console.error(`Multiple repositories named '${name}' found:`);
+        for (const m of result.allMatches) {
+          console.error(`  - ${m.localPath} (${m.remoteUrl ?? 'no remote'})`);
+        }
+        console.error('Use the full path or remote URL to disambiguate.');
+        process.exit(1);
+      }
+      const entry = result.match;
       if (!entry) {
         console.error(`Repository '${name}' not found. Run: forge repo scan`);
         process.exit(1);

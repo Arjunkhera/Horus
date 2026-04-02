@@ -141,4 +141,47 @@ describe('RepoIndexQuery', () => {
       expect(result).toBeNull();
     });
   });
+
+  describe('findAllByName', () => {
+    it('returns all repos matching the name (case-insensitive)', () => {
+      const duplicateRepos: RepoIndexEntry[] = [
+        ...mockRepos,
+        {
+          name: 'forge',
+          localPath: '/home/user/work/forge',
+          remoteUrl: 'git@github.com:other-org/forge.git',
+          defaultBranch: 'main',
+          language: 'TypeScript',
+          framework: null,
+          lastCommitDate: '2024-03-01T00:00:00Z',
+          lastScannedAt: '2024-03-01T00:00:00Z',
+        },
+      ];
+      const query = new RepoIndexQuery(duplicateRepos);
+      const results = query.findAllByName('forge');
+      expect(results).toHaveLength(2);
+      expect(results[0].localPath).toBe('/home/user/Repositories/forge');
+      expect(results[1].localPath).toBe('/home/user/work/forge');
+    });
+
+    it('is case-insensitive', () => {
+      const query = new RepoIndexQuery(mockRepos);
+      const results = query.findAllByName('FORGE');
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(mockRepos[0]);
+    });
+
+    it('returns empty array when no match', () => {
+      const query = new RepoIndexQuery(mockRepos);
+      const results = query.findAllByName('nonexistent');
+      expect(results).toHaveLength(0);
+    });
+
+    it('returns single-element array for unique names', () => {
+      const query = new RepoIndexQuery(mockRepos);
+      const results = query.findAllByName('react-app');
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(mockRepos[1]);
+    });
+  });
 });

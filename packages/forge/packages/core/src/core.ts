@@ -109,6 +109,15 @@ export interface AutoDetectedWorkflow {
   remotesSnapshot?: Record<string, string>;
 }
 
+export interface RepoResolveResult {
+  /** The resolved repo entry, or null if not found or ambiguous. */
+  match: RepoIndexEntry | null;
+  /** True when multiple repos share the same name and disambiguation is needed. */
+  ambiguous: boolean;
+  /** All matching entries (>1 when ambiguous, 0-1 otherwise). */
+  allMatches: RepoIndexEntry[];
+}
+
 /**
  * Result returned by `repoWorkflow()`.
  *
@@ -447,7 +456,7 @@ export class ForgeCore {
    * When resolving by name, tries Typesense fuzzy search first for typo tolerance,
    * then falls back to exact/substring matching in the local index.
    */
-  async repoResolve(opts: { name?: string; remoteUrl?: string }): Promise<RepoIndexEntry | null> {
+  async repoResolve(opts: { name?: string; remoteUrl?: string }): Promise<RepoResolveResult> {
     if (!opts.name && !opts.remoteUrl) {
       throw new Error('Either name or remoteUrl must be provided');
     }
@@ -463,30 +472,41 @@ export class ForgeCore {
       index = await this.repoScan();
     }
 
-    if (!index) return null;
+    if (!index) return { match: null, ambiguous: false, allMatches: [] };
 
     const q = new RepoIndexQuery(index.repos);
     let entry: RepoIndexEntry | null = null;
 
     if (opts.name) {
+      const allByName = q.findAllByName(opts.name);
+      if (allByName.length > 1) {
+        return {
+          match: null,
+          ambiguous: true,
+          allMatches: allByName.map(e => translateRepoPath(e, scan_paths, host_repos_path)),
+        };
+      }
+
       // Try Typesense fuzzy search first (handles typos and partial matches)
       const searchClient = this.getSearchClient();
       if (searchClient) {
         const hits = await searchClient.searchRepos(opts.name);
         if (hits !== null && hits.length > 0) {
-          // Take the top result and look it up in the local index for full data
           entry = q.findByName(hits[0]);
         }
       }
-      // Fallback: exact name match in the local index
       if (!entry) {
-        entry = q.findByName(opts.name);
+        entry = allByName[0] ?? null;
       }
     } else if (opts.remoteUrl) {
       entry = q.findByRemoteUrl(opts.remoteUrl);
     }
 
-    return entry ? translateRepoPath(entry, scan_paths, host_repos_path) : null;
+    return {
+      match: entry ? translateRepoPath(entry, scan_paths, host_repos_path) : null,
+      ambiguous: false,
+      allMatches: entry ? [translateRepoPath(entry, scan_paths, host_repos_path)] : [],
+    };
   }
 
   /**
@@ -567,7 +587,8 @@ export class ForgeCore {
     }
 
     // --- Tier 2: Auto-detect from local git remotes ---
-    const repo = await this.repoResolve({ name: repoName });
+    const resolveResult = await this.repoResolve({ name: repoName });
+    const repo = resolveResult.match;
     if (repo) {
       const detected = await this._detectWorkflowFull(repo.localPath, repo.remoteUrl);
       const hosting = extractHostingFromUrl(repo.remoteUrl);
