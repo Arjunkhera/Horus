@@ -7,6 +7,7 @@ import {
   SkillMetaSchema,
   AgentMetaSchema,
   PluginMetaSchema,
+  PersonaMetaSchema,
   WorkspaceConfigMetaSchema,
 } from '../models/index.js';
 import { ArtifactNotFoundError, InvalidMetadataError } from './errors.js';
@@ -16,6 +17,7 @@ const TYPE_DIRS: Record<ArtifactType, string> = {
   skill: 'skills',
   agent: 'agents',
   plugin: 'plugins',
+  persona: 'personas',
   'workspace-config': 'workspace-configs',
 };
 
@@ -24,6 +26,7 @@ const CONTENT_FILES: Record<ArtifactType, string> = {
   skill: 'SKILL.md',
   agent: 'AGENT.md',
   plugin: 'PLUGIN.md',
+  persona: 'PERSONA.md',
   'workspace-config': 'WORKSPACE.md',
 };
 
@@ -32,6 +35,7 @@ const SCHEMAS = {
   skill: SkillMetaSchema,
   agent: AgentMetaSchema,
   plugin: PluginMetaSchema,
+  persona: PersonaMetaSchema,
   'workspace-config': WorkspaceConfigMetaSchema,
 };
 

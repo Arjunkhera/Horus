@@ -45,6 +45,7 @@ export const WorkspaceConfigMetaSchema = z.object({
   tags: z.array(z.string()).default([]),
   plugins: z.array(z.string()).default([]),
   skills: z.array(z.string()).default([]),
+  personas: z.array(z.string()).default([]),
   mcp_servers: z.record(z.string(), McpServerConfigSchema).default({}),
   settings: WorkspaceSettingsConfigSchema.default({}),
   git_workflow: GitWorkflowConfigSchema.default({}),

@@ -5,7 +5,7 @@ import { z } from 'zod';
  */
 export const LockedArtifactSchema = z.object({
   id: z.string(),
-  type: z.enum(['skill', 'agent', 'plugin']),
+  type: z.enum(['skill', 'agent', 'plugin', 'persona']),
   version: z.string(),
   registry: z.string(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/, 'Must be a valid SHA-256 hex string'),

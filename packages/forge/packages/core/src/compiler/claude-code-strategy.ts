@@ -59,6 +59,15 @@ export class ClaudeCodeStrategy implements EmitStrategy {
         sourceRef: ref,
         operation: 'create',
       });
+    } else if (ref.type === 'persona') {
+      // Personas: .claude/personas/{id}/PERSONA.md
+      const personaPath = `.claude/personas/${ref.id}/PERSONA.md`;
+      operations.push({
+        path: personaPath,
+        content: bundle.content,
+        sourceRef: ref,
+        operation: 'create',
+      });
     } else if (ref.type === 'plugin') {
       // Plugins: emit all contained skills and agents
       // Plugin content is metadata-only; individual skills/agents listed in deps

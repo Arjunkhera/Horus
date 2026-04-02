@@ -242,6 +242,8 @@ export class ForgeCore {
         config.artifacts.agents[ref.id] = ref.version;
       } else if (ref.type === 'plugin') {
         config.artifacts.plugins[ref.id] = ref.version;
+      } else if (ref.type === 'persona') {
+        config.artifacts.personas[ref.id] = ref.version;
       }
     }
 
@@ -270,6 +272,9 @@ export class ForgeCore {
       })),
       ...Object.entries(config.artifacts.plugins).map(([id, version]) => ({
         type: 'plugin' as const, id, version,
+      })),
+      ...Object.entries(config.artifacts.personas).map(([id, version]) => ({
+        type: 'persona' as const, id, version,
       })),
     ];
 
@@ -307,7 +312,7 @@ export class ForgeCore {
       };
 
       for (const artifact of resolved) {
-        // Skip workspace-config artifacts — only skill|agent|plugin go in the lock file
+        // Skip workspace-config artifacts — only skill|agent|plugin|persona go in the lock file
         if (artifact.ref.type === 'workspace-config') {
           continue;
         }
@@ -321,7 +326,7 @@ export class ForgeCore {
 
         newLock.artifacts[lockKey] = {
           id: artifact.ref.id,
-          type: artifact.ref.type as 'skill' | 'agent' | 'plugin',
+          type: artifact.ref.type as 'skill' | 'agent' | 'plugin' | 'persona',
           version: artifact.bundle.meta.version,
           registry: 'local',
           sha256: sha,
@@ -351,6 +356,7 @@ export class ForgeCore {
       if (ref.type === 'skill') delete config.artifacts.skills[ref.id];
       else if (ref.type === 'agent') delete config.artifacts.agents[ref.id];
       else if (ref.type === 'plugin') delete config.artifacts.plugins[ref.id];
+      else if (ref.type === 'persona') delete config.artifacts.personas[ref.id];
     }
 
     await this.workspaceManager.writeConfig(config);
@@ -1185,6 +1191,7 @@ export class ForgeCore {
     if (remaining.startsWith('skill:')) { type = 'skill'; remaining = remaining.slice(6); }
     else if (remaining.startsWith('agent:')) { type = 'agent'; remaining = remaining.slice(6); }
     else if (remaining.startsWith('plugin:')) { type = 'plugin'; remaining = remaining.slice(7); }
+    else if (remaining.startsWith('persona:')) { type = 'persona'; remaining = remaining.slice(8); }
     else if (remaining.startsWith('workspace-config:')) { type = 'workspace-config'; remaining = remaining.slice(17); }
 
     // Extract version suffix
