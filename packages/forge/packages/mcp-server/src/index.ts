@@ -208,6 +208,7 @@ const TOOLS = [
       'Implements 3-tier repo resolution: (1) local repo index, (2) managed pool, (3) error with guidance. ' +
       'Returns "needs_workflow_confirmation" when the repo has no saved workflow — call again with the workflow parameter to confirm. ' +
       'Returns "needs_remote_confirmation" when no default remote is configured and the repo has multiple remotes — call again with the defaultRemote parameter (e.g. "origin" or "upstream"). ' +
+      'Returns "needs_repo_disambiguation" when multiple repos share the same name — call again with the localPath parameter set to the chosen repo\'s path. ' +
       'If a session already exists for this workItem+repo it is resumed. A second concurrent agent gets a separate slot ("-2" suffix).',
     inputSchema: {
       type: 'object' as const,
@@ -223,6 +224,11 @@ const TOOLS = [
         branch: {
           type: 'string',
           description: 'Feature branch name (optional — auto-generated from workItem if omitted)',
+        },
+        localPath: {
+          type: 'string',
+          description: 'Local filesystem path to the repo. Required when responding to a needs_repo_disambiguation response ' +
+            '(multiple repos share the same name). Use the localPath from the chosen match.',
         },
         defaultRemote: {
           type: 'string',
@@ -502,13 +508,32 @@ function buildServer(workspaceRoot: string): Server {
               isError: true,
             };
           }
-          const entry = await forge.repoResolve({ name, remoteUrl });
-          if (!entry) {
+          const resolveResult = await forge.repoResolve({ name, remoteUrl });
+          if (resolveResult.ambiguous) {
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  ambiguous: true,
+                  message: `Multiple repositories named "${name}" found. Use remoteUrl or localPath to disambiguate.`,
+                  matches: resolveResult.allMatches.map(e => ({
+                    name: e.name,
+                    localPath: e.localPath,
+                    remoteUrl: e.remoteUrl,
+                    defaultBranch: e.defaultBranch,
+                    language: e.language,
+                  })),
+                }, null, 2),
+              }],
+            };
+          }
+          if (!resolveResult.match) {
             return {
               content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'REPO_NOT_FOUND', message: 'Repository not found', suggestion: 'Run: forge repo scan' }) }],
               isError: true,
             };
           }
+          const entry = resolveResult.match;
           return {
             content: [{
               type: 'text',
@@ -581,10 +606,11 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_develop': {
-          const { repo, workItem, branch, defaultRemote, workflow } = (args ?? {}) as {
+          const { repo, workItem, branch, localPath, defaultRemote, workflow } = (args ?? {}) as {
             repo: string;
             workItem: string;
             branch?: string;
+            localPath?: string;
             defaultRemote?: string;
             workflow?: {
               type: 'owner' | 'fork' | 'contributor';
@@ -606,10 +632,11 @@ function buildServer(workspaceRoot: string): Server {
               isError: true,
             };
           }
-          const developResult = await forge.repoDevelop({ repo, workItem, branch, defaultRemote, workflow });
+          const developResult = await forge.repoDevelop({ repo, workItem, branch, localPath, defaultRemote, workflow });
           if (
             developResult.status === 'needs_workflow_confirmation' ||
-            developResult.status === 'needs_remote_confirmation'
+            developResult.status === 'needs_remote_confirmation' ||
+            developResult.status === 'needs_repo_disambiguation'
           ) {
             return {
               content: [{

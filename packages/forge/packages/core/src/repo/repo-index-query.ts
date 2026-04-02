@@ -9,9 +9,19 @@ export class RepoIndexQuery {
 
   /**
    * Find a repository by name (case-insensitive).
+   * Returns the first match — use findAllByName when disambiguation is needed.
    */
   findByName(name: string): RepoIndexEntry | null {
     return this.repos.find(r => r.name.toLowerCase() === name.toLowerCase()) ?? null;
+  }
+
+  /**
+   * Find all repositories matching a name (case-insensitive).
+   * Returns an empty array if no matches are found.
+   */
+  findAllByName(name: string): RepoIndexEntry[] {
+    const lower = name.toLowerCase();
+    return this.repos.filter(r => r.name.toLowerCase() === lower);
   }
 
   /**

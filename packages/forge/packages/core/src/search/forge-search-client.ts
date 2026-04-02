@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createClient, loadSearchConfig } from '@horus/search';
 import type { TypesenseClient } from '@horus/search';
 import type { RepoIndexEntry } from '../models/repo-index.js';
@@ -61,11 +62,13 @@ export class ForgeSearchClient {
 
   /**
    * Upsert a repo index entry into horus_documents.
-   * Uses the repo name as the document ID (prefixed with "forge-repo-").
+   * Uses a hash of localPath for a unique, stable document ID so that
+   * repos with the same name but different paths coexist in the index.
    */
   async indexRepo(entry: RepoIndexEntry): Promise<void> {
+    const pathHash = createHash('sha256').update(entry.localPath).digest('hex').slice(0, 12);
     const doc = {
-      id: `forge-repo-${entry.name}`,
+      id: `forge-repo-${pathHash}`,
       source: 'forge',
       source_type: 'repo',
       title: entry.name,
