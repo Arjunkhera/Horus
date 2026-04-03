@@ -54,7 +54,7 @@ export function createMcpServer(ctx: ToolContext): Server {
     {
       name: 'anvil_create_note',
       description:
-        'Create a new note in the vault with automatic ID, timestamps, and type validation',
+        'Create a new note in the vault with automatic ID, timestamps, and type validation. Accepts both "content" and "body" for the body text — "body" is an alias for "content".',
       inputSchema: {
         type: 'object',
         properties: {
@@ -70,6 +70,10 @@ export function createMcpServer(ctx: ToolContext): Server {
             type: 'string',
             description: 'Optional markdown body content',
           },
+          body: {
+            type: 'string',
+            description: 'Alias for content (matches the field name returned by anvil_get_note). If both body and content are provided, content wins.',
+          },
           fields: {
             type: 'object',
             description: 'Type-specific frontmatter fields',
@@ -81,6 +85,7 @@ export function createMcpServer(ctx: ToolContext): Server {
           },
         },
         required: ['type', 'title'],
+        additionalProperties: false,
       },
     },
     {
@@ -99,7 +104,7 @@ export function createMcpServer(ctx: ToolContext): Server {
     },
     {
       name: 'anvil_update_note',
-      description: 'Update a note (PATCH semantics for fields, append or replace for body)',
+      description: 'Update a note (PATCH semantics for fields, append or replace for body). Accepts both "content" and "body" for the body text — "body" is an alias for "content" (since anvil_get_note returns the field as "body").',
       inputSchema: {
         type: 'object',
         properties: {
@@ -115,8 +120,13 @@ export function createMcpServer(ctx: ToolContext): Server {
             type: 'string',
             description: 'New body content (appends for journals, replaces otherwise)',
           },
+          body: {
+            type: 'string',
+            description: 'Alias for content (anvil_get_note returns "body", so this is accepted for convenience). If both body and content are provided, content wins.',
+          },
         },
         required: ['noteId'],
+        additionalProperties: false,
       },
     },
     {
