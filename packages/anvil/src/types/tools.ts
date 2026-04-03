@@ -42,13 +42,20 @@ export const CreateNoteInputSchema = z.object({
   type: z.string().describe('Note type (e.g., task, note, journal, story)'),
   title: z.string().min(1).max(300).describe('Note title'),
   content: z.string().optional().describe('Optional markdown body content'),
+  body: z
+    .string()
+    .optional()
+    .describe('Alias for content (matches the field name returned by anvil_get_note). If both body and content are provided, content wins.'),
   fields: z.record(z.unknown()).optional().describe('Type-specific frontmatter fields to set'),
   use_template: z
     .boolean()
     .default(true)
     .optional()
     .describe('Apply the type body template (default: true). Frontmatter defaults always apply.'),
-});
+}).strict().transform(({ body, ...rest }) => ({
+  ...rest,
+  content: rest.content ?? body,
+}));
 
 export const CreateNoteOutputSchema = z.object({
   noteId: z.string(),
@@ -77,7 +84,14 @@ export const UpdateNoteInputSchema = z.object({
     .describe(
       'New body content. For append_only types (journal), appends to body. Otherwise replaces.',
     ),
-});
+  body: z
+    .string()
+    .optional()
+    .describe('Alias for content (anvil_get_note returns "body", so callers often pass it here). If both body and content are provided, content wins.'),
+}).strict().transform(({ body, ...rest }) => ({
+  ...rest,
+  content: rest.content ?? body,
+}));
 
 export const UpdateNoteOutputSchema = z.object({
   noteId: z.string(),
@@ -160,10 +174,10 @@ export const SyncPushInputSchema = z.object({
 
 // ─── Inferred TypeScript types ─────────────────────────────────────────────
 
-export type CreateNoteInput = z.infer<typeof CreateNoteInputSchema>;
+export type CreateNoteInput = z.output<typeof CreateNoteInputSchema>;
 export type CreateNoteOutput = z.infer<typeof CreateNoteOutputSchema>;
 export type GetNoteInput = z.infer<typeof GetNoteInputSchema>;
-export type UpdateNoteInput = z.infer<typeof UpdateNoteInputSchema>;
+export type UpdateNoteInput = z.output<typeof UpdateNoteInputSchema>;
 export type UpdateNoteOutput = z.infer<typeof UpdateNoteOutputSchema>;
 export type SearchInput = z.infer<typeof SearchInputSchema>;
 export type QueryViewInput = z.infer<typeof QueryViewInputSchema>;
