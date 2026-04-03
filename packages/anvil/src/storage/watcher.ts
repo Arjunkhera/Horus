@@ -31,6 +31,7 @@ export type WatcherOptions = {
   ignorePatterns?: string[];
   onError?: (err: Error) => void;
   typesenseClient?: TypesenseClient;
+  onBatchComplete?: () => void;
 };
 
 /**
@@ -43,6 +44,7 @@ export class AnvilWatcher {
   private pendingEvents = new Map<string, WatchEvent['type']>();
   private debounceTimer: NodeJS.Timeout | null = null;
   private batchCompletionCallbacks: Array<() => void> = [];
+  private batchCompleteListeners: Array<() => void> = [];
 
   /**
    * Create a new AnvilWatcher instance
@@ -102,6 +104,15 @@ export class AnvilWatcher {
         this.batchCompletionCallbacks.push(resolve);
       }
     });
+  }
+
+  /**
+   * Register a persistent listener called after every batch completes.
+   * Unlike waitForBatch (which is one-shot), these listeners persist
+   * across batches. Used by GitSyncEngine to trigger debounced pushes.
+   */
+  addBatchCompleteListener(listener: () => void): void {
+    this.batchCompleteListeners.push(listener);
   }
 
   /**
@@ -172,6 +183,18 @@ export class AnvilWatcher {
     // Notify waiting batch completion callbacks
     const callbacks = this.batchCompletionCallbacks.splice(0);
     callbacks.forEach((cb) => cb());
+
+    if (this.options.onBatchComplete) {
+      this.options.onBatchComplete();
+    }
+
+    for (const listener of this.batchCompleteListeners) {
+      try {
+        listener();
+      } catch {
+        // Don't let a listener error crash the watcher
+      }
+    }
   }
 
   /**

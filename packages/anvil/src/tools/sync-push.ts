@@ -15,14 +15,26 @@ export type SyncPushOutput =
 
 /**
  * Handle anvil_sync_push request.
- * Validates vault has git repo, then performs push.
+ * Routes through GitSyncEngine when available (mutex-protected, health-tracked),
+ * falls back to direct git operations for stdio mode or non-git vaults.
  */
 export async function handleSyncPush(
   input: SyncPushInput,
   ctx: ToolContext
 ): Promise<SyncPushOutput | AnvilError> {
   try {
-    // 1. Validate vault has git repo
+    if (ctx.syncEngine) {
+      const result = await ctx.syncEngine.push();
+      if (result.status === 'ok') {
+        return { status: 'ok', filesCommitted: 0, commitHash: '' };
+      } else if (result.status === 'no_changes') {
+        return { status: 'no_changes' };
+      } else {
+        return { status: 'push_failed', message: result.error ?? 'Push failed' };
+      }
+    }
+
+    // Fallback: direct git operations (no sync engine — stdio mode or no git repo)
     if (!(await isGitRepo(ctx.vaultPath))) {
       return makeError(
         ERROR_CODES.NO_GIT_REPO,
@@ -30,10 +42,8 @@ export async function handleSyncPush(
       );
     }
 
-    // 2. Call syncPush with context
     const result = await syncPush(ctx.vaultPath, input.message);
 
-    // 3. Return result or error
     if (isAnvilError(result)) {
       return result;
     }

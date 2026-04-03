@@ -15,14 +15,28 @@ export type SyncPullOutput =
 
 /**
  * Handle anvil_sync_pull request.
- * Validates vault has git repo, then performs pull with optional conflict detection.
+ * Routes through GitSyncEngine when available (mutex-protected, health-tracked),
+ * falls back to direct git operations for stdio mode or non-git vaults.
  */
 export async function handleSyncPull(
   input: SyncPullInput,
   ctx: ToolContext
 ): Promise<SyncPullOutput | AnvilError> {
   try {
-    // 1. Validate vault has git repo
+    if (ctx.syncEngine) {
+      const result = await ctx.syncEngine.pull();
+      if (result.status === 'ok') {
+        return { status: 'ok', filesChanged: result.filesChanged ?? 0, conflicts: [] };
+      } else if (result.status === 'no_changes') {
+        return { status: 'no_changes' };
+      } else if (result.status === 'conflict') {
+        return { status: 'conflict', conflicts: [{ filePath: result.error ?? 'unknown', type: 'merge_conflict' }] };
+      } else {
+        return makeError(ERROR_CODES.SYNC_ERROR, result.error ?? 'Pull failed');
+      }
+    }
+
+    // Fallback: direct git operations (no sync engine — stdio mode or no git repo)
     if (!(await isGitRepo(ctx.vaultPath))) {
       return makeError(
         ERROR_CODES.NO_GIT_REPO,
@@ -30,7 +44,6 @@ export async function handleSyncPull(
       );
     }
 
-    // 2. Call syncPull with context
     const remote = input.remote ?? 'origin';
     const result = await syncPull(
       ctx.vaultPath,
@@ -39,7 +52,6 @@ export async function handleSyncPull(
       ctx.watcher
     );
 
-    // 3. Return result or error
     if (isAnvilError(result)) {
       return result;
     }

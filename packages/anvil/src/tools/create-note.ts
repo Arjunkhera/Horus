@@ -19,6 +19,7 @@ import type { AnvilWatcher } from '../storage/watcher.js';
 import type { SearchEngine } from '../core/search/engine.js';
 import type { TypesenseClient } from '@horus/search';
 import { pushToTypesense } from '../core/search/typesense-doc.js';
+import type { GitSyncEngine } from '../core/sync/engine.js';
 
 export type ToolContext = {
   vaultPath: string;
@@ -27,6 +28,7 @@ export type ToolContext = {
   watcher?: AnvilWatcher;
   searchEngine?: SearchEngine;
   typesenseClient?: TypesenseClient;
+  syncEngine?: GitSyncEngine;
 };
 
 /**
