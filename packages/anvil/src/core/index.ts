@@ -6,7 +6,16 @@ export { AnvilDb, AnvilDatabase } from './storage/sqlite.js';
 export type { SearchEngine, SearchResult, SearchOptions } from './search/engine.js';
 export { ViewEngine } from './views/query-engine.js';
 export { TypeRegistry } from './types/registry.js';
-export { SyncDaemon } from './sync/daemon.js';
+export { GitSyncEngine } from './sync/engine.js';
+export type { GitSyncEngineOptions } from './sync/engine.js';
+export { GitMutex } from './sync/mutex.js';
+export {
+  type SyncHealthState,
+  createInitialHealthState,
+  isHealthCritical,
+  isHealthDegraded,
+  healthHttpStatus,
+} from './sync/health.js';
 
 // Re-export sync types for convenience
 export * from './sync/git.js';

@@ -12,6 +12,8 @@ import { startHttp } from './mcp/transports/http.js';
 import { createTypeWatcher } from './watcher/type-watcher.js';
 import { createSearchEngine } from './core/search/index.js';
 import { AnvilWatcher } from './storage/watcher.js';
+import { GitSyncEngine } from './core/sync/engine.js';
+import { isGitRepo } from './sync/git-sync.js';
 import { loadSearchConfig, loadEmbeddingConfig, createClient, bootstrapCollection } from '@horus/search';
 import type { ToolContext } from './tools/create-note.js';
 import type { TypeWatcher } from './watcher/type-watcher.js';
@@ -222,6 +224,29 @@ async function main(): Promise<void> {
     await reindexToTypesense(db, typesenseClient);
   }
 
+  // Initialize GitSyncEngine if this is a git-backed vault
+  let syncEngine: GitSyncEngine | null = null;
+  if (await isGitRepo(config.vault_path)) {
+    syncEngine = new GitSyncEngine({
+      notesPath: config.vault_path,
+      watcher,
+      pushDebounceMs: parseInt(process.env.ANVIL_PUSH_DEBOUNCE || '5000', 10),
+      pullIntervalMs: parseInt(process.env.ANVIL_PULL_INTERVAL || '60000', 10),
+      gitTimeoutMs: parseInt(process.env.ANVIL_GIT_TIMEOUT || '60000', 10),
+      onReindex: async () => {
+        await watcher.waitForBatch();
+      },
+    });
+    await syncEngine.start();
+    process.stderr.write(
+      JSON.stringify({
+        level: 'info',
+        message: 'GitSyncEngine started (in-process sync daemon)',
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+  }
+
   // Create tool context
   const ctx: ToolContext = {
     vaultPath: config.vault_path,
@@ -230,6 +255,7 @@ async function main(): Promise<void> {
     watcher,
     searchEngine,
     typesenseClient: typesenseClient ?? undefined,
+    syncEngine: syncEngine ?? undefined,
   };
 
   // Set up type watcher for hot reload
@@ -257,6 +283,7 @@ async function main(): Promise<void> {
   // Set up signal handlers for graceful shutdown
   const shutdown = async () => {
     console.info('[index] Shutting down...');
+    if (syncEngine) await syncEngine.stop();
     await watcher.stop();
     if (typeWatcher) {
       await typeWatcher.close();
@@ -275,7 +302,11 @@ async function main(): Promise<void> {
 
   if (transport === 'http') {
     // Pass a factory so each MCP session gets its own Server instance
-    await startHttp(() => createMcpServer(ctx), { port, host });
+    await startHttp(() => createMcpServer(ctx), {
+      port,
+      host,
+      getHealth: syncEngine ? () => syncEngine!.getHealth() : undefined,
+    });
   } else {
     const server = createMcpServer(ctx);
     await startStdio(server);

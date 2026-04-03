@@ -39,6 +39,9 @@ services:
       - ANVIL_REPO_URL=${ANVIL_REPO_URL:-}
       - ANVIL_SYNC_INTERVAL=${ANVIL_SYNC_INTERVAL:-300}
       - ANVIL_DEBOUNCE_SECONDS=${ANVIL_DEBOUNCE_SECONDS:-5}
+      - ANVIL_PUSH_DEBOUNCE=${ANVIL_PUSH_DEBOUNCE:-5000}
+      - ANVIL_PULL_INTERVAL=${ANVIL_PULL_INTERVAL:-60000}
+      - ANVIL_GIT_TIMEOUT=${ANVIL_GIT_TIMEOUT:-60000}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       # Runtime detection — entrypoints use this to conditionally run chown/chmod
       # (needed for Podman user-namespace remapping, harmful on Docker Desktop macOS)

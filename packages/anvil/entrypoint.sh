@@ -36,8 +36,6 @@ fi
 # Mark bind-mounted path as safe for git (CVE-2022-24765: ownership differs in container)
 git config --global --add safe.directory "$NOTES_PATH"
 
-# PID of the background git sync daemon (set in Step 4 if started)
-SYNC_PID=""
 # PID of the Anvil MCP server process
 NODE_PID=""
 
@@ -53,51 +51,10 @@ log_warn() {
   echo "{\"level\":\"warn\",\"message\":\"$1\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >&2
 }
 
-# Write sync status to /tmp/sync-status.json — polled by the /health endpoint.
-# Args: ok (true|false), failures (int), last_error (JSON string or null), ahead, behind
-write_sync_status() {
-  local ok="$1" failures="$2" last_error="${3:-null}" ahead="${4:-0}" behind="${5:-0}"
-  local timestamp
-  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  printf '{"ok":%s,"service":"anvil","consecutive_failures":%s,"last_attempt":"%s","last_error":%s,"ahead":%s,"behind":%s}\n' \
-    "$ok" "$failures" "$timestamp" "$last_error" "$ahead" "$behind" \
-    > /tmp/sync-status.json
-}
-
-# ── Helper function for bidirectional sync ─────────────────────────────────────
-push_cycle() {
-  git -C "$NOTES_PATH" add -- '*.md' '.anvil/types/*.yaml'
-  if ! git -C "$NOTES_PATH" diff --cached --quiet; then
-    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" || true
-    PUSH_ERR=$(git -C "$NOTES_PATH" push 2>&1) || {
-      log_err "Final push failed: ${PUSH_ERR}"
-      return
-    }
-    log "Final push cycle complete"
-  else
-    log "Final push cycle: no changes to commit"
-  fi
-}
-
 # ── Graceful shutdown ──────────────────────────────────────────────────────────
-# Trap SIGTERM and SIGINT. Kill the background sync daemon (if running), run a
-# final push cycle, and clean up the node process before the shell exits.
+# Forward SIGTERM to the Node process which handles its own sync engine shutdown.
 shutdown() {
-  log "Shutdown signal received — cleaning up..."
-  # Stop the sync daemon
-  if [ -n "$SYNC_PID" ] && kill -0 "$SYNC_PID" 2>/dev/null; then
-    log "Stopping git sync daemon (PID: $SYNC_PID)..."
-    kill "$SYNC_PID"
-    wait "$SYNC_PID" 2>/dev/null || true
-    log "Git sync daemon stopped"
-  fi
-  # Final push flush before exit
-  if [ -d "$NOTES_PATH/.git" ] && [ -n "$GITHUB_TOKEN" ]; then
-    log "Running final push cycle before shutdown..."
-    push_cycle
-  fi
-  # Kill the node process if running
+  log "Shutdown signal received — forwarding to Node..."
   if [ -n "$NODE_PID" ] && kill -0 "$NODE_PID" 2>/dev/null; then
     kill "$NODE_PID"
     wait "$NODE_PID" 2>/dev/null || true
@@ -154,84 +111,8 @@ if [ ! -f "$NOTES_PATH/.anvil/types/_core.yaml" ]; then
   fi
 fi
 
-# Step 4: Start background git sync daemon with bidirectional sync (pull + commit + push)
-# Only runs when a git repository exists (indicated by .git directory presence).
-if [ -d "$NOTES_PATH/.git" ]; then
-  log "Starting git sync daemon (interval: ${SYNC_INTERVAL}s)..."
-  write_sync_status "true" "0" "null" "0" "0"
-
-  (
-    SYNC_FAIL_COUNT=0
-    SYNC_FAIL_THRESHOLD=3
-
-    while true; do
-      sleep "$SYNC_INTERVAL"
-
-      # ── Pull remote changes ──────────────────────────────────────────────────
-      log "Running git pull..."
-      # Try fast-forward first; fall back to rebase on divergence.
-      PULL_ERR=$(git -C "$NOTES_PATH" pull --ff-only 2>&1)
-      PULL_EXIT=$?
-      if [ $PULL_EXIT -ne 0 ]; then
-        log_err "git pull --ff-only failed: ${PULL_ERR}"
-        log "Retrying with --rebase..."
-        PULL_ERR=$(git -C "$NOTES_PATH" pull --rebase 2>&1)
-        PULL_EXIT=$?
-        if [ $PULL_EXIT -ne 0 ]; then
-          SYNC_FAIL_COUNT=$((SYNC_FAIL_COUNT + 1))
-          AHEAD=$(git -C "$NOTES_PATH" rev-list --count "@{u}..HEAD" 2>/dev/null || echo "?")
-          BEHIND=$(git -C "$NOTES_PATH" rev-list --count "HEAD..@{u}" 2>/dev/null || echo "?")
-          SAFE_ERR=$(echo "$PULL_ERR" | head -1 | sed 's/"/\\\"/g')
-          log_err "git pull --rebase also failed: ${PULL_ERR}"
-          write_sync_status "false" "$SYNC_FAIL_COUNT" "\"${SAFE_ERR}\"" "$AHEAD" "$BEHIND"
-          if [ "$SYNC_FAIL_COUNT" -ge "$SYNC_FAIL_THRESHOLD" ]; then
-            log_warn "SYNC STUCK: ${SYNC_FAIL_COUNT} consecutive failures — local is ${AHEAD} ahead, ${BEHIND} behind. Manual intervention may be required. Last error: ${PULL_ERR}"
-          fi
-          continue
-        fi
-      fi
-
-      # ── Commit and push local changes ────────────────────────────────────────
-      # Stage only .md notes and type definitions — never binary files like index.db.
-      git -C "$NOTES_PATH" add -- '*.md' '.anvil/types/*.yaml'
-      if ! git -C "$NOTES_PATH" diff --cached --quiet; then
-        TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        COMMIT_ERR=$(git -C "$NOTES_PATH" commit -m "auto: sync $TIMESTAMP" 2>&1) || {
-          log_err "Git commit failed: ${COMMIT_ERR}"
-          SYNC_FAIL_COUNT=$((SYNC_FAIL_COUNT + 1))
-          SAFE_ERR=$(echo "$COMMIT_ERR" | head -1 | sed 's/"/\\\"/g')
-          write_sync_status "false" "$SYNC_FAIL_COUNT" "\"${SAFE_ERR}\"" "?" "?"
-          continue
-        }
-        PUSH_ERR=$(git -C "$NOTES_PATH" push 2>&1)
-        PUSH_EXIT=$?
-        if [ $PUSH_EXIT -ne 0 ]; then
-          SYNC_FAIL_COUNT=$((SYNC_FAIL_COUNT + 1))
-          SAFE_ERR=$(echo "$PUSH_ERR" | head -1 | sed 's/"/\\\"/g')
-          log_err "Git push failed: ${PUSH_ERR}"
-          write_sync_status "false" "$SYNC_FAIL_COUNT" "\"${SAFE_ERR}\"" "?" "?"
-          if [ "$SYNC_FAIL_COUNT" -ge "$SYNC_FAIL_THRESHOLD" ]; then
-            log_warn "SYNC STUCK: ${SYNC_FAIL_COUNT} consecutive push failures. Last error: ${PUSH_ERR}"
-          fi
-          continue
-        fi
-        log "Sync complete: committed and pushed local changes"
-      else
-        log "Sync complete: no local changes to commit"
-      fi
-
-      # ── Reset failure counter on a clean cycle ───────────────────────────────
-      SYNC_FAIL_COUNT=0
-      write_sync_status "true" "0" "null" "0" "0"
-
-    done
-  ) &
-
-  SYNC_PID=$!
-  log "Sync daemon started (PID: $SYNC_PID)"
-fi
-
-# Step 5: Start Anvil MCP server in HTTP mode.
+# Step 4: Start Anvil MCP server in HTTP mode.
+# Git sync is now handled in-process by GitSyncEngine (packages/anvil/src/core/sync/engine.ts).
 # Run node as a background process and wait for it, allowing SIGTERM to be handled
 # via the trap above.
 log "Starting Anvil MCP server in HTTP mode on port ${ANVIL_PORT:-8100}..."
