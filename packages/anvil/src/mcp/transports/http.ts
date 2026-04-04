@@ -76,8 +76,21 @@ export async function startHttp(serverFactory: () => Server, opts: HttpOptions):
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       let transport = sessionId ? sessions.get(sessionId) : undefined;
 
-      if (!transport) {
-        // New session: create a fresh transport and server instance
+      if (!transport && sessionId) {
+        // Session ID provided but not in map — server restarted or session expired.
+        // Recover transparently: create a stateless transport (no sessionIdGenerator)
+        // which bypasses the SDK's session validation and init enforcement.
+        const server = serverFactory();
+        transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
+        transport.onclose = () => {
+          sessions.delete(sessionId);
+          log('info', 'MCP session closed (recovered)', { sessionId });
+        };
+        await server.connect(transport);
+        sessions.set(sessionId, transport);
+        log('info', 'MCP session recovered (transparent reinit)', { sessionId });
+      } else if (!transport) {
+        // No session ID = new session request (initialize handshake).
         const server = serverFactory();
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
