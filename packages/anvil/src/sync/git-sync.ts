@@ -179,7 +179,11 @@ export async function syncPush(
     const statusAfter = await git.status();
     const isStagedEmpty = (statusAfter.staged?.length ?? 0) === 0 && (statusAfter.files?.length ?? 0) === 0;
 
-    if (isStagedEmpty && statusBefore.not_added?.length === 0) {
+    // Only count untracked files that would actually be staged (.md or .anvil/types/*.yaml)
+    const relevantNotAdded = (statusBefore.not_added ?? []).filter(
+      (f) => f.endsWith('.md') || (f.startsWith('.anvil/types/') && f.endsWith('.yaml'))
+    );
+    if (isStagedEmpty && relevantNotAdded.length === 0) {
       return { status: 'no_changes' };
     }
 
@@ -188,6 +192,10 @@ export async function syncPush(
     try {
       const commitResult = await git.commit(message);
       commitHash = commitResult.commit;
+      // If git.commit() returned silently with no hash, nothing was committed
+      if (!commitHash) {
+        return { status: 'no_changes' };
+      }
     } catch (err) {
       // No changes to commit
       if ((err instanceof Error && err.message.includes('nothing to commit')) || (statusAfter.staged?.length ?? 0) === 0) {
