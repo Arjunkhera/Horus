@@ -137,8 +137,8 @@ export async function registerWithClaudeCode(
   const failed: string[] = [];
 
   for (const [name, entry] of Object.entries(mcpServers)) {
-    // claude mcp add expects the base URL without the /sse suffix
-    const baseUrl = entry.url.replace(/\/sse$/, '');
+    // claude mcp add expects the base URL without the path suffix
+    const baseUrl = entry.url.replace(/\/(mcp|sse)$/, '');
     // Remove first so re-runs and URL changes are handled cleanly (ignore exit code)
     await execa('claude', ['mcp', 'remove', '--scope', 'user', name], { reject: false });
     const result = await execa(
@@ -236,11 +236,11 @@ export async function runConnect(
   targets: ClientTarget[],
   host: string = 'localhost',
 ): Promise<ClientTarget[]> {
-  // Build HTTP MCP config (used by Claude Code and Cursor)
+  // Build HTTP MCP config (used by all clients — Claude Desktop, Claude Code, Cursor)
   const httpServers: Record<string, HttpMcpServerEntry> = {
-    anvil: { url: `http://${host}:${config.ports.anvil}/sse` },
-    vault: { url: `http://${host}:${config.ports.vault_mcp}/sse` },
-    forge: { url: `http://${host}:${config.ports.forge}/sse` },
+    anvil: { url: `http://${host}:${config.ports.anvil}/mcp` },
+    vault: { url: `http://${host}:${config.ports.vault_mcp}/mcp` },
+    forge: { url: `http://${host}:${config.ports.forge}/mcp` },
   };
 
   const configured: ClientTarget[] = [];
@@ -248,23 +248,14 @@ export async function runConnect(
   // Write config for each target
   for (const target of targets) {
     if (target === 'claude-desktop') {
-      // Claude Desktop requires stdio-based servers (command + args).
-      // It cannot connect to HTTP URLs directly — needs mcp-remote-wrapper as a bridge.
+      // Claude Desktop supports HTTP URLs natively (Streamable HTTP transport).
+      // Previous versions required mcp-remote-wrapper as a stdio bridge, but this
+      // caused permanent MCP disconnects on container restarts (mcp-remote has no
+      // reconnect logic — it tears down the stdio pipe when the backend drops).
       const desktopSpinner = ora(`Configuring ${chalk.cyan('claude-desktop')}...`).start();
-      const wrapperPath = getMcpRemoteWrapperPath();
-
-      if (!existsSync(wrapperPath)) {
-        desktopSpinner.fail('mcp-remote-wrapper not found');
-        console.log(chalk.dim(`Expected at: ${wrapperPath}`));
-        console.log(chalk.dim('Install it with: npx --yes mcp-remote --help'));
-        console.log(chalk.dim('Then place the wrapper script at the path above.'));
-        continue;
-      }
-
       try {
-        const stdioServers = buildStdioServers(config, wrapperPath, host);
         const configPath = getConfigPath(target);
-        mergeAndWriteConfig(configPath, stdioServers);
+        mergeAndWriteConfig(configPath, httpServers);
         desktopSpinner.succeed(`Configured ${chalk.cyan('claude-desktop')} — ${chalk.dim(configPath)}`);
         configured.push(target);
       } catch (error) {
@@ -294,7 +285,7 @@ export async function runConnect(
       } else {
         cliSpinner.warn('claude CLI not found on PATH — register manually:');
         for (const [name, entry] of Object.entries(httpServers)) {
-          const baseUrl = entry.url.replace(/\/sse$/, '');
+          const baseUrl = entry.url.replace(/\/(mcp|sse)$/, '');
           console.log(
             chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`),
           );

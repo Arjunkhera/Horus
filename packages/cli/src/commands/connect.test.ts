@@ -79,9 +79,9 @@ describe('isClaudeCliAvailable', () => {
 
 describe('registerWithClaudeCode', () => {
   const servers = {
-    anvil: { url: 'http://localhost:8100/sse' },
-    vault: { url: 'http://localhost:8300/sse' },
-    forge: { url: 'http://localhost:8200/sse' },
+    anvil: { url: 'http://localhost:8100/mcp' },
+    vault: { url: 'http://localhost:8300/mcp' },
+    forge: { url: 'http://localhost:8200/mcp' },
   };
 
   it('calls claude mcp remove then add for each server', async () => {
@@ -123,9 +123,9 @@ describe('registerWithClaudeCode', () => {
     );
   });
 
-  it('strips /sse suffix from URL before passing to claude mcp add', async () => {
+  it('strips /mcp suffix from URL before passing to claude mcp add', async () => {
     mockExeca.mockResolvedValue(makeResult(0));
-    await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100/sse' } });
+    await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100/mcp' } });
 
     // second call is the add (first is remove)
     expect(mockExeca).toHaveBeenNthCalledWith(
