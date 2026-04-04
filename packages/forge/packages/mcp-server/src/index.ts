@@ -854,19 +854,23 @@ export async function startMcpServerHttp(opts: HttpServerOptions): Promise<void>
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       let entry = sessionId ? sessions.get(sessionId) : undefined;
 
-      if (sessionId && !entry) {
-        // Session ID provided but unknown (e.g. server restarted, session expired).
-        // Per MCP spec: return 404 so the client can reinitialize cleanly.
-        // Without this guard, we'd create a new uninitialized transport for every
-        // stale request, leaking memory and potentially leaving requests unanswered.
-        log('warn', 'Unknown session ID — returning 404', { sessionId });
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Session not found' }));
-        return;
-      }
-
       let transport: StreamableHTTPServerTransport;
-      if (!entry) {
+      if (sessionId && !entry) {
+        // Session ID provided but unknown (server restarted or session expired).
+        // Recover transparently: create a stateless transport (no sessionIdGenerator)
+        // which bypasses the SDK's session validation and init enforcement.
+        // The client continues using its existing session ID without needing to restart.
+        const server = buildServer(workspaceRoot);
+        transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
+        transport.onclose = () => {
+          sessions.delete(sessionId);
+          log('info', 'MCP session closed (recovered)', { sessionId });
+        };
+        await server.connect(transport);
+        entry = { transport, lastSeen: Date.now() };
+        sessions.set(sessionId, entry);
+        log('info', 'MCP session recovered (transparent reinit)', { sessionId });
+      } else if (!entry) {
         // No session ID = new session request (initialize handshake).
         const server = buildServer(workspaceRoot);
         transport = new StreamableHTTPServerTransport({
