@@ -104,20 +104,15 @@ export class GitSyncEngine {
 
       await this.stageFiles(git);
 
-      // Use git diff --cached to reliably detect staged changes.
-      // If nothing is staged, there is nothing to commit regardless of
-      // untracked or modified-but-unstaged files (e.g. conversation JSONs).
-      const hasStagedChanges = await git
-        .diff(['--cached', '--quiet'])
-        .then(() => false, () => true);
-
-      if (!hasStagedChanges) {
-        return { status: 'no_changes' };
-      }
-
-      // Count staged files before committing
+      // Check staged files via git.status() — simple-git's diff() does not
+      // reject on exit code 1 with --quiet, so git diff --cached --quiet
+      // always resolves and hasStagedChanges would always be false.
       const statusBeforeCommit = await git.status();
       const filesCommitted = statusBeforeCommit.staged?.length ?? 0;
+
+      if (filesCommitted === 0) {
+        return { status: 'no_changes' };
+      }
 
       const timestamp = new Date().toISOString();
       let commitHash = '';
