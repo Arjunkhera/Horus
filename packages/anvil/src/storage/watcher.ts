@@ -52,6 +52,14 @@ export class AnvilWatcher {
   constructor(private options: WatcherOptions) {}
 
   /**
+   * Update the Typesense client used for live document sync.
+   * Called after a successful lazy reconnect so newly written notes get indexed.
+   */
+  setTypesenseClient(client: TypesenseClient): void {
+    this.options.typesenseClient = client;
+  }
+
+  /**
    * Start watching the vault.
    * Runs startup catchup first to handle changes while offline,
    * then initializes the chokidar watcher for real-time updates.
