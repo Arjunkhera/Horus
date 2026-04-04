@@ -18,6 +18,15 @@ import { handleSyncPull } from '../tools/sync-pull.js';
 import { handleSyncPush } from '../tools/sync-push.js';
 import { handleHorusSearch } from '../tools/horus-search.js';
 import { handleDeleteNote } from '../tools/delete-note.js';
+// V2 tool handlers
+import { handleCreateEntity, type CreateEntityParams } from '../tools/create-entity.js';
+import { handleUpdateEntity, type UpdateEntityInput } from '../tools/update-entity.js';
+import { handleDeleteEntity, type DeleteEntityInput } from '../tools/delete-entity.js';
+import { handleCreateEdge, type CreateEdgeParams } from '../tools/create-edge.js';
+import { handleDeleteEdge, type DeleteEdgeParams } from '../tools/delete-edge.js';
+import { handleGetEdges, type GetEdgesParams } from '../tools/get-edges.js';
+import { handleCreateType, type CreateTypeInput } from '../tools/create-type.js';
+import { handleUpdateType, type UpdateTypeInput } from '../tools/update-type.js';
 import {
   CreateNoteInputSchema,
   GetNoteInputSchema,
@@ -365,6 +374,217 @@ export function createMcpServer(ctx: ToolContext): Server {
         required: ['noteId'],
       },
     },
+    // ── V2 Tools ──────────────────────────────────────────────────────────
+    {
+      name: 'anvil_create_entity',
+      description:
+        'Create a new entity through the V2 ingestion pipeline with automatic validation, persistence, graph sync, and indexing.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            description: 'Entity type ID (e.g., task, note, story)',
+          },
+          title: {
+            type: 'string',
+            description: 'Entity title',
+          },
+          fields: {
+            type: 'object',
+            description: 'Type-specific frontmatter fields',
+          },
+          body: {
+            type: 'string',
+            description: 'Optional markdown body content',
+          },
+          edges: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                targetId: { type: 'string', description: 'Target entity UUID' },
+                intent: { type: 'string', description: 'Edge intent (relationship type)' },
+                description: { type: 'string', description: 'Optional edge description' },
+              },
+              required: ['targetId', 'intent'],
+            },
+            description: 'Optional edges to create alongside the entity',
+          },
+          sourcePath: {
+            type: 'string',
+            description: 'Optional source file path for file-type entities',
+          },
+        },
+        required: ['type', 'title'],
+      },
+    },
+    {
+      name: 'anvil_update_entity',
+      description:
+        'Update an entity with PATCH semantics through the V2 pipeline. Only provided fields are updated; edges are NOT modified via this tool.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          noteId: {
+            type: 'string',
+            description: 'Entity UUID to update',
+          },
+          fields: {
+            type: 'object',
+            description: 'Fields to merge (omitted fields are preserved)',
+          },
+          content: {
+            type: 'string',
+            description: 'New body content (omit to keep existing)',
+          },
+        },
+        required: ['noteId'],
+      },
+    },
+    {
+      name: 'anvil_delete_entity',
+      description:
+        'Delete an entity with cascade through the V2 pipeline. Removes index entry, Neo4j node + edges, storage record, and backing file.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          noteId: {
+            type: 'string',
+            description: 'Entity UUID to delete',
+          },
+          force: {
+            type: 'boolean',
+            description:
+              'If true, continues deletion even if the entity is not found (default: false)',
+          },
+        },
+        required: ['noteId'],
+      },
+    },
+    {
+      name: 'anvil_create_edge',
+      description:
+        'Create a directed edge between two entities in the Neo4j graph. Validates the intent against the IntentRegistry.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sourceId: {
+            type: 'string',
+            description: 'Source entity UUID',
+          },
+          targetId: {
+            type: 'string',
+            description: 'Target entity UUID',
+          },
+          intent: {
+            type: 'string',
+            description: 'Edge intent / relationship type (e.g., blocks, depends_on, parent_of)',
+          },
+          description: {
+            type: 'string',
+            description: 'Optional human-readable edge description',
+          },
+        },
+        required: ['sourceId', 'targetId', 'intent'],
+      },
+    },
+    {
+      name: 'anvil_delete_edge',
+      description:
+        'Delete one or more edges between two entities. When intent is provided, only the matching edge is removed; when omitted, all edges between the pair are deleted.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sourceId: {
+            type: 'string',
+            description: 'Source entity UUID',
+          },
+          targetId: {
+            type: 'string',
+            description: 'Target entity UUID',
+          },
+          intent: {
+            type: 'string',
+            description: 'Optional intent filter — omit to delete all edges between the pair',
+          },
+        },
+        required: ['sourceId', 'targetId'],
+      },
+    },
+    {
+      name: 'anvil_get_edges',
+      description:
+        'Get all edges for an entity (both directions), optionally filtered by intent. Returns resolved edges with direction context and display labels.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          noteId: {
+            type: 'string',
+            description: 'Entity UUID to get edges for',
+          },
+          intent: {
+            type: 'string',
+            description: 'Optional intent filter',
+          },
+        },
+        required: ['noteId'],
+      },
+    },
+    {
+      name: 'anvil_create_type',
+      description:
+        'Create a new custom entity type definition. Writes YAML to the vault\'s custom-types/ directory and reloads the type registry.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: 'Type ID (lowercase letters, digits, hyphens, underscores; must start with a letter)',
+          },
+          name: {
+            type: 'string',
+            description: 'Human-readable type name',
+          },
+          description: {
+            type: 'string',
+            description: 'Optional type description',
+          },
+          icon: {
+            type: 'string',
+            description: 'Optional icon identifier',
+          },
+          extends: {
+            type: 'string',
+            description: 'Optional parent type ID to inherit fields from',
+          },
+          fields: {
+            type: 'object',
+            description: 'Field definitions for the type (keys are field names, values are field configs)',
+          },
+        },
+        required: ['id', 'name', 'fields'],
+      },
+    },
+    {
+      name: 'anvil_update_type',
+      description:
+        'Add new fields to an existing custom type definition. Add-only: cannot modify existing fields or update built-in types.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          typeId: {
+            type: 'string',
+            description: 'Type ID to update',
+          },
+          fields: {
+            type: 'object',
+            description: 'New field definitions to add (keys are field names, values are field configs)',
+          },
+        },
+        required: ['typeId', 'fields'],
+      },
+    },
   ];
 
   // Register ListTools handler
@@ -573,6 +793,165 @@ export function createMcpServer(ctx: ToolContext): Server {
         case 'horus_search': {
           const input = HorusSearchInputSchema.parse(args);
           const result = await handleHorusSearch(input, ctx);
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        // ── V2 Tool Handlers ────────────────────────────────────────────
+
+        case 'anvil_create_entity': {
+          if (!ctx.storageBackend || !ctx.edgeStore || !ctx.intentRegistry) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 subsystem not initialized. Run with V2 bootstrap to use this tool.')) }],
+              isError: true,
+            };
+          }
+          const params = args as unknown as CreateEntityParams;
+          const result = await handleCreateEntity(
+            {
+              storageBackend: ctx.storageBackend,
+              edgeStore: ctx.edgeStore,
+              intentRegistry: ctx.intentRegistry,
+              typeRegistry: ctx.registry,
+              fileStore: ctx.fileStore,
+            },
+            params,
+          );
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_update_entity': {
+          if (!ctx.storageBackend) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 subsystem not initialized. Run with V2 bootstrap to use this tool.')) }],
+              isError: true,
+            };
+          }
+          const input = args as unknown as UpdateEntityInput;
+          const result = await handleUpdateEntity(input, {
+            storageBackend: ctx.storageBackend,
+            edgeStore: ctx.edgeStore,
+          });
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_delete_entity': {
+          if (!ctx.storageBackend) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 subsystem not initialized. Run with V2 bootstrap to use this tool.')) }],
+              isError: true,
+            };
+          }
+          const input = args as unknown as DeleteEntityInput;
+          const result = await handleDeleteEntity(input, {
+            storageBackend: ctx.storageBackend,
+            edgeStore: ctx.edgeStore,
+            fileStore: ctx.fileStore,
+          });
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_create_edge': {
+          if (!ctx.edgeStore || !ctx.intentRegistry) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 subsystem not initialized. Run with V2 bootstrap to use this tool.')) }],
+              isError: true,
+            };
+          }
+          const params = args as unknown as CreateEdgeParams;
+          const result = await handleCreateEdge(
+            { edgeStore: ctx.edgeStore, intentRegistry: ctx.intentRegistry },
+            params,
+          );
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_delete_edge': {
+          if (!ctx.edgeStore || !ctx.intentRegistry) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 subsystem not initialized. Run with V2 bootstrap to use this tool.')) }],
+              isError: true,
+            };
+          }
+          const params = args as unknown as DeleteEdgeParams;
+          const result = await handleDeleteEdge(
+            { edgeStore: ctx.edgeStore, intentRegistry: ctx.intentRegistry },
+            params,
+          );
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_get_edges': {
+          if (!ctx.edgeStore || !ctx.intentRegistry) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 subsystem not initialized. Run with V2 bootstrap to use this tool.')) }],
+              isError: true,
+            };
+          }
+          const params = args as unknown as GetEdgesParams;
+          const result = await handleGetEdges(
+            { edgeStore: ctx.edgeStore, intentRegistry: ctx.intentRegistry },
+            params,
+          );
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_create_type': {
+          const params = args as CreateTypeInput;
+          const result = await handleCreateType(params, ctx);
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_update_type': {
+          const params = args as UpdateTypeInput;
+          const result = await handleUpdateType(params, ctx);
           if (isAnvilError(result)) {
             return {
               content: [{ type: 'text', text: JSON.stringify(result) }],

@@ -20,6 +20,12 @@ import type { SearchEngine } from '../core/search/engine.js';
 import type { TypesenseClient } from '@horus/search';
 import { pushToTypesense } from '../core/search/typesense-doc.js';
 import type { GitSyncEngine } from '../core/sync/engine.js';
+import type { StorageBackend } from '../core/storage/storage-backend.js';
+import type { FileStore } from '../core/storage/file-store.js';
+import type { Neo4jEdgeStore } from '../core/graph/neo4j-edge-store.js';
+import type { IntentRegistry } from '../core/graph/intent-registry.js';
+import type { SchemaBuilder } from '../core/search/schema-builder.js';
+import type { IngestPipeline } from '../core/pipeline/ingest-pipeline.js';
 
 export type ToolContext = {
   vaultPath: string;
@@ -35,6 +41,14 @@ export type ToolContext = {
    * Returns true if Typesense is now available, false otherwise.
    */
   tryReconnect?: () => Promise<boolean>;
+
+  // V2 optional fields (present when V2 bootstrap runs)
+  storageBackend?: StorageBackend;
+  fileStore?: FileStore;
+  edgeStore?: Neo4jEdgeStore;
+  intentRegistry?: IntentRegistry;
+  schemaBuilder?: SchemaBuilder;
+  pipeline?: IngestPipeline;
 };
 
 /**
