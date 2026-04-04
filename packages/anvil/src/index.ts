@@ -18,6 +18,7 @@ import { loadSearchConfig, loadEmbeddingConfig, createClient, bootstrapCollectio
 import type { ToolContext } from './tools/create-note.js';
 import type { TypeWatcher } from './watcher/type-watcher.js';
 import type { TypesenseClient } from '@horus/search';
+import { bootstrapV2, shutdownV2, type V2Context } from './bootstrap-v2.js';
 
 /**
  * Attempt to initialise Typesense: connect, bootstrap collection, return client.
@@ -258,6 +259,35 @@ async function main(): Promise<void> {
     syncEngine: syncEngine ?? undefined,
   };
 
+  // ── V2 Bootstrap (non-fatal) ─────────────────────────────────────────────
+  // Attempt to initialize V2 subsystems (StorageBackend, Neo4j, pipeline).
+  // On success, V1 tools (create_note, update_note, delete_note, get_related)
+  // will delegate to V2 automatically. On failure, V1 continues as before.
+  let v2: V2Context | null = null;
+  try {
+    v2 = await bootstrapV2(config);
+    ctx.storageBackend = v2.storageBackend;
+    ctx.fileStore = v2.fileStore;
+    ctx.edgeStore = v2.edgeStore;
+    ctx.intentRegistry = v2.intentRegistry;
+    ctx.pipeline = v2.pipeline;
+    process.stderr.write(
+      JSON.stringify({
+        level: 'info',
+        message: `V2 subsystems initialized (Neo4j: ok, Typesense: ${v2.typesenseAvailable ? 'ok' : 'degraded'})`,
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+  } catch (err) {
+    process.stderr.write(
+      JSON.stringify({
+        level: 'warn',
+        message: `V2 bootstrap failed — V1 tools will continue without V2 delegation: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+  }
+
   // Lazy reconnect: if Typesense was unavailable at startup, allow search tools to
   // re-attempt the connection on first use rather than requiring a server restart.
   // Concurrent calls share the same in-flight promise so we only connect once.
@@ -313,6 +343,7 @@ async function main(): Promise<void> {
   // Set up signal handlers for graceful shutdown
   const shutdown = async () => {
     console.info('[index] Shutting down...');
+    if (v2) await shutdownV2(v2);
     if (syncEngine) await syncEngine.stop();
     await watcher.stop();
     if (typeWatcher) {

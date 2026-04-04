@@ -600,6 +600,43 @@ export function createMcpServer(ctx: ToolContext): Server {
       switch (name) {
         case 'anvil_create_note': {
           const input = CreateNoteInputSchema.parse(args);
+
+          // V2 delegation: route through IngestPipeline when available
+          if (ctx.storageBackend && ctx.edgeStore && ctx.intentRegistry) {
+            const v2Result = await handleCreateEntity(
+              {
+                storageBackend: ctx.storageBackend,
+                edgeStore: ctx.edgeStore,
+                intentRegistry: ctx.intentRegistry,
+                typeRegistry: ctx.registry,
+                fileStore: ctx.fileStore,
+              },
+              {
+                type: input.type,
+                title: input.title,
+                fields: { type: input.type, ...input.fields },
+                body: input.content ?? '',
+              },
+            );
+            if (isAnvilError(v2Result)) {
+              return {
+                content: [{ type: 'text', text: JSON.stringify(v2Result) }],
+                isError: true,
+              };
+            }
+            // Map V2 result to V1 shape: { noteId, filePath, title, type }
+            const v1Compat = {
+              noteId: v2Result.entityId,
+              filePath: v2Result.filePath,
+              title: v2Result.title,
+              type: v2Result.type,
+            };
+            return {
+              content: [{ type: 'text', text: JSON.stringify(v1Compat) }],
+            };
+          }
+
+          // Fallback: V1 path
           const result = await handleCreateNote(input, ctx);
           if (isAnvilError(result)) {
             return {
@@ -648,6 +685,32 @@ export function createMcpServer(ctx: ToolContext): Server {
 
         case 'anvil_update_note': {
           const input = UpdateNoteInputSchema.parse(args);
+
+          // V2 delegation: route through StorageBackend when available
+          if (ctx.storageBackend) {
+            const v2Result = await handleUpdateEntity(
+              {
+                noteId: input.noteId,
+                fields: input.fields,
+                content: input.content,
+              },
+              {
+                storageBackend: ctx.storageBackend,
+                edgeStore: ctx.edgeStore,
+              },
+            );
+            if (isAnvilError(v2Result)) {
+              return {
+                content: [{ type: 'text', text: JSON.stringify(v2Result) }],
+                isError: true,
+              };
+            }
+            return {
+              content: [{ type: 'text', text: JSON.stringify(v2Result) }],
+            };
+          }
+
+          // Fallback: V1 path
           const result = await handleUpdateNote(input, ctx);
           if (isAnvilError(result)) {
             return {
@@ -732,6 +795,58 @@ export function createMcpServer(ctx: ToolContext): Server {
 
         case 'anvil_get_related': {
           const input = args as { noteId: string };
+
+          // V2 delegation: use Neo4j edge store when available
+          if (ctx.edgeStore && ctx.intentRegistry) {
+            const v2Result = await handleGetEdges(
+              { edgeStore: ctx.edgeStore, intentRegistry: ctx.intentRegistry },
+              { noteId: input.noteId },
+            );
+            if (isAnvilError(v2Result)) {
+              return {
+                content: [{ type: 'text', text: JSON.stringify(v2Result) }],
+                isError: true,
+              };
+            }
+            // Map to V1-compatible shape with forward/reverse grouping
+            const forward: Record<string, any[]> = {};
+            const reverse: Record<string, any[]> = {};
+            for (const edge of (v2Result as any).edges) {
+              const bucket = edge.direction === 'outgoing' ? forward : reverse;
+              const key = edge.displayLabel || edge.intent;
+              if (!bucket[key]) bucket[key] = [];
+              bucket[key].push({
+                noteId: edge.direction === 'outgoing' ? edge.targetId : edge.sourceId,
+                title: edge.targetTitle || '',
+                type: edge.targetType,
+                resolved: true,
+              });
+            }
+            // Get the source note info for the response
+            let title = '';
+            let type = 'note';
+            try {
+              if (ctx.storageBackend) {
+                const entity = await ctx.storageBackend.getEntity(input.noteId);
+                title = entity.title;
+                type = entity.type;
+              }
+            } catch {
+              // Best effort — note may not exist in storage yet
+            }
+            const v1Compat = {
+              noteId: input.noteId,
+              title,
+              type,
+              forward,
+              reverse,
+            };
+            return {
+              content: [{ type: 'text', text: JSON.stringify(v1Compat) }],
+            };
+          }
+
+          // Fallback: V1 path (frontmatter-based relationships)
           const result = handleGetRelated(input, ctx);
           if (isAnvilError(result)) {
             return {
@@ -780,6 +895,32 @@ export function createMcpServer(ctx: ToolContext): Server {
 
         case 'anvil_delete_note': {
           const input = args as { noteId: string; force?: boolean };
+
+          // V2 delegation: route through StorageBackend + cascade when available
+          if (ctx.storageBackend) {
+            const v2Result = await handleDeleteEntity(
+              { noteId: input.noteId, force: input.force },
+              {
+                storageBackend: ctx.storageBackend,
+                edgeStore: ctx.edgeStore,
+                fileStore: ctx.fileStore,
+              },
+            );
+            if (isAnvilError(v2Result)) {
+              return {
+                content: [{ type: 'text', text: JSON.stringify(v2Result) }],
+                isError: true,
+              };
+            }
+            // Map to V1 shape: { noteId, deleted }
+            const v1Compat = {
+              noteId: v2Result.noteId,
+              deleted: v2Result.deleted,
+            };
+            return { content: [{ type: 'text', text: JSON.stringify(v1Compat) }] };
+          }
+
+          // Fallback: V1 path
           const result = await handleDeleteNote(input, ctx);
           if (isAnvilError(result)) {
             return {
