@@ -1,0 +1,34 @@
+id: bookmark
+name: Bookmark
+description: "Web bookmark with URL metadata"
+icon: "link"
+extends: note
+fields:
+  url:
+    type: url
+    required: true
+    search_mode: both
+  page_title:
+    type: string
+    required: false
+    search_mode: text
+  description:
+    type: text
+    required: false
+    search_mode: text
+  favicon:
+    type: url
+    required: false
+    search_mode: none
+  og_image:
+    type: url
+    required: false
+    search_mode: none
+  fetched_at:
+    type: datetime
+    required: false
+    search_mode: term
+template:
+  frontmatter:
+    tags: []
+  body: ""

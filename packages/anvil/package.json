@@ -24,6 +24,7 @@
     "node-sqlite3-wasm": "^0.8.53",
     "simple-git": "^3.22.0",
     "uuid": "^9.0.1",
+    "neo4j-driver": "^5.27.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {

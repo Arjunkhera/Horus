@@ -7,13 +7,16 @@ fields:
     type: reference
     ref_type: person
     required: false
+    search_mode: term
   repo:
     type: url
     required: false
+    search_mode: none
   dependencies:
     type: reference_list
     ref_type: service
     required: false
+    search_mode: none
 template:
   frontmatter:
     tags: []

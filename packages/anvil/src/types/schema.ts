@@ -14,6 +14,9 @@ export type FieldType =
   | 'url'
   | 'object';
 
+/** How a field participates in search indexing */
+export type SearchMode = 'term' | 'text' | 'both' | 'none';
+
 /** Definition for a single field in a type template */
 export type FieldDefinition = {
   type: FieldType;
@@ -47,6 +50,10 @@ export type FieldDefinition = {
 
   // display hint
   description?: string;
+
+  // search indexing
+  /** How this field participates in search indexing. Defaults to 'none'. */
+  search_mode?: SearchMode;
 };
 
 /** Behavioral flags declared at the type level */

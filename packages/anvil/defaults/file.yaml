@@ -1,0 +1,26 @@
+id: file
+name: File
+description: "Binary file attachment tracked as an entity"
+icon: "paperclip"
+extends: note
+fields:
+  file_path:
+    type: string
+    required: true
+    search_mode: none
+  mime_type:
+    type: string
+    required: true
+    search_mode: term
+  file_size:
+    type: number
+    required: false
+    search_mode: none
+  description:
+    type: text
+    required: false
+    search_mode: text
+template:
+  frontmatter:
+    tags: []
+  body: ""

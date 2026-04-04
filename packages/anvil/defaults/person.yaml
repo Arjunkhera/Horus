@@ -7,12 +7,15 @@ fields:
     type: string
     pattern: "^[^@]+@[^@]+\\.[^@]+$"
     required: false
+    search_mode: term
   team:
     type: string
     required: false
+    search_mode: term
   role:
     type: string
     required: false
+    search_mode: text
 template:
   frontmatter:
     tags: []

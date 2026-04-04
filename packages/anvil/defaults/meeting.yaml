@@ -6,16 +6,20 @@ fields:
   date:
     type: date
     required: false
+    search_mode: term
   attendees:
     type: reference_list
     ref_type: person
     required: false
+    search_mode: none
   agenda:
     type: text
     required: false
+    search_mode: text
   action_items:
     type: text
     required: false
+    search_mode: text
 template:
   frontmatter:
     tags: []

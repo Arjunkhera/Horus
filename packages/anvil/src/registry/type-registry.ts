@@ -46,6 +46,7 @@ const FieldDefinitionSchema: z.ZodType<FieldDefinition> = z.lazy(() =>
     no_duplicates: z.boolean().optional(),
     fields: z.record(FieldDefinitionSchema).optional(),
     description: z.string().optional(),
+    search_mode: z.enum(['term', 'text', 'both', 'none']).optional(),
   }),
 );
 
