@@ -26,7 +26,11 @@ export async function handleSyncPush(
     if (ctx.syncEngine) {
       const result = await ctx.syncEngine.push();
       if (result.status === 'ok') {
-        return { status: 'ok', filesCommitted: 0, commitHash: '' };
+        return {
+          status: 'ok',
+          filesCommitted: result.filesCommitted ?? 0,
+          commitHash: result.commitHash ?? '',
+        };
       } else if (result.status === 'no_changes') {
         return { status: 'no_changes' };
       } else {

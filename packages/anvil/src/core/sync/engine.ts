@@ -96,7 +96,7 @@ export class GitSyncEngine {
 
   // ── Push ──
 
-  async push(): Promise<{ status: string; error?: string }> {
+  async push(): Promise<{ status: string; commitHash?: string; filesCommitted?: number; error?: string }> {
     const release = await this.mutex.acquire('high');
     try {
       await this.cleanStaleLocks();
@@ -104,20 +104,30 @@ export class GitSyncEngine {
 
       await this.stageFiles(git);
 
+      // Use git diff --cached to reliably detect staged changes.
+      // If nothing is staged, there is nothing to commit regardless of
+      // untracked or modified-but-unstaged files (e.g. conversation JSONs).
       const hasStagedChanges = await git
         .diff(['--cached', '--quiet'])
         .then(() => false, () => true);
 
       if (!hasStagedChanges) {
-        const status = await git.status();
-        if (!status.files.length) {
-          return { status: 'no_changes' };
-        }
+        return { status: 'no_changes' };
       }
 
+      // Count staged files before committing
+      const statusBeforeCommit = await git.status();
+      const filesCommitted = statusBeforeCommit.staged?.length ?? 0;
+
       const timestamp = new Date().toISOString();
+      let commitHash = '';
       try {
-        await git.commit(`auto: sync ${timestamp}`);
+        const commitResult = await git.commit(`auto: sync ${timestamp}`);
+        commitHash = commitResult.commit;
+        // If git.commit() returned silently with no hash, nothing was committed
+        if (!commitHash) {
+          return { status: 'no_changes' };
+        }
       } catch (err: unknown) {
         if (err instanceof Error && err.message?.includes('nothing to commit')) {
           return { status: 'no_changes' };
@@ -139,7 +149,7 @@ export class GitSyncEngine {
         if (this.running) {
           setTimeout(() => this.pull(), POST_PUSH_PULL_DELAY_MS);
         }
-        return { status: 'ok' };
+        return { status: 'ok', commitHash, filesCommitted };
       } catch (pushErr: unknown) {
         const errMsg =
           pushErr instanceof Error ? pushErr.message : String(pushErr);
