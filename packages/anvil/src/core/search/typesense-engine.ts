@@ -43,7 +43,7 @@ export class TypesenseSearchEngine implements SearchEngine {
         snippet_threshold: 30,
       });
 
-    return (result.hits ?? []).map((hit) => ({
+    return (result.hits ?? []).map((hit: any) => ({
       noteId: (hit.document as { id: string }).id,
       score: hit.text_match ?? 0,
       snippet: buildSnippet(

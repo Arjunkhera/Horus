@@ -145,7 +145,7 @@ export async function syncPush(
     // 1. Check current status
     const statusBefore = await git.status();
 
-    // 2. Stage only .md and .anvil/types/*.yaml files (never .anvil/.local/)
+    // 2. Stage only .md, .anvil/types/*.yaml, and _graph/*.json files (never .anvil/.local/)
     // Handle patterns separately since missing patterns cause errors
     try {
       // First try to add markdown files
@@ -167,6 +167,20 @@ export async function syncPush(
         }
       } catch {
         // No type files might exist, continue
+      }
+
+      // Then try to add graph backup JSON files if the directory exists
+      try {
+        const graphPath = `${vaultPath}/_graph`;
+        try {
+          await fs.stat(graphPath);
+          // Directory exists, try to add json files from it
+          await git.add(['_graph/*.json']);
+        } catch {
+          // Directory doesn't exist, skip
+        }
+      } catch {
+        // No graph files might exist, continue
       }
     } catch (err) {
       return makeError(

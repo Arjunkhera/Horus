@@ -7,35 +7,43 @@ fields:
     required: true
     immutable: true
     auto: uuid
+    search_mode: none
   type:
     type: string
     required: true
     description: "Note type identifier"
+    search_mode: term
   title:
     type: string
     required: true
     min_length: 1
     max_length: 300
+    search_mode: both
   created:
     type: datetime
     required: true
     auto: now
     immutable: true
+    search_mode: term
   modified:
     type: datetime
     required: true
     auto: now
+    search_mode: term
   tags:
     type: tags
     required: false
     no_duplicates: true
+    search_mode: both
   related:
     type: reference_list
     required: false
     no_duplicates: true
+    search_mode: none
   scope:
     type: object
     required: false
+    search_mode: none
     fields:
       context:
         type: enum

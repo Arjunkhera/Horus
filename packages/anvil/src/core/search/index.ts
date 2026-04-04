@@ -1,6 +1,8 @@
 // Search engine factory and exports
 
 export { TypesenseSearchEngine } from './typesense-engine.js';
+export { SchemaBuilder } from './schema-builder.js';
+export type { DiffAction, DiffResult } from './schema-builder.js';
 export type { SearchEngine, SearchResult, SearchOptions } from './engine.js';
 
 import { TypesenseSearchEngine } from './typesense-engine.js';
