@@ -29,6 +29,12 @@ export type ToolContext = {
   searchEngine?: SearchEngine;
   typesenseClient?: TypesenseClient;
   syncEngine?: GitSyncEngine;
+  /**
+   * Attempt to (re)connect to Typesense. Updates searchEngine and typesenseClient
+   * on success. Concurrent calls share the same in-flight attempt.
+   * Returns true if Typesense is now available, false otherwise.
+   */
+  tryReconnect?: () => Promise<boolean>;
 };
 
 /**

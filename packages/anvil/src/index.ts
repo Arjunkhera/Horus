@@ -258,6 +258,36 @@ async function main(): Promise<void> {
     syncEngine: syncEngine ?? undefined,
   };
 
+  // Lazy reconnect: if Typesense was unavailable at startup, allow search tools to
+  // re-attempt the connection on first use rather than requiring a server restart.
+  // Concurrent calls share the same in-flight promise so we only connect once.
+  let reconnectInFlight: Promise<boolean> | null = null;
+  ctx.tryReconnect = (): Promise<boolean> => {
+    if (ctx.searchEngine) return Promise.resolve(true); // already connected
+    if (reconnectInFlight) return reconnectInFlight;
+    reconnectInFlight = (async () => {
+      const result = await initTypesense();
+      if (!result) return false;
+      const { client, migrated } = result;
+      const { engine } = await createSearchEngine(client);
+      ctx.searchEngine = engine;
+      ctx.typesenseClient = client;
+      watcher.setTypesenseClient(client);
+      // Always reindex on reconnect — SQLite is the source of truth and Typesense
+      // may have missed writes that arrived while it was unavailable.
+      await reindexToTypesense(db, client);
+      process.stderr.write(
+        JSON.stringify({
+          level: 'info',
+          message: 'Typesense reconnected — search engine restored',
+          timestamp: new Date().toISOString(),
+        }) + '\n',
+      );
+      return true;
+    })().finally(() => { reconnectInFlight = null; });
+    return reconnectInFlight;
+  };
+
   // Set up type watcher for hot reload
   let typeWatcher: TypeWatcher | null = null;
   try {

@@ -263,6 +263,12 @@ export async function handleSearch(
     let searchResults: Array<{ noteId: string; score?: number; snippet?: string }> = [];
     let total = 0;
 
+    // If the search engine is unavailable (e.g. Typesense wasn't ready at startup),
+    // attempt a lazy reconnect before falling through to the error cases below.
+    if (!ctx.searchEngine && !input.semantic && (input.query || hasActiveFilters)) {
+      if (ctx.tryReconnect) await ctx.tryReconnect();
+    }
+
     // Case S: semantic param present -> vector or hybrid search via Typesense embedding field
     if (input.semantic) {
       if (!ctx.typesenseClient) {

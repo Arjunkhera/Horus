@@ -45,6 +45,10 @@ export async function handleHorusSearch(
   input: HorusSearchInput,
   ctx: ToolContext
 ): Promise<HorusSearchResponse | AnvilError> {
+  if (!ctx.typesenseClient && ctx.tryReconnect) {
+    await ctx.tryReconnect();
+  }
+
   if (!ctx.typesenseClient) {
     return makeError(
       ERROR_CODES.SERVER_ERROR,
