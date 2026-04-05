@@ -47,8 +47,13 @@ const ANVIL_SERVICE = `\
       - TYPESENSE_HOST=typesense
       - TYPESENSE_PORT=8108
       - TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=horus-neo4j
     depends_on:
       typesense:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     networks:
       - horus-net
