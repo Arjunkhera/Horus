@@ -5,7 +5,7 @@ import { existsSync, accessSync, statfsSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig, configExists } from '../lib/config.js';
 import { detectRuntime, parseComposeJson } from '../lib/runtime.js';
-import { COMPOSE_PATH, DEFAULT_PORTS, DEFAULT_DATA_DIR, HEALTH_ENDPOINTS } from '../lib/constants.js';
+import { HORUS_DIR, COMPOSE_PATH, DEFAULT_PORTS, DEFAULT_DATA_DIR, HEALTH_ENDPOINTS } from '../lib/constants.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -172,6 +172,17 @@ function checkDataDir(dataDir: string): CheckResult {
       hint: `Run: chmod u+w "${dataDir}"`,
     };
   }
+}
+
+function checkGhostDataDir(): CheckResult | null {
+  const ghostDir = join(HORUS_DIR, 'horus-data');
+  if (!existsSync(ghostDir)) return null;
+  return {
+    status: 'warn',
+    label: 'Ghost data directory',
+    message: `Legacy directory ~/Horus/horus-data/ exists — this is not used by Horus`,
+    hint: `Delete it: rm -rf "${ghostDir}"`,
+  };
 }
 
 function checkDiskSpace(dataDir: string): CheckResult {
@@ -341,6 +352,10 @@ export const doctorCommand = new Command('doctor')
 
     // 7. Disk space
     allResults.push(checkDiskSpace(dataDir));
+
+    // 7b. Ghost data directory
+    const ghostCheck = checkGhostDataDir();
+    if (ghostCheck) allResults.push(ghostCheck);
 
     // 8. Services (only if runtime + compose are ok)
     const runtimeOk = allResults[0].status !== 'fail';
