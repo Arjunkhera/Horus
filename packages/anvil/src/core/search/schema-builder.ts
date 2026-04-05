@@ -8,6 +8,16 @@ import type { Note } from '../../types/note.js';
 const COLLECTION_NAME = 'horus_documents';
 const BODY_TRUNCATE_CHARS = 20_000;
 
+/**
+ * Fields that Typesense treats as reserved/system-managed and omits from its
+ * collection field listings. Including them in a schema alter request causes
+ * HTTP 400 "Field `<name>` cannot be altered". The diff must skip these.
+ *
+ * - `id`: immutable system field, always present, never returned in fields[]
+ * - `embedding`: managed via drop-and-recreate (handled separately above diffSchema)
+ */
+const RESERVED_FIELDS = new Set(['id', 'embedding']);
+
 /** Typesense field definition subset we care about */
 interface TsField {
   name: string;
@@ -194,7 +204,11 @@ export class SchemaBuilder {
       const current = currentMap.get(name);
 
       if (!current) {
-        // New field — can be added via alter API
+        // New field — can be added via alter API, unless it is a reserved field.
+        // Typesense omits reserved fields (e.g. `id`) from its field listings, so
+        // the diff incorrectly sees them as absent. Alter requests that include
+        // reserved fields are rejected with HTTP 400.
+        if (RESERVED_FIELDS.has(name)) continue;
         fieldsToAdd.push(computed as TsField);
         continue;
       }
