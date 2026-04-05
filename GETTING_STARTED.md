@@ -18,10 +18,10 @@ Create a directory where Horus will store cloned repositories and workspace data
 
 ```bash
 # Create the data directory
-mkdir -p "$HOME/horus-data"
+mkdir -p "$HOME/Horus/data"
 
 # Export the path (or add to ~/.bashrc or ~/.zshrc for persistence)
-export HORUS_DATA_PATH="$HOME/horus-data"
+export HORUS_DATA_PATH="$HOME/Horus/data"
 ```
 
 Then set the required environment variables in `.env` or as exports:
@@ -39,7 +39,7 @@ cp .env.example .env
 Or export them before running `docker-compose`:
 
 ```bash
-export HORUS_DATA_PATH="$HOME/horus-data"
+export HORUS_DATA_PATH="$HOME/Horus/data"
 export ANVIL_REPO_URL="https://github.com/youruser/your-notes-repo"
 export GITHUB_TOKEN="your_token_if_needed"
 ```
@@ -209,8 +209,8 @@ The most common cause is a missing or empty `HORUS_DATA_PATH`, or invalid reposi
 - `ANVIL_REPO_URL` is set to your Notes repo (required)
 - `GITHUB_TOKEN` is set if any repos are private
 
-**Vault is very slow to start**
-Vault builds its QMD semantic search index on first boot — this is normal and can take 1–3 minutes. Subsequent starts reuse the index and are much faster. Watch with `docker-compose logs -f vault`.
+**Vault is slow to start**
+Vault builds its search index on first boot. This typically completes in under a minute. Watch with `docker-compose logs -f vault`.
 
 **Smoke tests failing**
 Check service logs first. Known intentional skips: `check-duplicates` (heavy CPU, skipped by design) and `registry/add` (read-only test fixture).

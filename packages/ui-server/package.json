@@ -1,0 +1,15 @@
+{
+  "name": "@horus/ui-server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.58",
+    "ai": "^6.0.116",
+    "express": "^4.19.0",
+    "http-proxy-middleware": "^3.0.0"
+  }
+}

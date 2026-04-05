@@ -2,32 +2,26 @@
 # publish-cli.sh — Build and publish @arkhera30/cli to npm
 #
 # Usage:
-#   ./publish-cli.sh <otp>
+#   ./publish-cli.sh
 #
-# Example:
-#   ./publish-cli.sh 123456
+# Auth is handled via browser-based 2FA when prompted by npm.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI_DIR="$SCRIPT_DIR/cli"
+CLI_DIR="$SCRIPT_DIR/packages/cli"
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <otp>"
-  echo "Example: $0 123456"
-  exit 1
-fi
-
-OTP="$1"
+echo "Installing dependencies..."
+cd "$SCRIPT_DIR"
+pnpm install --frozen-lockfile
 
 echo "Building @arkhera30/cli..."
-cd "$CLI_DIR"
-npm install --silent
-npm run build
+pnpm --filter @arkhera30/cli run build
 
 echo ""
 echo "Publishing to npm..."
-npm publish --otp="$OTP"
+cd "$CLI_DIR"
+npm publish
 
 echo ""
 echo "Done. Published $(node -p "require('./package.json').version")"

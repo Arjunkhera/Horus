@@ -1,0 +1,27 @@
+# Anvil MCP Service — Docker Compose
+# Usage: docker compose up
+# The notes directory is mounted from ~/Desktop/Repositories/Anvil-Old by default
+# Override with ANVIL_NOTES_PATH environment variable or edit the volume below
+
+services:
+  anvil:
+    build: .
+    ports:
+      - "8100:8100"
+    volumes:
+      # Mount your notes repository here
+      - ~/Desktop/Repositories/Anvil-Old:/data/notes:rw
+    environment:
+      # Git authentication (required for git pull/push sync)
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      # Optional: clone from remote if notes dir is empty
+      # - ANVIL_REPO_URL=https://github.com/youruser/your-notes-repo.git
+      # Sync interval in seconds (default: 300 = 5 minutes)
+      - ANVIL_SYNC_INTERVAL=300
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3

@@ -240,8 +240,7 @@ sys.exit(1)
 test_forge_workspace_create() {
     local params=$(python3 -c "import json; print(json.dumps({
         'config': 'test-workspace',
-        'storyId': 'STORY-999',
-        'storyTitle': 'Smoke Test Workspace'
+        'name': 'smoke-test-workspace'
     }))")
 
     local response=$(call_mcp "tools/call" "{\"name\":\"forge_workspace_create\",\"arguments\":$params}")

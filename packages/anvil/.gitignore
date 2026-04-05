@@ -1,0 +1,18 @@
+# Compiled output
+dist/
+
+# Dependencies
+node_modules/
+
+# Vitest cache and results
+*.timestamp-*.mjs
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor
+.DS_Store
+*.swp
+*.swo

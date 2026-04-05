@@ -21,33 +21,6 @@
 
 services:
 
-  # ── QMD Daemon ─────────────────────────────────────────────────────────────
-  # Shared QMD MCP HTTP server. Keeps GGUF models warm in memory so Anvil and
-  # Vault pay the model-load cost only once.
-  # start_period covers first-boot GGUF model download (~1-2 GB) + initial embed.
-  qmd-daemon:
-    image: ghcr.io/arjunkhera/horus/qmd-daemon:latest
-    environment:
-      - QMD_DAEMON_PORT=8181
-    volumes:
-      - qmd-daemon-data:/home/qmd/.cache/qmd
-    networks:
-      - horus-net
-    restart: unless-stopped
-    stop_grace_period: 15s
-    deploy:
-      resources:
-        limits:
-          memory: 4g
-        reservations:
-          memory: 512m
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8181/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 600s
-      retries: 3
-
   # ── Anvil ──────────────────────────────────────────────────────────────────
   anvil:
     image: ghcr.io/arjunkhera/horus/anvil:latest
@@ -55,21 +28,15 @@ services:
       - "${ANVIL_PORT:-8100}:8100"
     volumes:
       - ${HORUS_DATA_PATH}/notes:/data/notes:rw
-      - qmd-daemon-data:/home/anvil/.cache/qmd
     environment:
       - ANVIL_TRANSPORT=http
       - ANVIL_PORT=8100
       - ANVIL_HOST=0.0.0.0
       - ANVIL_NOTES_PATH=/data/notes
       - ANVIL_REPO_URL=${ANVIL_REPO_URL:-}
-      - ANVIL_QMD_COLLECTION=${ANVIL_QMD_COLLECTION:-anvil}
       - ANVIL_SYNC_INTERVAL=${ANVIL_SYNC_INTERVAL:-300}
       - ANVIL_DEBOUNCE_SECONDS=${ANVIL_DEBOUNCE_SECONDS:-5}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-      - QMD_DAEMON_URL=http://qmd-daemon:8181
-    depends_on:
-      qmd-daemon:
-        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -84,7 +51,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
       interval: 30s
       timeout: 5s
-      start_period: 600s
+      start_period: 60s
       retries: 3
 
   # ── Vault ──────────────────────────────────────────────────────────────────
@@ -95,22 +62,16 @@ services:
     volumes:
       - ${HORUS_DATA_PATH}/knowledge-base:/data/knowledge-repo:rw
       - vault-workspace:/data/workspace
-      - qmd-daemon-data:/home/appuser/.cache/qmd
     environment:
       - KNOWLEDGE_REPO_PATH=/data/knowledge-repo
       - WORKSPACE_PATH=/data/workspace
       - VAULT_KNOWLEDGE_REPO_URL=${VAULT_KNOWLEDGE_REPO_URL:-}
-      - QMD_INDEX_NAME=${QMD_INDEX_NAME:-knowledge}
       - SYNC_INTERVAL=${VAULT_SYNC_INTERVAL:-300}
       - VAULT_SYNC_INTERVAL=${VAULT_SYNC_INTERVAL:-300}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HOST=0.0.0.0
       - PORT=8000
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-      - QMD_DAEMON_URL=http://qmd-daemon:8181
-    depends_on:
-      qmd-daemon:
-        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -205,6 +166,26 @@ services:
       start_period: 60s
       retries: 3
 
+  # ── Typesense ─────────────────────────────────────────────────────────────
+  # Full-text and vector search engine for unified Horus Search.
+  typesense:
+    image: typesense/typesense:27.1
+    ports:
+      - "${TYPESENSE_PORT:-8108}:8108"
+    volumes:
+      - ${HORUS_DATA_PATH:-~/.horus}/typesense-data:/data
+    command: >
+      --data-dir=/data
+      --api-key=${TYPESENSE_API_KEY:-horus-local-key}
+      --enable-cors
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8108'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
 # ── Networks ──────────────────────────────────────────────────────────────────
 networks:
   horus-net:
@@ -212,5 +193,4 @@ networks:
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
-  qmd-daemon-data:
   vault-workspace:

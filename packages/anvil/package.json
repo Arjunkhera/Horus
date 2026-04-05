@@ -1,0 +1,41 @@
+{
+  "name": "anvil-mcp",
+  "version": "0.1.0",
+  "description": "Anvil MCP Server — markdown notes system with type registry, SQLite index, and MCP tools",
+  "main": "dist/index.js",
+  "bin": {
+    "anvil-mcp": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "index:rebuild": "tsx src/cli/rebuild.ts"
+  },
+  "dependencies": {
+    "@horus/search": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "chokidar": "^4.0.0",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^4.1.0",
+    "node-sqlite3-wasm": "^0.8.53",
+    "simple-git": "^3.22.0",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.11.5",
+    "@types/uuid": "^9.0.7",
+    "tsx": "^4.7.0",
+    "typesense": "^2.0.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.1"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-arm64-gnu": "^4.59.0"
+  }
+}

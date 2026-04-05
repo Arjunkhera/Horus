@@ -1,0 +1,26 @@
+/* Horus dark theme — CSS custom properties */
+:root {
+  --bg-primary:    #0d1117;
+  --bg-secondary:  #161b22;
+  --bg-tertiary:   #21262d;
+  --text-primary:  #e6edf3;
+  --text-secondary:#8b949e;
+  --text-muted:    #484f58;
+  --accent:        #58a6ff;
+  --accent-hover:  #79c0ff;
+  --border:        #30363d;
+  --border-subtle: #21262d;
+  --status-green:  #3fb950;
+  --status-yellow: #d29922;
+  --status-red:    #f85149;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  min-width: 1024px;
+}

@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Horus — Shadow Stack Overlay for Integration Testing
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage (managed by `horus test-env acquire`):
+#
+#   docker compose \
+#     -p horus-test-0 \
+#     -f ~/Horus/docker-compose.yml \
+#     -f ~/Horus/docker-compose.test.yml \
+#     up -d
+#
+# All TEST_PORT_* and TEST_DATA_PATH are set by `horus test-env acquire`.
+# Slot 0 defaults: ports 9100-9399, data at ~/Horus/data/test-env/slot-0/
+#
+# NOTE: vault-personal is assumed as the primary vault name. If your config
+# uses a different vault name, set TEST_VAULT_NAME accordingly.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  anvil:
+    ports:
+      - "${TEST_PORT_ANVIL:-9100}:8100"
+    volumes:
+      - "${TEST_DATA_PATH:-/tmp/horus-test}/notes:/data/notes:rw"
+
+  vault-personal:
+    ports:
+      - "${TEST_PORT_VAULT_SVC:-9101}:8000"
+    volumes:
+      - "${TEST_DATA_PATH:-/tmp/horus-test}/vaults/personal:/data/knowledge-repo:rw"
+
+  vault-router:
+    ports:
+      - "${TEST_PORT_VAULT_ROUTER:-9150}:8400"
+
+  vault-mcp:
+    ports:
+      - "${TEST_PORT_VAULT_MCP:-9200}:8300"
+
+  forge:
+    ports:
+      - "${TEST_PORT_FORGE:-9250}:8200"
+    volumes:
+      - "${TEST_DATA_PATH:-/tmp/horus-test}/registry:/data/registry:rw"
+      - "${TEST_DATA_PATH:-/tmp/horus-test}/workspaces:/data/workspaces:rw"
+      - "${TEST_DATA_PATH:-/tmp/horus-test}/sessions:/data/sessions:rw"
+
+  typesense:
+    ports:
+      - "${TEST_PORT_TYPESENSE:-9108}:8108"
+    volumes:
+      - "${TEST_DATA_PATH:-/tmp/horus-test}/typesense-data:/data"
+
+  horus-ui:
+    ports:
+      - "${TEST_PORT_UI:-9260}:8400"

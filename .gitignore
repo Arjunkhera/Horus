@@ -1,3 +1,16 @@
 .env
 .horus-build-state
+node_modules
+**/node_modules
+.DS_Store
+**/.DS_Store
+# npm lock files (repo uses pnpm)
 package-lock.json
+**/package-lock.json
+# stale pre-monorepo CLI build directory (anchored to root)
+/cli/
+# stray directories created by unexpanded tilde paths
+/~/
+**/~/
+# TypeScript build output
+**/dist/

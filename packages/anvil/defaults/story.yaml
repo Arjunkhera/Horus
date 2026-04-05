@@ -1,0 +1,30 @@
+id: story
+name: Story
+description: "SDLC work item (software development story)"
+icon: "book"
+extends: task
+fields:
+  acceptance_criteria:
+    type: text
+    required: false
+  story_points:
+    type: number
+    min: 1
+    max: 21
+    integer: true
+    required: false
+template:
+  frontmatter:
+    status: open
+    priority: P2-medium
+    tags: []
+  body: |
+    ## Description
+
+    ## Acceptance Criteria
+
+    - [ ]
+
+    ## Technical Notes
+
+    ## Dependencies

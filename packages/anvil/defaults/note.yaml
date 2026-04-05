@@ -1,0 +1,9 @@
+id: note
+name: Note
+description: "Generic note with no extra fields"
+icon: "file"
+fields: {}
+template:
+  frontmatter:
+    tags: []
+  body: ""
