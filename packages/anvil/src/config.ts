@@ -137,6 +137,7 @@ export function loadVaultConfig(vaultPath: string): VaultConfig {
 export function vaultPaths(vaultPath: string) {
   return {
     typesDir: path.join(vaultPath, '.anvil', 'types'),
+    customTypesDir: path.join(vaultPath, 'custom-types'),
     pluginsDir: path.join(vaultPath, '.anvil', 'plugins'),
     localDir: path.join(vaultPath, '.anvil', '.local'),
     indexDb: path.join(vaultPath, '.anvil', '.local', 'index.db'),
