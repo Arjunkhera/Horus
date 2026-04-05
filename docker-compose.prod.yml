@@ -60,7 +60,7 @@ services:
     ports:
       - "${VAULT_PORT:-8000}:8000"
     volumes:
-      - ${HORUS_DATA_PATH}/knowledge-base:/data/knowledge-repo:rw
+      - ${HORUS_DATA_PATH}/vaults/default:/data/knowledge-repo:rw
       - vault-workspace:/data/workspace
     environment:
       - KNOWLEDGE_REPO_PATH=/data/knowledge-repo

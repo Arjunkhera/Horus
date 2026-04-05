@@ -114,19 +114,19 @@ Docker Compose Stack
 +---------------------------------------------------+
           |                                 |
           v                                 v
-  ~/Horus/horus-data/              ~/Horus/horus-data/
+  ~/Horus/data/                     ~/Horus/data/
   notes/ (git repo)                registry/ (git repo)
-  knowledge-base/ (git repo)       workspaces/
+  vaults/<name>/ (git repo)        workspaces/
                                    sessions/
                                    config/
 ```
 
 ### Data Directory Layout
 
-All runtime data lives in `~/Horus/horus-data/`:
+All runtime data lives in `~/Horus/data/`:
 
 ```
-horus-data/
+data/
 ├── notes/                  # Anvil vault (cloned git repo)
 │   ├── .anvil/
 │   │   ├── types/          # Note type definitions (YAML)

@@ -25,7 +25,7 @@ Claude Code / Cursor
     +----+----+----+----+----+
          |
          v
-  ~/Horus/horus-data/notes/
+  ~/Horus/data/notes/
   (Git-backed markdown files)
 ```
 
@@ -157,7 +157,7 @@ template:
 
 ### File Storage
 
-- **Location**: `~/Horus/horus-data/notes/`
+- **Location**: `~/Horus/data/notes/`
 - **Organization**: Flat (`slug.md`) or by-type (`type/slug.md`)
 - **Slugification**: `"My Cool Task"` -> `my-cool-task.md` (collision: `-1`, `-2`, etc.)
 - **Atomic writes**: Write to `.tmp` file, then rename

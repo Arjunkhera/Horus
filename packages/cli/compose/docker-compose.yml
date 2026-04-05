@@ -60,7 +60,7 @@ services:
       - "${VAULT_PORT:-8000}:8000"
     volumes:
       # Knowledge-base repo — read/write; Vault clones on first boot if empty
-      - ${HORUS_DATA_PATH}/knowledge-base:/data/knowledge-repo:rw
+      - ${HORUS_DATA_PATH}/vaults/default:/data/knowledge-repo:rw
       # Write-path workspace: staging area for draft pages before PR
       - vault-workspace:/data/workspace
     environment:

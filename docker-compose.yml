@@ -79,7 +79,7 @@ services:
       - "${VAULT_PORT:-8000}:8000"
     volumes:
       # Knowledge-base repo — read/write; Vault clones on first boot if empty
-      - ${HORUS_DATA_PATH}/knowledge-base:/data/knowledge-repo:rw
+      - ${HORUS_DATA_PATH}/vaults/default:/data/knowledge-repo:rw
       # Write-path workspace: staging area for draft pages before PR
       - vault-workspace:/data/workspace
     environment:
@@ -311,7 +311,7 @@ services:
     ports:
       - "${TYPESENSE_PORT:-8108}:8108"
     volumes:
-      - ${HORUS_DATA_PATH:-~/.horus}/typesense-data:/data
+      - ${HORUS_DATA_PATH}/typesense-data:/data
     command: >
       --data-dir=/data
       --api-key=${TYPESENSE_API_KEY:-horus-local-key}
