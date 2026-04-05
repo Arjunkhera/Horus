@@ -59,7 +59,8 @@ export function createTypeWatcher(opts: TypeWatcherOptions): TypeWatcher {
       // Re-discover plugin directories to get updated list
       const pluginDirs = await discoverPluginTypeDirs(vaultPath);
       const vaultTypesDir = path.join(vaultPath, '.anvil', 'types');
-      const updatedDirs = [vaultTypesDir, ...pluginDirs];
+      const customTypesDir = path.join(vaultPath, 'custom-types');
+      const updatedDirs = [vaultTypesDir, ...pluginDirs, customTypesDir];
 
       // Check if the list changed
       const newDirsSet = new Set(updatedDirs);

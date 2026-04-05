@@ -169,8 +169,9 @@ async function main(): Promise<void> {
   // Discover plugin type directories
   const pluginTypeDirs = await discoverPluginTypeDirs(config.vault_path);
 
-  // Build directory array: vault types first (highest precedence), then plugin types (alphabetical), then additional dirs
-  const typesDirs = [paths.typesDir, ...pluginTypeDirs, ...(config.additional_type_dirs || [])];
+  // Build directory array: vault types first (highest precedence), then plugin types (alphabetical),
+  // then user custom types, then additional dirs
+  const typesDirs = [paths.typesDir, ...pluginTypeDirs, paths.customTypesDir, ...(config.additional_type_dirs || [])];
 
   // Initialize TypeRegistry
   const registry = new TypeRegistry();
