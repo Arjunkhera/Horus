@@ -9,7 +9,19 @@ This CLAUDE.md covers both `packages/ui-server` (Express proxy) and `packages/ui
 Load before working here:
 ```
 knowledge_get_page({ id: "shared/guides/horus-ui-package.md" })
+knowledge_get_page({ id: "shared/procedures/horus-ui-local-dev.md" })
 ```
+
+## Local Dev (fast iteration)
+
+**Do NOT rebuild the Docker image for UI changes.** Instead, run the UI locally with hot reload:
+
+1. Stop the `horus-ui` container (`docker stop horus-horus-ui-1`)
+2. Run ui-server locally: `ANVIL_URL=http://localhost:8100 VAULT_URL=http://localhost:8300 FORGE_URL=http://localhost:8200 SEARCH_URL=http://localhost:8108 HORUS_DATA_PATH=<data-path> pnpm dev`
+3. Run ui-client locally: `cd ../ui-client && pnpm dev`
+4. Open `http://localhost:5173` — Vite HMR gives sub-second frontend updates
+
+Full procedure: see Vault page `shared/procedures/horus-ui-local-dev.md`
 
 ## What This Does
 
