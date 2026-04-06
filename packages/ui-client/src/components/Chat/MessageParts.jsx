@@ -111,6 +111,52 @@ function RenderViewPrimitive({ input, onPin }) {
   )
 }
 
+// Auto-adapt structured tool output to RenderViewPrimitive input format.
+// This lets data tools render visually without the LLM needing to call renderView.
+function autoAdaptToolOutput(toolName, output) {
+  if (!output) return null
+
+  if (toolName === 'anvil_query_view') {
+    // Board view: columns array with items per status
+    if (output.view === 'board' && output.columns) {
+      const items = output.columns.flatMap(col =>
+        (col.items ?? []).map(item => ({ ...item, status: item.status ?? col.id }))
+      )
+      if (!items.length) return null
+      return { primitive: 'board', title: '', items, groupBy: output.groupBy ?? 'status' }
+    }
+    // Table view: rows with values sub-object (network format)
+    if (output.view === 'table' && output.rows?.length) {
+      return {
+        primitive: 'table',
+        title: '',
+        items: output.rows.map(r => r.values ?? r),
+        columns: output.columns,
+      }
+    }
+    // Flat items (list/table view normalised by SDK or Anvil)
+    const flatItems = output.items ?? output.results ?? []
+    if (flatItems.length) {
+      const primitive = output.view === 'table' ? 'table' : 'list'
+      return { primitive, title: '', items: flatItems, columns: output.columns }
+    }
+  }
+
+  if (toolName === 'anvil_search' || toolName === 'horus_search') {
+    const items = output.results ?? output.notes ?? output.items ?? []
+    if (!items.length) return null
+    return { primitive: 'list', title: '', items }
+  }
+
+  if (toolName === 'knowledge_search') {
+    const items = output.results ?? output.pages ?? output.items ?? []
+    if (!items.length) return null
+    return { primitive: 'cards', title: '', items }
+  }
+
+  return null
+}
+
 export function MessageParts({ parts, onPin }) {
   if (!parts?.length) return null
 
@@ -137,8 +183,14 @@ export function MessageParts({ parts, onPin }) {
             return null
           }
 
-          // Other tools — show activity indicator
-          return <ToolActivity key={i} toolName={toolName} state={state} output={output} />
+          // Data tools — show activity chip + auto-render structured output
+          const autoInput = state === 'output-available' ? autoAdaptToolOutput(toolName, output) : null
+          return (
+            <div key={i}>
+              <ToolActivity toolName={toolName} state={state} output={output} />
+              {autoInput && <RenderViewPrimitive input={autoInput} onPin={onPin} />}
+            </div>
+          )
         }
 
         // Skip step-start and other internal part types
