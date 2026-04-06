@@ -90,7 +90,7 @@ export function Chat({ conversationId, onConversationChange, onPin }) {
     e.preventDefault()
     const text = input.trim()
     if (!text || isLoading) return
-    sendMessage(text)
+    sendMessage({ text })
     setInput('')
   }
 
