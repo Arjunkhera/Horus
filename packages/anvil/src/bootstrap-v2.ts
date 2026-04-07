@@ -131,6 +131,7 @@ export async function bootstrapV2(config: ServerConfig): Promise<V2Context> {
   const typesDirs = [
     paths.typesDir,
     ...pluginTypeDirs,
+    paths.customTypesDir,
     ...(config.additional_type_dirs || []),
   ]
 
