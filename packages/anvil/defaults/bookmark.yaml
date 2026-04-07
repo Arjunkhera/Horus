@@ -12,10 +12,6 @@ fields:
     type: string
     required: false
     search_mode: text
-  description:
-    type: text
-    required: false
-    search_mode: text
   favicon:
     type: url
     required: false
@@ -31,4 +27,5 @@ fields:
 template:
   frontmatter:
     tags: []
-  body: ""
+  body: |
+    ## Description

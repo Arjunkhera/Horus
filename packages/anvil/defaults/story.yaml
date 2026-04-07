@@ -4,10 +4,6 @@ description: "SDLC work item (software development story)"
 icon: "book"
 extends: task
 fields:
-  acceptance_criteria:
-    type: text
-    required: false
-    search_mode: text
   story_points:
     type: number
     min: 1
