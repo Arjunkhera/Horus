@@ -52,9 +52,12 @@ describe('Global Config Loader', () => {
   });
 
   describe('loadGlobalConfig()', () => {
-    it('returns empty config when file does not exist', async () => {
+    it('returns default registries when file does not exist', async () => {
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toEqual([]);
+      // Default registries (local + global) are always present
+      expect(config.registries.length).toBeGreaterThanOrEqual(2);
+      expect(config.registries[0]!.name).toBe('local');
+      expect(config.registries[config.registries.length - 1]!.name).toBe('global');
     });
 
     it('loads a valid config file', async () => {
@@ -65,21 +68,25 @@ describe('Global Config Loader', () => {
       }));
 
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('team');
-      expect(config.registries[0]!.type).toBe('git');
+      // local + team + global = 3
+      expect(config.registries).toHaveLength(3);
+      const team = config.registries.find(r => r.name === 'team');
+      expect(team).toBeDefined();
+      expect(team!.type).toBe('git');
     });
 
-    it('returns empty config for malformed yaml', async () => {
+    it('returns default registries for malformed yaml', async () => {
       await fs.writeFile(configPath, '{{not valid yaml');
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toEqual([]);
+      expect(config.registries.length).toBeGreaterThanOrEqual(2);
+      expect(config.registries[0]!.name).toBe('local');
     });
 
-    it('handles config with no registries field', async () => {
+    it('returns default registries when no registries field', async () => {
       await fs.writeFile(configPath, toYaml({}));
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toEqual([]);
+      expect(config.registries.length).toBeGreaterThanOrEqual(2);
+      expect(config.registries[0]!.name).toBe('local');
     });
   });
 
@@ -88,67 +95,71 @@ describe('Global Config Loader', () => {
       const nestedPath = path.join(tmpDir, 'sub', 'dir', 'config.yaml');
       await saveGlobalConfig({
         registries: [
-          { type: 'filesystem', name: 'local', path: '/some/path' },
+          { type: 'filesystem', name: 'local', path: '/some/path', writable: false },
         ],
       }, nestedPath);
 
       const config = await loadGlobalConfig(nestedPath);
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('local');
+      // local (from saved config) + global (injected default)
+      const local = config.registries.find(r => r.name === 'local');
+      expect(local).toBeDefined();
+      expect(local!.name).toBe('local');
     });
   });
 
   describe('addGlobalRegistry()', () => {
-    it('adds a registry to empty config', async () => {
+    it('adds a registry to config', async () => {
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://github.com/org/reg.git', branch: 'main', path: 'registry' },
+        { type: 'git', name: 'team', url: 'https://github.com/org/reg.git', ref: 'main', path: 'registry', writable: false },
         configPath,
       );
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('team');
+      const team = config.registries.find(r => r.name === 'team');
+      expect(team).toBeDefined();
+      expect(team!.name).toBe('team');
     });
 
     it('replaces existing registry with same name', async () => {
       await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://old-url.com/reg.git', branch: 'main', path: 'registry' },
+        { type: 'git', name: 'team', url: 'https://old-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
         configPath,
       );
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://new-url.com/reg.git', branch: 'main', path: 'registry' },
+        { type: 'git', name: 'team', url: 'https://new-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
         configPath,
       );
-      expect(config.registries).toHaveLength(1);
-      expect((config.registries[0] as any).url).toBe('https://new-url.com/reg.git');
+      const teams = config.registries.filter(r => r.name === 'team');
+      expect(teams).toHaveLength(1);
+      expect((teams[0] as any).url).toBe('https://new-url.com/reg.git');
     });
 
     it('persists to disk', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'local', path: '/reg' },
+        { type: 'filesystem', name: 'custom', path: '/reg', writable: false },
         configPath,
       );
       const loaded = await loadGlobalConfig(configPath);
-      expect(loaded.registries).toHaveLength(1);
+      const custom = loaded.registries.find(r => r.name === 'custom');
+      expect(custom).toBeDefined();
     });
   });
 
   describe('removeGlobalRegistry()', () => {
     it('removes a registry by name', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'to-remove', path: '/reg' },
+        { type: 'filesystem', name: 'to-remove', path: '/reg', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('to-remove', configPath);
-      expect(config.registries).toHaveLength(0);
+      expect(config.registries.find(r => r.name === 'to-remove')).toBeUndefined();
     });
 
     it('no-ops if registry name not found', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'keep', path: '/reg' },
+        { type: 'filesystem', name: 'keep', path: '/reg', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('nonexistent', configPath);
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('keep');
+      expect(config.registries.find(r => r.name === 'keep')).toBeDefined();
     });
   });
 });

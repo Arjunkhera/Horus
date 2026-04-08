@@ -232,7 +232,7 @@ describe('ForgeCore — integration', () => {
 
       // Save global config
       await saveGlobalConfig({
-        registries: [{ type: 'filesystem', name: 'global', path: globalReg }],
+        registries: [{ type: 'filesystem', name: 'global', path: globalReg, writable: false }],
       }, globalConfigPath);
 
       // Clear workspace registries
@@ -264,7 +264,7 @@ describe('ForgeCore — integration', () => {
 
       // Global config also has "shared" registry (different path)
       await saveGlobalConfig({
-        registries: [{ type: 'filesystem', name: 'shared', path: globalReg }],
+        registries: [{ type: 'filesystem', name: 'shared', path: globalReg, writable: false }],
       }, globalConfigPath);
 
       // Should only see workspace skill since names conflict → workspace wins
@@ -289,7 +289,7 @@ describe('ForgeCore — integration', () => {
       await wm.writeConfig(config);
 
       await saveGlobalConfig({
-        registries: [{ type: 'filesystem', name: 'global', path: globalReg }],
+        registries: [{ type: 'filesystem', name: 'global', path: globalReg, writable: false }],
       }, globalConfigPath);
 
       // Both skills should be visible

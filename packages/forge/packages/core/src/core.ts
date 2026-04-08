@@ -7,7 +7,7 @@ import { WorkspaceManager } from './workspace/workspace-manager.js';
 import { WorkspaceCreator, type WorkspaceCreateOptions } from './workspace/workspace-creator.js';
 import { WorkspaceLifecycleManager } from './workspace/workspace-lifecycle.js';
 import { WorkspaceMetadataStore } from './workspace/workspace-metadata-store.js';
-import { Registry } from './registry/registry.js';
+import { Registry, type PublishResult } from './registry/registry.js';
 import { Resolver } from './resolver/resolver.js';
 import { Compiler } from './compiler/compiler.js';
 import { ClaudeCodeStrategy } from './compiler/claude-code-strategy.js';
@@ -21,6 +21,7 @@ import type { DataAdapter } from './adapters/types.js';
 import type {
   ArtifactRef,
   ArtifactSummary,
+  ArtifactBundle,
   ArtifactType,
   InstallReport,
   SearchResult,
@@ -401,6 +402,61 @@ export class ForgeCore {
     }
     const registry = await this.buildRegistry();
     return registry.list(type);
+  }
+
+
+  /**
+   * Publish an artifact to a writable registry.
+   */
+  async publish(
+    type: ArtifactType,
+    id: string,
+    bundle: ArtifactBundle,
+    registryName?: string,
+  ): Promise<PublishResult> {
+    let config: ForgeConfig | null = null;
+    try {
+      config = await this.workspaceManager.readConfig();
+    } catch {
+      // No workspace config
+    }
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+
+    const workspaceRegs = config?.registries ?? [];
+    const workspaceNames = new Set(workspaceRegs.map(r => r.name));
+    const globalFallbacks = globalConfig.registries.filter(r => !workspaceNames.has(r.name));
+    const allRegistries = [...workspaceRegs, ...globalFallbacks];
+
+    const writableConfigs = allRegistries.filter(r => r.type === 'filesystem' || r.type === 'git');
+
+    if (writableConfigs.length === 0) {
+      throw new ForgeError(
+        'NO_WRITABLE_REGISTRY',
+        'No writable registry configured. Run Horus setup to add a private registry.',
+        'Add a filesystem or git registry to forge.yaml or the global config.',
+      );
+    }
+
+    let targetConfig: RegistryConfig;
+    if (registryName) {
+      const found = writableConfigs.find(r => r.name === registryName);
+      if (!found) {
+        const available = writableConfigs.map(r => r.name).join(', ');
+        throw new ForgeError(
+          'REGISTRY_NOT_FOUND',
+          `Registry '${registryName}' not found or is not writable. Writable registries: ${available}`,
+          `Use one of: ${available}`,
+        );
+      }
+      targetConfig = found;
+    } else {
+      targetConfig = writableConfigs[0];
+    }
+
+    const adapter = this.buildAdapter(targetConfig);
+    const registry = new Registry(adapter, targetConfig.name);
+
+    return registry.publish(type, id, bundle);
   }
 
   /**
