@@ -192,7 +192,10 @@ describe('Registry.publish()', () => {
         description: 'A test agent',
         type: 'agent' as const,
         tags: [],
-      } as ArtifactMeta,
+        dependencies: {},
+        skills: [],
+        // rootSkill intentionally omitted to test validation
+      } as unknown as ArtifactMeta,
       content: '# Test Agent',
       contentPath: 'AGENT.md',
     };

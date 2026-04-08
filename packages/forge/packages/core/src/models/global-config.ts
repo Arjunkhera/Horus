@@ -186,3 +186,9 @@ export const GlobalConfigSchema = z.object({
 });
 
 export type GlobalConfig = z.infer<typeof GlobalConfigSchema>;
+
+/**
+ * Input variant of GlobalConfig — fields with `.default()` are optional.
+ * Use this when accepting user/test input that will be parsed by Zod.
+ */
+export type GlobalConfigInput = z.input<typeof GlobalConfigSchema>;

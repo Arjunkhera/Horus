@@ -31,6 +31,7 @@ export {
   normalizeRegistryConfig,
   type ForgeConfig,
   type RegistryConfig,
+  type RegistryConfigInput,
   type Target,
 } from './forge-config.js';
 
@@ -43,6 +44,7 @@ export {
   McpEndpointsSchema,
   ReposConfigSchema,
   type GlobalConfig,
+  type GlobalConfigInput,
   type GlobalPluginEntry,
   type WorkspaceSettings,
   type McpEndpoint,

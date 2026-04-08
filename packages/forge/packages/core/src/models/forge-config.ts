@@ -49,6 +49,12 @@ export const RegistryConfigSchema = z.discriminatedUnion('type', [
 export type RegistryConfig = z.infer<typeof RegistryConfigSchema>;
 
 /**
+ * Input variant of RegistryConfig — fields with `.default()` are optional.
+ * Use this when accepting user/test input that will be parsed by Zod.
+ */
+export type RegistryConfigInput = z.input<typeof RegistryConfigSchema>;
+
+/**
  * Normalize a git registry: resolve legacy `branch` field into `ref`.
  * Call after parsing to ensure `ref` always has the correct value.
  */

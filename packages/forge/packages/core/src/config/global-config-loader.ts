@@ -2,8 +2,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { GlobalConfigSchema, type GlobalConfig } from '../models/global-config.js';
-import type { RegistryConfig } from '../models/forge-config.js';
+import { GlobalConfigSchema, type GlobalConfig, type GlobalConfigInput } from '../models/global-config.js';
+import type { RegistryConfig, RegistryConfigInput } from '../models/forge-config.js';
+import { RegistryConfigSchema } from '../models/forge-config.js';
 import { normalizeRegistryConfig } from '../models/forge-config.js';
 import { expandPath } from './path-utils.js';
 
@@ -156,7 +157,7 @@ export async function loadGlobalConfig(
  * @param configPath - Override the default path (useful for testing).
  */
 export async function saveGlobalConfig(
-  config: Partial<GlobalConfig>,
+  config: Partial<GlobalConfig> | Partial<GlobalConfigInput>,
   configPath: string = GLOBAL_CONFIG_PATH,
 ): Promise<void> {
   const dir = path.dirname(configPath);
@@ -174,13 +175,15 @@ export async function saveGlobalConfig(
  * @param configPath - Override the default path (useful for testing).
  */
 export async function addGlobalRegistry(
-  registry: RegistryConfig,
+  registry: RegistryConfigInput,
   configPath: string = GLOBAL_CONFIG_PATH,
 ): Promise<GlobalConfig> {
   const config = await loadGlobalConfig(configPath);
+  // Parse to fill in defaults (e.g. writable, ref)
+  const parsed = RegistryConfigSchema.parse(registry);
   // Remove any existing registry with the same name
-  config.registries = config.registries.filter(r => r.name !== registry.name);
-  config.registries.push(registry);
+  config.registries = config.registries.filter(r => r.name !== parsed.name);
+  config.registries.push(parsed);
   await saveGlobalConfig(config, configPath);
   return config;
 }
