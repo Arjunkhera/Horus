@@ -118,7 +118,7 @@ describe('ForgeCore — integration', () => {
 
       // Update config to point at it
       const config = await forge.getConfig();
-      config.registries = [{ type: 'filesystem' as const, name: 'local', path: externalReg }];
+      config.registries = [{ type: 'filesystem' as const, name: 'local', path: externalReg, writable: false }];
       const wm = (forge as any).workspaceManager;
       await wm.writeConfig(config);
 
@@ -140,8 +140,8 @@ describe('ForgeCore — integration', () => {
 
       const config = await forge.getConfig();
       config.registries = [
-        { type: 'filesystem' as const, name: 'primary', path: primaryReg },
-        { type: 'filesystem' as const, name: 'secondary', path: secondaryReg },
+        { type: 'filesystem' as const, name: 'primary', path: primaryReg, writable: false },
+        { type: 'filesystem' as const, name: 'secondary', path: secondaryReg, writable: false },
       ];
       const wm = (forge as any).workspaceManager;
       await wm.writeConfig(config);
@@ -170,8 +170,8 @@ describe('ForgeCore — integration', () => {
 
       const config = await forge.getConfig();
       config.registries = [
-        { type: 'http' as const, name: 'remote', url: 'https://example.com/api' },
-        { type: 'filesystem' as const, name: 'local', path: fsReg },
+        { type: 'http' as const, name: 'remote', url: 'https://example.com/api', writable: false },
+        { type: 'filesystem' as const, name: 'local', path: fsReg, writable: false },
       ];
       const wm = (forge as any).workspaceManager;
       await wm.writeConfig(config);
@@ -188,7 +188,7 @@ describe('ForgeCore — integration', () => {
       await createRegistryAt(externalReg, 'ext-skill');
 
       const config = await forge.getConfig();
-      config.registries = [{ type: 'filesystem' as const, name: 'ext', path: externalReg }];
+      config.registries = [{ type: 'filesystem' as const, name: 'ext', path: externalReg, writable: false }];
       config.artifacts.skills['ext-skill'] = '1.0.0';
       const wm = (forge as any).workspaceManager;
       await wm.writeConfig(config);
@@ -232,7 +232,7 @@ describe('ForgeCore — integration', () => {
 
       // Save global config
       await saveGlobalConfig({
-        registries: [{ type: 'filesystem', name: 'global', path: globalReg }],
+        registries: [{ type: 'filesystem', name: 'global', path: globalReg, writable: false }],
       }, globalConfigPath);
 
       // Clear workspace registries
@@ -258,13 +258,13 @@ describe('ForgeCore — integration', () => {
 
       // Workspace config has "shared" registry
       const config = await globalForge.getConfig();
-      config.registries = [{ type: 'filesystem' as const, name: 'shared', path: workspaceReg }];
+      config.registries = [{ type: 'filesystem' as const, name: 'shared', path: workspaceReg, writable: false }];
       const wm = (globalForge as any).workspaceManager;
       await wm.writeConfig(config);
 
       // Global config also has "shared" registry (different path)
       await saveGlobalConfig({
-        registries: [{ type: 'filesystem', name: 'shared', path: globalReg }],
+        registries: [{ type: 'filesystem', name: 'shared', path: globalReg, writable: false }],
       }, globalConfigPath);
 
       // Should only see workspace skill since names conflict → workspace wins
@@ -284,12 +284,12 @@ describe('ForgeCore — integration', () => {
       await createRegistryAt(globalReg, 'gl-skill');
 
       const config = await globalForge.getConfig();
-      config.registries = [{ type: 'filesystem' as const, name: 'workspace', path: workspaceReg }];
+      config.registries = [{ type: 'filesystem' as const, name: 'workspace', path: workspaceReg, writable: false }];
       const wm = (globalForge as any).workspaceManager;
       await wm.writeConfig(config);
 
       await saveGlobalConfig({
-        registries: [{ type: 'filesystem', name: 'global', path: globalReg }],
+        registries: [{ type: 'filesystem', name: 'global', path: globalReg, writable: false }],
       }, globalConfigPath);
 
       // Both skills should be visible

@@ -19,7 +19,7 @@ describe('FilesystemAdapter', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  // Helper to create a skill fixture
+  // Helper to create a skill fixture (flat layout)
   async function createSkillFixture(
     id: string,
     overrides: Record<string, unknown> = {}
@@ -38,6 +38,29 @@ describe('FilesystemAdapter', () => {
     await fs.writeFile(
       path.join(dir, 'SKILL.md'),
       `# Skill ${id}\nSome content.`
+    );
+  }
+
+  // Helper to create a versioned skill fixture
+  async function createVersionedSkillFixture(
+    id: string,
+    version: string,
+    overrides: Record<string, unknown> = {}
+  ) {
+    const dir = path.join(tmpDir, 'skills', id, version);
+    await fs.mkdir(dir, { recursive: true });
+    const meta = {
+      id,
+      name: `Skill ${id}`,
+      version,
+      description: `A test skill v${version}`,
+      type: 'skill',
+      ...overrides,
+    };
+    await fs.writeFile(path.join(dir, 'metadata.yaml'), toYaml(meta));
+    await fs.writeFile(
+      path.join(dir, 'SKILL.md'),
+      `# Skill ${id} v${version}\nContent for ${version}.`
     );
   }
 
@@ -144,6 +167,29 @@ describe('FilesystemAdapter', () => {
       expect(results).toHaveLength(1);
       expect(results[0]!.id).toBe('valid-skill');
     });
+
+    it('returns latest version metadata for versioned layout', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '1.1.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      const results = await adapter.list('skill');
+      expect(results).toHaveLength(1);
+      expect(results[0]!.id).toBe('developer');
+      expect(results[0]!.version).toBe('2.0.0');
+    });
+
+    it('handles mixed flat and versioned artifacts in same type dir', async () => {
+      await createSkillFixture('flat-skill');
+      await createVersionedSkillFixture('versioned-skill', '1.0.0');
+      await createVersionedSkillFixture('versioned-skill', '2.0.0');
+      const results = await adapter.list('skill');
+      expect(results).toHaveLength(2);
+      const ids = results.map((r) => r.id);
+      expect(ids).toContain('flat-skill');
+      expect(ids).toContain('versioned-skill');
+      const versioned = results.find((r) => r.id === 'versioned-skill');
+      expect(versioned!.version).toBe('2.0.0');
+    });
   });
 
   describe('read()', () => {
@@ -217,6 +263,49 @@ Tabs:	here	and	there.
       const bundle = await adapter.read('skill', 'special');
       expect(bundle.content).toBe(specialContent);
     });
+
+    it('reads latest version from versioned layout when no version specified', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '1.1.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      const bundle = await adapter.read('skill', 'developer');
+      expect(bundle.meta.id).toBe('developer');
+      expect(bundle.meta.version).toBe('2.0.0');
+      expect(bundle.content).toContain('v2.0.0');
+    });
+
+    it('reads specific version when @version suffix is provided', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '1.1.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      const bundle = await adapter.read('skill', 'developer@1.1.0');
+      expect(bundle.meta.id).toBe('developer');
+      expect(bundle.meta.version).toBe('1.1.0');
+      expect(bundle.content).toContain('v1.1.0');
+    });
+
+    it('throws ArtifactNotFoundError for nonexistent version', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await expect(
+        adapter.read('skill', 'developer@9.9.9')
+      ).rejects.toThrow(ArtifactNotFoundError);
+    });
+
+    it('correctly resolves latest across unordered semver versions', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '10.0.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      const bundle = await adapter.read('skill', 'developer');
+      expect(bundle.meta.version).toBe('10.0.0');
+    });
+
+    it('handles prerelease versions in semver sort', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '2.0.0-beta.1');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      const bundle = await adapter.read('skill', 'developer');
+      expect(bundle.meta.version).toBe('2.0.0');
+    });
   });
 
   describe('exists()', () => {
@@ -237,6 +326,23 @@ Tabs:	here	and	there.
     it('returns true for plugin that exists', async () => {
       await createPluginFixture('anvil-sdlc');
       expect(await adapter.exists('plugin', 'anvil-sdlc')).toBe(true);
+    });
+
+    it('returns true for versioned artifact without version suffix', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      expect(await adapter.exists('skill', 'developer')).toBe(true);
+    });
+
+    it('returns true for specific existing version', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      expect(await adapter.exists('skill', 'developer@1.0.0')).toBe(true);
+    });
+
+    it('returns false for nonexistent version', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      expect(await adapter.exists('skill', 'developer@9.9.9')).toBe(false);
     });
   });
 
@@ -350,6 +456,35 @@ Tabs:	here	and	there.
       const exists = await adapter.exists('skill', 'nested-skill');
       expect(exists).toBe(true);
     });
+
+    it('writes to versioned directory when artifact already uses versioned layout', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      const bundle = {
+        meta: {
+          id: 'developer',
+          name: 'Skill developer',
+          version: '2.0.0',
+          description: 'Updated',
+          type: 'skill' as const,
+          tags: [],
+          dependencies: {},
+          files: [],
+        },
+        content: '# Developer v2\nNew version.',
+        contentPath: 'SKILL.md',
+      };
+      await adapter.write('skill', 'developer', bundle);
+      // Both versions should now exist
+      const versions = await adapter.listVersions('skill', 'developer');
+      expect(versions).toContain('1.0.0');
+      expect(versions).toContain('2.0.0');
+      // Reading without version should get latest
+      const latest = await adapter.read('skill', 'developer');
+      expect(latest.meta.version).toBe('2.0.0');
+      // Reading old version should still work
+      const old = await adapter.read('skill', 'developer@1.0.0');
+      expect(old.meta.version).toBe('1.0.0');
+    });
   });
 
   describe('multiple artifact types', () => {
@@ -373,6 +508,108 @@ Tabs:	here	and	there.
       expect(agent.meta.type).toBe('agent');
       expect(skill.contentPath).toBe('SKILL.md');
       expect(agent.contentPath).toBe('AGENT.md');
+    });
+  });
+
+  describe('listVersions()', () => {
+    it('returns empty array for flat layout artifact', async () => {
+      await createSkillFixture('flat-skill');
+      const versions = await adapter.listVersions('skill', 'flat-skill');
+      expect(versions).toEqual([]);
+    });
+
+    it('returns empty array for nonexistent artifact', async () => {
+      const versions = await adapter.listVersions('skill', 'nonexistent');
+      expect(versions).toEqual([]);
+    });
+
+    it('returns sorted versions descending for versioned artifact', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      await createVersionedSkillFixture('developer', '1.1.0');
+      const versions = await adapter.listVersions('skill', 'developer');
+      expect(versions).toEqual(['2.0.0', '1.1.0', '1.0.0']);
+    });
+
+    it('handles prerelease versions correctly', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '2.0.0-beta.1');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      const versions = await adapter.listVersions('skill', 'developer');
+      expect(versions).toEqual(['2.0.0', '2.0.0-beta.1', '1.0.0']);
+    });
+
+    it('strips @version suffix from id before looking up', async () => {
+      await createVersionedSkillFixture('developer', '1.0.0');
+      await createVersionedSkillFixture('developer', '2.0.0');
+      const versions = await adapter.listVersions('skill', 'developer@1.0.0');
+      expect(versions).toEqual(['2.0.0', '1.0.0']);
+    });
+  });
+
+  describe('readResourceFile()', () => {
+    it('reads resource file from flat layout', async () => {
+      await createSkillFixture('with-resource');
+      const resDir = path.join(tmpDir, 'skills', 'with-resource', 'resources');
+      await fs.mkdir(resDir, { recursive: true });
+      await fs.writeFile(path.join(resDir, 'data.txt'), 'hello resource');
+      const content = await adapter.readResourceFile('skill', 'with-resource', 'resources/data.txt');
+      expect(content).toBe('hello resource');
+    });
+
+    it('reads resource file from versioned layout (latest)', async () => {
+      await createVersionedSkillFixture('with-resource', '1.0.0');
+      await createVersionedSkillFixture('with-resource', '2.0.0');
+      const resDir = path.join(tmpDir, 'skills', 'with-resource', '2.0.0', 'resources');
+      await fs.mkdir(resDir, { recursive: true });
+      await fs.writeFile(path.join(resDir, 'data.txt'), 'v2 resource');
+      const content = await adapter.readResourceFile('skill', 'with-resource', 'resources/data.txt');
+      expect(content).toBe('v2 resource');
+    });
+
+    it('reads resource file from specific version', async () => {
+      await createVersionedSkillFixture('with-resource', '1.0.0');
+      await createVersionedSkillFixture('with-resource', '2.0.0');
+      const resDir = path.join(tmpDir, 'skills', 'with-resource', '1.0.0', 'resources');
+      await fs.mkdir(resDir, { recursive: true });
+      await fs.writeFile(path.join(resDir, 'data.txt'), 'v1 resource');
+      const content = await adapter.readResourceFile('skill', 'with-resource@1.0.0', 'resources/data.txt');
+      expect(content).toBe('v1 resource');
+    });
+
+    it('returns null for missing resource file', async () => {
+      await createSkillFixture('no-resource');
+      const content = await adapter.readResourceFile('skill', 'no-resource', 'resources/missing.txt');
+      expect(content).toBeNull();
+    });
+  });
+
+  describe('version detection', () => {
+    it('treats directory with metadata.yaml as flat even if it also has semver-named dirs', async () => {
+      // If metadata.yaml exists at root level, it's flat
+      await createSkillFixture('hybrid');
+      // Also create a versioned-looking subdirectory
+      const vDir = path.join(tmpDir, 'skills', 'hybrid', '1.0.0');
+      await fs.mkdir(vDir, { recursive: true });
+      // Should still read from flat layout
+      const bundle = await adapter.read('skill', 'hybrid');
+      expect(bundle.meta.id).toBe('hybrid');
+      expect(bundle.meta.version).toBe('1.0.0');
+    });
+
+    it('ignores non-semver directories in versioned layout detection', async () => {
+      // Create an artifact dir with some non-semver subdirs and semver ones
+      const baseDir = path.join(tmpDir, 'skills', 'mixed-dirs');
+      await fs.mkdir(baseDir, { recursive: true });
+      // Non-semver dir
+      const otherDir = path.join(baseDir, 'docs');
+      await fs.mkdir(otherDir, { recursive: true });
+      // Semver dir
+      await createVersionedSkillFixture('mixed-dirs', '1.0.0');
+      const versions = await adapter.listVersions('skill', 'mixed-dirs');
+      expect(versions).toEqual(['1.0.0']);
+      // Non-semver dir should be ignored
+      expect(versions).not.toContain('docs');
     });
   });
 });

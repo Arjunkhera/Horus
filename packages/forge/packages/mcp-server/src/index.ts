@@ -8,12 +8,26 @@ import {
   type CallToolRequest,
   type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions } from '@forge/core';
+import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions, type ArtifactType, type ArtifactBundle, type ArtifactMeta } from '@forge/core';
 import * as http from 'node:http';
 import { readFileSync } from 'node:fs';
+import { promises as fsPromises } from 'node:fs';
 import * as path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 
 const startTime = Date.now();
+
+/**
+ * Content file names for each artifact type.
+ * Must stay in sync with CONTENT_FILES in filesystem-adapter.ts.
+ */
+const CONTENT_FILES: Record<string, string> = {
+  skill: 'SKILL.md',
+  agent: 'AGENT.md',
+  plugin: 'PLUGIN.md',
+  persona: 'PERSONA.md',
+  'workspace-config': 'WORKSPACE.md',
+};
 
 // ─── JSON logging ──────────────────────────────────────────────────────────
 
@@ -357,6 +371,38 @@ const TOOLS = [
             'Cleans: done (7+ days ago) and cancelled. Skips: in_progress, in_review, not found.',
         },
       },
+    },
+  },
+  {
+    name: 'forge_publish',
+    description:
+      'Publish an artifact to a writable registry. Reads artifact content from a path (or the current workspace), validates metadata, and publishes with version tracking.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['skill', 'agent', 'plugin', 'persona', 'workspace-config'],
+          description: 'Artifact type',
+        },
+        id: {
+          type: 'string',
+          description: 'Artifact ID (kebab-case, e.g., "my-skill")',
+        },
+        version: {
+          type: 'string',
+          description: 'Exact semver version string (e.g., "1.0.0")',
+        },
+        registryName: {
+          type: 'string',
+          description: 'Target registry name. Defaults to first writable registry.',
+        },
+        path: {
+          type: 'string',
+          description: 'Path to artifact directory containing metadata.yaml and content file (e.g., SKILL.md). If omitted, reads from the current workspace\'s installed artifacts.',
+        },
+      },
+      required: ['type', 'id', 'version'],
     },
   },
 ];
@@ -764,6 +810,189 @@ function buildServer(workspaceRoot: string): Server {
               }, null, 2),
             }],
           };
+        }
+
+        case 'forge_publish': {
+          const {
+            type: artifactType,
+            id: artifactId,
+            version,
+            registryName,
+            path: artifactPath,
+          } = (args ?? {}) as {
+            type: ArtifactType;
+            id: string;
+            version: string;
+            registryName?: string;
+            path?: string;
+          };
+
+          if (!artifactType || !artifactId || !version) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'MISSING_REQUIRED_FIELDS',
+                message: 'type, id, and version are required.',
+              }) }],
+              isError: true,
+            };
+          }
+
+          // Determine the artifact directory
+          const contentFileName = CONTENT_FILES[artifactType];
+          if (!contentFileName) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'INVALID_ARTIFACT_TYPE',
+                message: `Unknown artifact type: '${artifactType}'. Must be one of: skill, agent, plugin, persona, workspace-config`,
+              }) }],
+              isError: true,
+            };
+          }
+
+          let artifactDir: string;
+          if (artifactPath) {
+            artifactDir = artifactPath;
+          } else {
+            // Default: look in the workspace's installed artifacts
+            // Convention: {workspaceRoot}/registry/{type}s/{id}/ (pluralised)
+            const typePlural = artifactType === 'persona' ? 'personas' : `${artifactType}s`;
+            artifactDir = path.join(workspaceRoot, 'registry', typePlural, artifactId);
+          }
+
+          // Read metadata.yaml
+          const metadataPath = path.join(artifactDir, 'metadata.yaml');
+          let metadataRaw: string;
+          try {
+            metadataRaw = await fsPromises.readFile(metadataPath, 'utf-8');
+          } catch {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'METADATA_NOT_FOUND',
+                message: `Cannot read metadata.yaml at ${metadataPath}. Ensure the artifact directory exists and contains a metadata.yaml file.`,
+              }) }],
+              isError: true,
+            };
+          }
+
+          let meta: ArtifactMeta;
+          try {
+            meta = parseYaml(metadataRaw) as ArtifactMeta;
+          } catch (parseErr: any) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                error: true,
+                code: 'INVALID_METADATA',
+                message: `Failed to parse metadata.yaml: ${parseErr.message}`,
+              }) }],
+              isError: true,
+            };
+          }
+
+          // Override version with the explicitly provided version
+          (meta as any).version = version;
+
+          // Read content file (SKILL.md, AGENT.md, etc.)
+          const contentFilePath = path.join(artifactDir, contentFileName);
+          let content: string;
+          try {
+            content = await fsPromises.readFile(contentFilePath, 'utf-8');
+          } catch {
+            // Content file is optional for some types (e.g., workspace-config)
+            content = '';
+          }
+
+          // Build the ArtifactBundle
+          const bundle: ArtifactBundle = {
+            meta,
+            content,
+            contentPath: contentFileName,
+          };
+
+          // Publish via ForgeCore
+          try {
+            const result = await forge.publish(artifactType, artifactId, bundle, registryName);
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  type: result.type,
+                  id: result.id,
+                  version: result.version,
+                  registry: result.registry,
+                  files: result.files,
+                  message: `Successfully published ${result.type}:${result.id}@${result.version} to registry '${result.registry}'.`,
+                }, null, 2),
+              }],
+            };
+          } catch (publishErr: any) {
+            // Map specific error types to user-friendly messages
+            const code = publishErr.code ?? publishErr.name ?? 'PUBLISH_ERROR';
+
+            if (code === 'NO_WRITABLE_REGISTRY') {
+              return {
+                content: [{ type: 'text', text: JSON.stringify({
+                  error: true,
+                  code,
+                  message: 'No writable registry configured. Run Horus setup to add a private registry.',
+                }) }],
+                isError: true,
+              };
+            }
+
+            if (code === 'PUBLISH_AUTH_ERROR') {
+              return {
+                content: [{ type: 'text', text: JSON.stringify({
+                  error: true,
+                  code,
+                  message: `Token for registry is missing or lacks write access. ${publishErr.suggestion ?? 'Check your token environment variable.'}`,
+                }) }],
+                isError: true,
+              };
+            }
+
+            if (code === 'VERSION_CONFLICT') {
+              return {
+                content: [{ type: 'text', text: JSON.stringify({
+                  error: true,
+                  code,
+                  message: `Version ${version} of ${artifactType}:${artifactId} already exists in the registry.`,
+                  suggestion: 'Bump the version before publishing.',
+                }) }],
+                isError: true,
+              };
+            }
+
+            if (code === 'PUBLISH_VALIDATION_ERROR') {
+              return {
+                content: [{ type: 'text', text: JSON.stringify({
+                  error: true,
+                  code,
+                  message: `Invalid metadata: ${publishErr.message}`,
+                  suggestion: publishErr.suggestion,
+                }) }],
+                isError: true,
+              };
+            }
+
+            if (code === 'PUBLISH_PUSH_ERROR') {
+              return {
+                content: [{ type: 'text', text: JSON.stringify({
+                  error: true,
+                  code,
+                  message: `Push to registry failed: ${publishErr.message}`,
+                  suggestion: publishErr.suggestion,
+                }) }],
+                isError: true,
+              };
+            }
+
+            // Generic publish error — rethrow to outer catch
+            throw publishErr;
+          }
         }
 
         default:

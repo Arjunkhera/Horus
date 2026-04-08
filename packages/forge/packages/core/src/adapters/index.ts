@@ -11,6 +11,10 @@ export {
   UnsupportedTargetError,
   AdapterError,
   AllAdaptersFailedError,
+  VersionConflictError,
+  PublishAuthError,
+  PublishPushError,
+  PublishValidationError,
 } from './errors.js';
 
 // Implementations

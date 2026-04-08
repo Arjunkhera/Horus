@@ -107,6 +107,21 @@ export class AllAdaptersFailedError extends ForgeError {
 }
 
 /**
+ * Thrown when a workspace-config tries to extend a parent that itself extends another config.
+ * Multi-level workspace inheritance is not supported (single-level only).
+ */
+export class InheritanceDepthError extends ForgeError {
+  constructor(parent: string, grandparent: string) {
+    super(
+      'INHERITANCE_DEPTH',
+      `Multi-level workspace inheritance is not supported. '${parent}' also extends '${grandparent}'.`,
+      'Remove the extends field from the parent workspace-config, or flatten the inheritance chain',
+    );
+    this.name = 'InheritanceDepthError';
+  }
+}
+
+/**
  * Thrown when a compiler target is not supported.
  */
 export class UnsupportedTargetError extends ForgeError {
@@ -117,5 +132,61 @@ export class UnsupportedTargetError extends ForgeError {
       `Supported targets: claude-code, cursor, plugin. Check forge.yaml 'target' field`,
     );
     this.name = 'UnsupportedTargetError';
+  }
+}
+
+/**
+ * Thrown when attempting to publish a version that already exists.
+ */
+export class VersionConflictError extends ForgeError {
+  constructor(type: string, id: string, version: string) {
+    super(
+      'VERSION_CONFLICT',
+      `Version '${version}' of '${type}:${id}' already exists in the registry`,
+      `Bump the version in metadata.yaml before publishing, or use a different version identifier`,
+    );
+    this.name = 'VersionConflictError';
+  }
+}
+
+/**
+ * Thrown when a publish operation fails due to missing or insufficient auth credentials.
+ */
+export class PublishAuthError extends ForgeError {
+  constructor(detail: string) {
+    super(
+      'PUBLISH_AUTH_ERROR',
+      `Publish authentication failed: ${detail}`,
+      `Ensure the tokenEnv config points to a valid environment variable containing a token with write access`,
+    );
+    this.name = 'PublishAuthError';
+  }
+}
+
+/**
+ * Thrown when git push fails during a publish operation.
+ */
+export class PublishPushError extends ForgeError {
+  constructor(detail: string) {
+    super(
+      'PUBLISH_PUSH_ERROR',
+      `Publish push failed: ${detail}`,
+      `Check that you have write access to the remote repository and the branch is not protected`,
+    );
+    this.name = 'PublishPushError';
+  }
+}
+
+/**
+ * Thrown when publish validation fails (invalid metadata or semver).
+ */
+export class PublishValidationError extends ForgeError {
+  constructor(detail: string) {
+    super(
+      'PUBLISH_VALIDATION_ERROR',
+      `Publish validation failed: ${detail}`,
+      `Fix the validation errors in your artifact metadata before publishing`,
+    );
+    this.name = 'PublishValidationError';
   }
 }

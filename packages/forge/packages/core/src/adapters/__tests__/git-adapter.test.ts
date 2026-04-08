@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -6,7 +6,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { stringify as toYaml } from 'yaml';
 import { GitAdapter } from '../git-adapter.js';
-import { AdapterError } from '../errors.js';
+import { AdapterError, VersionConflictError, PublishAuthError, PublishPushError } from '../errors.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,7 +27,8 @@ async function git(args: string[], cwd: string): Promise<string> {
  */
 async function createBareRepoFixture(
   tmpDir: string,
-  skills: Array<{ id: string; name: string; version: string; description: string }>
+  skills: Array<{ id: string; name: string; version: string; description: string }>,
+  options?: { versioned?: boolean }
 ): Promise<string> {
   const workDir = path.join(tmpDir, 'work');
   const bareDir = path.join(tmpDir, 'bare.git');
@@ -45,7 +46,9 @@ async function createBareRepoFixture(
 
   // Create registry directory with skills
   for (const skill of skills) {
-    const skillDir = path.join(workDir, 'registry', 'skills', skill.id);
+    const skillDir = options?.versioned
+      ? path.join(workDir, 'registry', 'skills', skill.id, skill.version)
+      : path.join(workDir, 'registry', 'skills', skill.id);
     await fs.mkdir(skillDir, { recursive: true });
     await fs.writeFile(
       path.join(skillDir, 'metadata.yaml'),
@@ -71,6 +74,23 @@ async function createBareRepoFixture(
   await git(['push', 'origin', 'HEAD:main'], workDir);
 
   return bareDir;
+}
+
+function makeBundle(id: string, version: string, name: string, description: string) {
+  return {
+    meta: {
+      id,
+      name,
+      version,
+      description,
+      type: 'skill' as const,
+      tags: [],
+      dependencies: {},
+      files: [],
+    },
+    content: `# ${name}\n\n${description}`,
+    contentPath: 'SKILL.md',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +311,141 @@ describe('GitAdapter', () => {
       // Should still work since bareRepo is local
       const skills = await adapter.list('skill');
       expect(skills).toHaveLength(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Write support tests
+  // ---------------------------------------------------------------------------
+
+  describe('write (commit and push)', () => {
+    it('writes artifact files, commits, and pushes to remote', async () => {
+      const bareRepo = await createBareRepoFixture(tmpDir, [
+        { id: 'existing', name: 'Existing', version: '1.0.0', description: 'Already here' },
+      ]);
+
+      const adapter = new GitAdapter({ url: bareRepo, ref: 'main', cacheDir });
+
+      // Trigger initial clone
+      await adapter.list('skill');
+
+      const bundle = makeBundle('new-skill', '1.0.0', 'New Skill', 'A brand new skill');
+      await adapter.write('skill', 'new-skill', bundle);
+
+      // Verify the commit reached the bare repo by cloning fresh
+      const verifyDir = path.join(tmpDir, 'verify');
+      await fs.mkdir(verifyDir, { recursive: true });
+      await git(['clone', bareRepo, verifyDir], tmpDir);
+
+      // Check the new skill files exist in the fresh clone
+      const metaPath = path.join(verifyDir, 'registry', 'skills', 'new-skill', 'metadata.yaml');
+      const contentPath = path.join(verifyDir, 'registry', 'skills', 'new-skill', 'SKILL.md');
+      const metaContent = await fs.readFile(metaPath, 'utf-8');
+      const skillContent = await fs.readFile(contentPath, 'utf-8');
+
+      expect(metaContent).toContain('new-skill');
+      expect(skillContent).toContain('New Skill');
+    });
+
+    it('creates git commit with correct message format', async () => {
+      const bareRepo = await createBareRepoFixture(tmpDir, [
+        { id: 'existing', name: 'Existing', version: '1.0.0', description: 'Already here' },
+      ]);
+
+      const adapter = new GitAdapter({ url: bareRepo, ref: 'main', cacheDir });
+      await adapter.list('skill');
+
+      const bundle = makeBundle('my-skill', '2.1.0', 'My Skill', 'Description');
+      await adapter.write('skill', 'my-skill', bundle);
+
+      // Check the commit message in the bare repo
+      const log = await git(['log', '--oneline', '-1'], path.join(tmpDir, 'work'));
+      // Pull first to see the new commit
+      await git(['pull', 'origin', 'main'], path.join(tmpDir, 'work'));
+      const latestLog = await git(['log', '--oneline', '-1'], path.join(tmpDir, 'work'));
+      expect(latestLog).toContain('publish skill:my-skill@2.1.0');
+    });
+
+    it('throws VersionConflictError when version directory already exists', async () => {
+      const bareRepo = await createBareRepoFixture(
+        tmpDir,
+        [{ id: 'versioned-skill', name: 'Versioned', version: '1.0.0', description: 'V1' }],
+        { versioned: true },
+      );
+
+      const adapter = new GitAdapter({ url: bareRepo, ref: 'main', cacheDir });
+      await adapter.list('skill');
+
+      // Try to write the same version again
+      const bundle = makeBundle('versioned-skill', '1.0.0', 'Versioned', 'V1 duplicate');
+
+      await expect(adapter.write('skill', 'versioned-skill', bundle)).rejects.toThrow(
+        VersionConflictError,
+      );
+    });
+
+    it('allows writing a new version when previous versions exist', async () => {
+      const bareRepo = await createBareRepoFixture(
+        tmpDir,
+        [{ id: 'versioned-skill', name: 'Versioned', version: '1.0.0', description: 'V1' }],
+        { versioned: true },
+      );
+
+      const adapter = new GitAdapter({ url: bareRepo, ref: 'main', cacheDir });
+      await adapter.list('skill');
+
+      // Write version 2.0.0 — should succeed
+      const bundle = makeBundle('versioned-skill', '2.0.0', 'Versioned V2', 'Version two');
+      await adapter.write('skill', 'versioned-skill', bundle);
+
+      // Verify both versions exist
+      const versions = await adapter.listVersions('skill', 'versioned-skill');
+      expect(versions).toContain('1.0.0');
+      expect(versions).toContain('2.0.0');
+    });
+
+    it('throws PublishAuthError when tokenEnv is set but token is missing', async () => {
+      const bareRepo = await createBareRepoFixture(tmpDir, [
+        { id: 'existing', name: 'Existing', version: '1.0.0', description: 'Here' },
+      ]);
+
+      const adapter = new GitAdapter({
+        url: bareRepo,
+        ref: 'main',
+        cacheDir,
+        tokenEnv: 'FORGE_MISSING_WRITE_TOKEN',
+      });
+
+      // Read works (tokenEnv missing just warns for reads)
+      await adapter.list('skill');
+
+      // Write should fail with PublishAuthError
+      const bundle = makeBundle('new-skill', '1.0.0', 'New', 'Desc');
+
+      // Ensure the env var is not set
+      delete process.env.FORGE_MISSING_WRITE_TOKEN;
+
+      await expect(adapter.write('skill', 'new-skill', bundle)).rejects.toThrow(
+        PublishAuthError,
+      );
+    });
+
+    it('write is readable after round-trip', async () => {
+      const bareRepo = await createBareRepoFixture(tmpDir, [
+        { id: 'seed', name: 'Seed', version: '1.0.0', description: 'Seed skill for repo init' },
+      ]);
+
+      const adapter = new GitAdapter({ url: bareRepo, ref: 'main', cacheDir });
+      await adapter.list('skill'); // trigger clone
+
+      const bundle = makeBundle('round-trip', '1.0.0', 'Round Trip Skill', 'Tests round-trip');
+      await adapter.write('skill', 'round-trip', bundle);
+
+      // Read it back from the same adapter
+      const readBack = await adapter.read('skill', 'round-trip');
+      expect(readBack.meta.id).toBe('round-trip');
+      expect(readBack.meta.version).toBe('1.0.0');
+      expect(readBack.content).toContain('Round Trip Skill');
     });
   });
 });

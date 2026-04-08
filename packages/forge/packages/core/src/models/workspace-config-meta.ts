@@ -43,6 +43,7 @@ export const WorkspaceConfigMetaSchema = z.object({
   author: z.string().optional(),
   license: z.string().optional(),
   tags: z.array(z.string()).default([]),
+  extends: z.string().optional(),  // artifact reference with version, e.g., "sdlc-default@1.2.0"
   plugins: z.array(z.string()).default([]),
   skills: z.array(z.string()).default([]),
   personas: z.array(z.string()).default([]),

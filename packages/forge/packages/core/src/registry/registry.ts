@@ -1,3 +1,6 @@
+import { createHash } from 'crypto';
+import * as semver from 'semver';
+import type { ZodSchema } from 'zod';
 import type { DataAdapter } from '../adapters/types.js';
 import type {
   ArtifactType,
@@ -7,7 +10,50 @@ import type {
   ArtifactSummary,
   SearchResult,
 } from '../models/index.js';
-import { ArtifactNotFoundError } from '../adapters/errors.js';
+import {
+  SkillMetaSchema,
+  AgentMetaSchema,
+  PluginMetaSchema,
+  PersonaMetaSchema,
+  WorkspaceConfigMetaSchema,
+} from '../models/index.js';
+import {
+  ArtifactNotFoundError,
+  VersionConflictError,
+  PublishValidationError,
+} from '../adapters/errors.js';
+
+/**
+ * Result returned from a successful publish operation.
+ */
+export interface PublishResult {
+  type: ArtifactType;
+  id: string;
+  version: string;
+  registry: string;
+  files: Array<{ name: string; sha256: string }>;
+}
+
+/**
+ * Manifest generated during publish and included in the artifact bundle.
+ */
+export interface PublishManifest {
+  version: string;
+  files: Array<{ name: string; sha256: string }>;
+  published_at: string;
+  publisher: string;
+}
+
+/**
+ * Map from artifact type to its Zod validation schema.
+ */
+const META_SCHEMAS: Record<ArtifactType, ZodSchema> = {
+  skill: SkillMetaSchema,
+  agent: AgentMetaSchema,
+  plugin: PluginMetaSchema,
+  persona: PersonaMetaSchema,
+  'workspace-config': WorkspaceConfigMetaSchema,
+};
 
 /**
  * Search/query interface over a DataAdapter.
@@ -19,7 +65,10 @@ import { ArtifactNotFoundError } from '../adapters/errors.js';
  * const skill = await registry.get({ type: 'skill', id: 'developer', version: '1.0.0' });
  */
 export class Registry {
-  constructor(private readonly adapter: DataAdapter) {}
+  constructor(
+    private readonly adapter: DataAdapter,
+    private readonly name: string = 'default',
+  ) {}
 
   /**
    * Search for artifacts matching the query.
@@ -49,6 +98,8 @@ export class Registry {
 
   /**
    * Get a single artifact bundle by ref.
+   * When the ref includes a version suffix (e.g., "id@1.2.0"), the adapter
+   * reads that specific version from a versioned directory layout.
    * @throws {ArtifactNotFoundError} if not found
    */
   async get(ref: ArtifactRef): Promise<ArtifactBundle> {
@@ -57,6 +108,19 @@ export class Registry {
       throw new ArtifactNotFoundError(ref.type, ref.id);
     }
     return this.adapter.read(ref.type, ref.id);
+  }
+
+  /**
+   * List all available semver versions for an artifact.
+   * Returns versions sorted descending (highest first).
+   * Returns empty array if the adapter doesn't support listVersions
+   * or the artifact uses a flat (unversioned) layout.
+   */
+  async listVersions(type: ArtifactType, id: string): Promise<string[]> {
+    if (!this.adapter.listVersions) {
+      return [];
+    }
+    return this.adapter.listVersions(type, id);
   }
 
   /**
@@ -84,10 +148,74 @@ export class Registry {
 
   /**
    * Publish an artifact bundle to the registry.
-   * Delegates to the underlying adapter.
+   *
+   * Validates metadata against the appropriate Zod schema, verifies semver,
+   * checks for version conflicts, generates a manifest, and writes to the adapter.
+   *
+   * @returns Structured result with type, id, version, registry name, and file checksums
+   * @throws {PublishValidationError} if metadata or semver is invalid
+   * @throws {VersionConflictError} if version already exists
    */
-  async publish(type: ArtifactType, id: string, bundle: ArtifactBundle): Promise<void> {
-    await this.adapter.write(type, id, bundle);
+  async publish(type: ArtifactType, id: string, bundle: ArtifactBundle): Promise<PublishResult> {
+    const { meta, content, contentPath } = bundle;
+
+    // 1. Validate metadata against the appropriate Zod schema
+    const schema = META_SCHEMAS[type];
+    const parseResult = schema.safeParse(meta);
+    if (!parseResult.success) {
+      const issues = parseResult.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      throw new PublishValidationError(`Invalid ${type} metadata: ${issues}`);
+    }
+
+    // 2. Validate semver
+    const version = meta.version;
+    if (!semver.valid(version)) {
+      throw new PublishValidationError(
+        `Invalid semver '${version}'. Must be a valid semantic version (e.g., 1.0.0)`,
+      );
+    }
+
+    // 3. Check version doesn't already exist
+    if (this.adapter.listVersions) {
+      const existingVersions = await this.adapter.listVersions(type, id);
+      if (existingVersions.includes(version)) {
+        throw new VersionConflictError(type, id, version);
+      }
+    }
+
+    // 4. Generate file checksums for the bundle content
+    const files = [
+      { name: contentPath, sha256: sha256(content) },
+    ];
+
+    // 5. Generate manifest
+    const manifest: PublishManifest = {
+      version,
+      files,
+      published_at: new Date().toISOString(),
+      publisher: '',
+    };
+
+    // 6. Write bundle with manifest included
+    // We attach the manifest as a serialized YAML string in a new bundle
+    // The adapter receives the original bundle — manifest is written alongside
+    const manifestYaml = serializeManifest(manifest);
+    const enrichedBundle: ArtifactBundle & { manifest?: string } = {
+      ...bundle,
+      manifest: manifestYaml,
+    };
+    await this.adapter.write(type, id, enrichedBundle);
+
+    // 7. Return structured result
+    return {
+      type,
+      id,
+      version,
+      registry: this.name,
+      files,
+    };
   }
 
   private score(
@@ -134,4 +262,29 @@ export class Registry {
       matchedOn,
     };
   }
+}
+
+/**
+ * Compute SHA-256 hash of a string.
+ */
+function sha256(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+/**
+ * Serialize a PublishManifest to YAML-like string format.
+ * Uses a simple deterministic format to avoid importing yaml just for this.
+ */
+function serializeManifest(manifest: PublishManifest): string {
+  const lines: string[] = [
+    `version: "${manifest.version}"`,
+    `published_at: "${manifest.published_at}"`,
+    `publisher: "${manifest.publisher}"`,
+    'files:',
+  ];
+  for (const file of manifest.files) {
+    lines.push(`  - name: "${file.name}"`);
+    lines.push(`    sha256: "${file.sha256}"`);
+  }
+  return lines.join('\n') + '\n';
 }

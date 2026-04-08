@@ -250,7 +250,7 @@ describe('ForgeConfig Schema', () => {
     const reg = result.registries[0];
     expect(reg.type).toBe('git');
     if (reg.type === 'git') {
-      expect(reg.branch).toBe('main');
+      expect(reg.ref).toBe('main');
       expect(reg.path).toBe('registry');
     }
   });
@@ -263,7 +263,7 @@ describe('ForgeConfig Schema', () => {
           type: 'git' as const,
           name: 'remote',
           url: 'https://github.com/example/registry.git',
-          branch: 'develop',
+          ref: 'develop',
           path: 'custom-registry',
         },
       ],
@@ -271,7 +271,7 @@ describe('ForgeConfig Schema', () => {
     const result = ForgeConfigSchema.parse(config);
     const reg = result.registries[0];
     if (reg.type === 'git') {
-      expect(reg.branch).toBe('develop');
+      expect(reg.ref).toBe('develop');
       expect(reg.path).toBe('custom-registry');
     }
   });
@@ -499,7 +499,7 @@ describe('Discriminated Union - RegistryConfig', () => {
     expect(reg.type).toBe('git');
     if (reg.type === 'git') {
       expect('url' in reg).toBe(true);
-      expect('branch' in reg).toBe(true);
+      expect('ref' in reg).toBe(true);
     }
   });
 

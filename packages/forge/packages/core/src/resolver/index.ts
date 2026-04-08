@@ -1,1 +1,2 @@
-export { Resolver } from './resolver.js';
+export { Resolver, type LockEntry } from './resolver.js';
+export { mergeWorkspaceConfigs } from '../workspace/merge-workspace-configs.js';

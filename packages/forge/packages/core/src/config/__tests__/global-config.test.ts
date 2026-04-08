@@ -134,10 +134,12 @@ describe('Global Config', () => {
   });
 
   describe('loadGlobalConfig()', () => {
-    it('returns empty config when file does not exist', async () => {
+    it('returns default registries when file does not exist', async () => {
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toEqual([]);
-      expect(config.workspace.mount_path).toBe('~/forge-workspaces');
+      // Default registries (local + global) are always present
+      expect(config.registries.length).toBeGreaterThanOrEqual(2);
+      expect(config.registries[0]!.name).toBe('local');
+      expect(config.registries[config.registries.length - 1]!.name).toBe('global');
     });
 
     it('loads a valid config file with all sections', async () => {
@@ -160,7 +162,9 @@ describe('Global Config', () => {
       }));
 
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toHaveLength(1);
+      // local (from file) + global (injected) = 2
+      expect(config.registries.length).toBeGreaterThanOrEqual(2);
+      expect(config.registries[0]!.name).toBe('local');
       expect(config.workspace.mount_path).toBe(path.join(os.homedir(), 'my-workspaces'));
       expect(config.workspace.default_config).toBe('custom');
       expect(config.workspace.retention_days).toBe(45);
@@ -196,21 +200,24 @@ describe('Global Config', () => {
       }));
 
       const config = await loadGlobalConfig(configPath);
-      expect((config.registries[0] as any).path).toBe(path.join(os.homedir(), 'registry'));
+      const local = config.registries.find(r => r.name === 'local');
+      expect((local as any).path).toBe(path.join(os.homedir(), 'registry'));
     });
 
-    it('returns empty config for malformed yaml', async () => {
+    it('returns default registries for malformed yaml', async () => {
       await fs.writeFile(configPath, '{{not valid yaml');
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toEqual([]);
+      expect(config.registries.length).toBeGreaterThanOrEqual(2);
+      expect(config.registries[0]!.name).toBe('local');
     });
 
-    it('handles config with no registries field', async () => {
+    it('returns default registries when no registries field', async () => {
       await fs.writeFile(configPath, toYaml({
         workspace: { mount_path: '~/workspaces' },
       }));
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toEqual([]);
+      expect(config.registries.length).toBeGreaterThanOrEqual(2);
+      expect(config.registries[0]!.name).toBe('local');
       expect(config.workspace.mount_path).toBe(path.join(os.homedir(), 'workspaces'));
     });
 
@@ -228,7 +235,8 @@ describe('Global Config', () => {
       }));
 
       const config = await loadGlobalConfig(configPath);
-      expect((config.registries[0] as any).url).toBe('https://github.com/org/reg.git');
+      const team = config.registries.find(r => r.name === 'team');
+      expect((team as any).url).toBe('https://github.com/org/reg.git');
     });
   });
 
@@ -237,7 +245,7 @@ describe('Global Config', () => {
       const nestedPath = path.join(tmpDir, 'sub', 'dir', 'config.yaml');
       await saveGlobalConfig({
         registries: [
-          { type: 'filesystem', name: 'local', path: '/some/path' },
+          { type: 'filesystem', name: 'local', path: '/some/path', writable: false },
         ],
         workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions', max_sessions: 20 },
         mcp_endpoints: {},
@@ -245,8 +253,10 @@ describe('Global Config', () => {
       }, nestedPath);
 
       const config = await loadGlobalConfig(nestedPath);
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('local');
+      // local (from saved config) + global (injected default)
+      const local = config.registries.find(r => r.name === 'local');
+      expect(local).toBeDefined();
+      expect(local!.name).toBe('local');
     });
 
     it('does not expand paths when saving', async () => {
@@ -289,7 +299,9 @@ describe('Global Config', () => {
       await saveGlobalConfig(original, configPath);
       const loaded = await loadGlobalConfig(configPath);
 
-      expect(loaded.registries).toHaveLength(1);
+      // filesystem registry (from config) + global (injected default) = at least original
+      const fsReg = loaded.registries.find(r => r.name === 'local' && r.type === 'filesystem');
+      expect(fsReg).toBeDefined();
       expect(loaded.workspace.mount_path).toBe('/home/user/workspaces');
       expect(loaded.workspace.default_config).toBe('my-config');
       expect(loaded.workspace.retention_days).toBe(45);
@@ -299,26 +311,28 @@ describe('Global Config', () => {
   });
 
   describe('addGlobalRegistry()', () => {
-    it('adds a registry to empty config', async () => {
+    it('adds a registry to config', async () => {
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://github.com/org/reg.git', branch: 'main', path: 'registry' },
+        { type: 'git', name: 'team', url: 'https://github.com/org/reg.git', ref: 'main', path: 'registry', writable: false },
         configPath,
       );
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('team');
+      const team = config.registries.find(r => r.name === 'team');
+      expect(team).toBeDefined();
+      expect(team!.name).toBe('team');
     });
 
     it('replaces existing registry with same name', async () => {
       await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://old-url.com/reg.git', branch: 'main', path: 'registry' },
+        { type: 'git', name: 'team', url: 'https://old-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
         configPath,
       );
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://new-url.com/reg.git', branch: 'main', path: 'registry' },
+        { type: 'git', name: 'team', url: 'https://new-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
         configPath,
       );
-      expect(config.registries).toHaveLength(1);
-      expect((config.registries[0] as any).url).toBe('https://new-url.com/reg.git');
+      const teams = config.registries.filter(r => r.name === 'team');
+      expect(teams).toHaveLength(1);
+      expect((teams[0] as any).url).toBe('https://new-url.com/reg.git');
     });
 
     it('preserves other sections when adding registry', async () => {
@@ -332,58 +346,59 @@ describe('Global Config', () => {
 
       // Add a registry
       const config = await addGlobalRegistry(
-        { type: 'filesystem', name: 'local', path: '/registry' },
+        { type: 'filesystem', name: 'local', path: '/registry', writable: true },
         configPath,
       );
 
-      expect(config.registries).toHaveLength(1);
+      const local = config.registries.find(r => r.name === 'local');
+      expect(local).toBeDefined();
       expect(config.workspace.default_config).toBe('custom');
       expect(config.workspace.retention_days).toBe(60);
     });
 
     it('persists to disk', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'local', path: '/reg' },
+        { type: 'filesystem', name: 'custom', path: '/reg', writable: false },
         configPath,
       );
       const loaded = await loadGlobalConfig(configPath);
-      expect(loaded.registries).toHaveLength(1);
+      const custom = loaded.registries.find(r => r.name === 'custom');
+      expect(custom).toBeDefined();
     });
   });
 
   describe('removeGlobalRegistry()', () => {
     it('removes a registry by name', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'to-remove', path: '/reg' },
+        { type: 'filesystem', name: 'to-remove', path: '/reg', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('to-remove', configPath);
-      expect(config.registries).toHaveLength(0);
+      expect(config.registries.find(r => r.name === 'to-remove')).toBeUndefined();
     });
 
     it('no-ops if registry name not found', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'keep', path: '/reg' },
+        { type: 'filesystem', name: 'keep', path: '/reg', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('nonexistent', configPath);
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('keep');
+      expect(config.registries.find(r => r.name === 'keep')).toBeDefined();
     });
 
     it('preserves other sections when removing registry', async () => {
       // Set up initial config with registry and workspace settings
       await saveGlobalConfig({
         registries: [
-          { type: 'filesystem', name: 'local', path: '/registry' },
+          { type: 'filesystem', name: 'custom-reg', path: '/registry', writable: false },
         ],
         workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions', max_sessions: 20 },
         mcp_endpoints: {},
         repos: { scan_paths: [], index_path: '~/Horus/data/config/repos.json' },
       }, configPath);
 
-      const config = await removeGlobalRegistry('local', configPath);
-      expect(config.registries).toHaveLength(0);
+      const config = await removeGlobalRegistry('custom-reg', configPath);
+      expect(config.registries.find(r => r.name === 'custom-reg')).toBeUndefined();
       expect(config.workspace.default_config).toBe('custom');
       expect(config.workspace.retention_days).toBe(50);
     });
@@ -398,8 +413,12 @@ describe('Global Config', () => {
       }));
 
       const config = await loadGlobalConfig(configPath);
-      expect(config.registries).toHaveLength(1);
-      expect(config.registries[0]!.name).toBe('team');
+      // local + team + global = 3
+      expect(config.registries).toHaveLength(3);
+      expect(config.registries[0]!.name).toBe('local');
+      const team = config.registries.find(r => r.name === 'team');
+      expect(team).toBeDefined();
+      expect(team!.type).toBe('git');
       // New sections should have defaults
       expect(config.workspace.mount_path).toBe(path.join(os.homedir(), 'forge-workspaces'));
       expect(config.mcp_endpoints).toEqual({});
