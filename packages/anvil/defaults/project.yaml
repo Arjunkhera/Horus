@@ -15,10 +15,6 @@ fields:
     default: P2-medium
     required: false
     search_mode: term
-  goal:
-    type: text
-    required: false
-    search_mode: text
 template:
   frontmatter:
     status: active

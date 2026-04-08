@@ -16,11 +16,8 @@ fields:
     type: number
     required: false
     search_mode: none
-  description:
-    type: text
-    required: false
-    search_mode: text
 template:
   frontmatter:
     tags: []
-  body: ""
+  body: |
+    ## Description
