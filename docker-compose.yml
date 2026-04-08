@@ -243,6 +243,13 @@ services:
       - FORGE_MANAGED_REPOS_PATH=/data/horus-repos
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
+      # Fix git "dubious ownership" errors on bind-mounted repos (bug 4a32728f).
+      # The container's forge user UID differs from the host UID that owns the
+      # mounted repos, so git refuses to operate. The wildcard '*' tells git to
+      # trust all directories — acceptable for a single-user dev tool.
+      - GIT_CONFIG_COUNT=1
+      - GIT_CONFIG_KEY_0=safe.directory
+      - GIT_CONFIG_VALUE_0=*
       - TYPESENSE_HOST=typesense
       - TYPESENSE_PORT=8108
       - TYPESENSE_API_KEY=${TYPESENSE_API_KEY:-horus-local-key}
