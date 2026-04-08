@@ -111,6 +111,25 @@ if [ ! -f "$NOTES_PATH/.anvil/types/_core.yaml" ]; then
   fi
 fi
 
+# Step 2.8: Sync default types on every startup.
+# The bootstrap above is first-run only. On subsequent deploys, updated type
+# schemas in /app/defaults/ must propagate to .anvil/types/. This is safe:
+# - .anvil/types/ holds image defaults (built-in types are read-only at runtime)
+# - custom types live in custom-types/ (untouched)
+# - plugin types live in .anvil/plugins/*/types/ (untouched)
+if [ -f "$NOTES_PATH/.anvil/types/_core.yaml" ] && [ -d /app/defaults ]; then
+  cp /app/defaults/*.yaml "$NOTES_PATH/.anvil/types/"
+  if [ -d "$NOTES_PATH/.git" ]; then
+    git -C "$NOTES_PATH" add ".anvil/types/" 2>/dev/null || true
+    if ! git -C "$NOTES_PATH" diff --cached --quiet 2>/dev/null; then
+      log "Default types updated — committing changes..."
+      git -C "$NOTES_PATH" commit -m "chore: sync default types from image" 2>/dev/null || true
+      git -C "$NOTES_PATH" push 2>/dev/null || log_err "Type sync push failed (non-fatal)"
+      log "Type sync committed and pushed"
+    fi
+  fi
+fi
+
 # Step 4: Start Anvil MCP server in HTTP mode.
 # Git sync is now handled in-process by GitSyncEngine (packages/anvil/src/core/sync/engine.ts).
 # Run node as a background process and wait for it, allowing SIGTERM to be handled
