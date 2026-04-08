@@ -53,12 +53,17 @@ export interface GitAdapterConfig {
  * On first access the repo is shallow-cloned into a local cache directory.
  * Subsequent accesses run `git fetch` + `git checkout` to update.
  *
+ * Supports version-aware artifact IDs (e.g., "my-skill@1.2.0") and
+ * versioned directory layouts. All version-aware operations are delegated
+ * to the underlying FilesystemAdapter.
+ *
  * @example
  * const adapter = new GitAdapter({
  *   url: 'https://github.com/myorg/registry.git',
  *   ref: 'main',
  * });
  * const skills = await adapter.list('skill');
+ * const versions = await adapter.listVersions('skill', 'developer');
  */
 export class GitAdapter implements DataAdapter {
   private readonly url: string;
@@ -113,6 +118,22 @@ export class GitAdapter implements DataAdapter {
   async write(type: ArtifactType, id: string, bundle: ArtifactBundle): Promise<void> {
     const delegate = await this.ensureCloned();
     return delegate.write(type, id, bundle);
+  }
+
+  async readResourceFile(type: ArtifactType, id: string, relativePath: string): Promise<string | null> {
+    const delegate = await this.ensureCloned();
+    return delegate.readResourceFile(type, id, relativePath);
+  }
+
+  /**
+   * List all available semver versions for a specific artifact.
+   * Delegates to the underlying FilesystemAdapter's listVersions.
+   * Returns versions sorted descending (highest first).
+   * Returns empty array for flat layout artifacts or nonexistent artifacts.
+   */
+  async listVersions(type: ArtifactType, id: string): Promise<string[]> {
+    const delegate = await this.ensureCloned();
+    return delegate.listVersions(type, id);
   }
 
   // ---------------------------------------------------------------------------

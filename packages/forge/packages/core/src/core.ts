@@ -1181,7 +1181,7 @@ export class ForgeCore {
       case 'git': {
         return new GitAdapter({
           url: reg.url,
-          ref: reg.branch,
+          ref: reg.ref ?? reg.branch ?? 'main',
           registryPath: reg.path,
         });
       }

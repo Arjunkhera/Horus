@@ -42,4 +42,11 @@ export interface DataAdapter {
    * Optional — not all adapters support this.
    */
   readResourceFile?(type: ArtifactType, id: string, relativePath: string): Promise<string | null>;
+
+  /**
+   * List all available semver versions for a specific artifact.
+   * Returns versions sorted descending (highest first).
+   * Optional — only supported by adapters with versioned directory layout.
+   */
+  listVersions?(type: ArtifactType, id: string): Promise<string[]>;
 }

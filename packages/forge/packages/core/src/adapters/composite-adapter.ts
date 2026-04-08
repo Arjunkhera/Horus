@@ -133,4 +133,24 @@ export class CompositeAdapter implements DataAdapter {
   async write(type: ArtifactType, id: string, bundle: ArtifactBundle): Promise<void> {
     await this.writableAdapter.write(type, id, bundle);
   }
+
+  /**
+   * List all available semver versions for a specific artifact.
+   * Tries adapters in priority order. Returns the first non-empty result,
+   * or an empty array if no adapter supports listVersions or none has versions.
+   */
+  async listVersions(type: ArtifactType, id: string): Promise<string[]> {
+    for (const adapter of this.adapters) {
+      if (!adapter.listVersions) continue;
+      try {
+        const versions = await adapter.listVersions(type, id);
+        if (versions.length > 0) return versions;
+      } catch (err: any) {
+        console.warn(
+          `[CompositeAdapter] ${adapter.constructor.name}.listVersions(${type}, ${id}) failed: ${err.message}. Trying next adapter.`
+        );
+      }
+    }
+    return [];
+  }
 }

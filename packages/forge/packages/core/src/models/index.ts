@@ -28,6 +28,7 @@ export {
 export {
   ForgeConfigSchema,
   RegistryConfigSchema,
+  normalizeRegistryConfig,
   type ForgeConfig,
   type RegistryConfig,
   type Target,

@@ -8,7 +8,7 @@ export {
   type RepoWorkflowResult,
   type RepoResolveResult,
 } from './core.js';
-export { Registry } from './registry/registry.js';
+export { Registry, type PublishResult } from './registry/registry.js';
 
 // Models
 export * from './models/index.js';
