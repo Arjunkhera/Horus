@@ -908,11 +908,6 @@ export async function startMcpServerHttp(opts: HttpServerOptions): Promise<void>
     }
   });
 
-  // Close idle TCP connections quickly (30s) so clients don't hang after sleep/wake.
-  // Node default is effectively OS-level (~15min). keepAliveTimeout must be < headersTimeout.
-  httpServer.keepAliveTimeout = 30_000;
-  httpServer.headersTimeout = 35_000;
-
   // Periodic TTL sweeper: evict sessions idle longer than SESSION_TTL_MS.
   // .unref() ensures the timer doesn't prevent process exit.
   const sweeper = setInterval(() => {
