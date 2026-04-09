@@ -59,4 +59,6 @@ export interface AnvilGraphNode {
   title: string
   /** Note type (e.g. task, note, story). */
   type: string
+  /** Optional status for filtering in graph traversal (open, in-progress, done, etc.). */
+  status?: string
 }
