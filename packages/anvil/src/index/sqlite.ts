@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS notes (
   priority TEXT,
   due TEXT,
   effort INTEGER,
+  recurrence TEXT,
+  last_swept_at TEXT,
   body_text TEXT,
   FOREIGN KEY (type) REFERENCES types(type_id) ON DELETE SET NULL
 );
@@ -157,6 +159,24 @@ export class AnvilDatabase {
   /** Run migrations to bring schema up to current version */
   private initialize(): void {
     this._db.exec(SCHEMA_SQL);
+    this.migrate();
+  }
+
+  /**
+   * Additive migrations for existing databases.
+   * ALTER TABLE IF NOT EXISTS (column) is not supported in all SQLite versions,
+   * so we catch errors from duplicate column additions gracefully.
+   */
+  private migrate(): void {
+    const addColumn = (sql: string) => {
+      try {
+        this._db.run(sql);
+      } catch {
+        // Column already exists — safe to ignore
+      }
+    };
+    addColumn('ALTER TABLE notes ADD COLUMN recurrence TEXT');
+    addColumn('ALTER TABLE notes ADD COLUMN last_swept_at TEXT');
   }
 
   /** Expose raw AnvilDb for use by indexer/query modules */

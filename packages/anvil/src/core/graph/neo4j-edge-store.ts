@@ -53,8 +53,8 @@ export class Neo4jEdgeStore {
     try {
       await session.run(
         `MERGE (n:${NODE_LABEL} {id: $id})
-         SET n.title = $title, n.type = $type`,
-        { id: node.id, title: node.title, type: node.type },
+         SET n.title = $title, n.type = $type, n.status = $status`,
+        { id: node.id, title: node.title, type: node.type, status: node.status ?? null },
       )
     } finally {
       await session.close()
