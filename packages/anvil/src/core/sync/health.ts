@@ -1,5 +1,6 @@
 export interface SyncHealthState {
   daemonAlive: boolean;
+  lastCycleAt: string | null;
 
   lastPushAttempt: string | null;
   lastPushSuccess: string | null;
@@ -22,6 +23,7 @@ export interface SyncHealthState {
 export function createInitialHealthState(): SyncHealthState {
   return {
     daemonAlive: false,
+    lastCycleAt: null,
     lastPushAttempt: null,
     lastPushSuccess: null,
     lastPushError: null,
@@ -39,10 +41,11 @@ export function createInitialHealthState(): SyncHealthState {
 }
 
 const PUSH_STALE_MS = 10 * 60 * 1000; // 10 minutes
+const CYCLE_STALE_MS = 3 * 60 * 1000; // 3 minutes (3x the default 60s pull interval)
 
 /**
- * Critical when data safety is at risk: push pipeline broken or conflict detected.
- * Push failures >= 3, push success stale while attempts ongoing, or unresolved conflict.
+ * Critical when data safety is at risk: push pipeline broken, conflict detected,
+ * or sync loop has stopped cycling.
  */
 export function isHealthCritical(state: SyncHealthState): boolean {
   if (state.pushConsecutiveFailures >= 3) return true;
@@ -57,6 +60,15 @@ export function isHealthCritical(state: SyncHealthState): boolean {
   }
 
   if (state.lastPushAttempt !== null && state.lastPushSuccess === null) {
+    return true;
+  }
+
+  // Detect dead sync loop: daemon claims alive but no cycle in 3x the interval
+  if (
+    state.daemonAlive &&
+    state.lastCycleAt !== null &&
+    Date.now() - new Date(state.lastCycleAt).getTime() > CYCLE_STALE_MS
+  ) {
     return true;
   }
 

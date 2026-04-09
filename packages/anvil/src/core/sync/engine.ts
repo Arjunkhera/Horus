@@ -57,7 +57,13 @@ export class GitSyncEngine {
     await this.push();
     await this.pull();
 
-    this.pullInterval = setInterval(() => this.pull(), this.opts.pullIntervalMs);
+    this.pullInterval = setInterval(() => {
+      this.pull().catch((err) => {
+        this.log('error', 'Unhandled error in pull cycle', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, this.opts.pullIntervalMs);
     this.subscribeToWatcher();
 
     this.log('info', 'GitSyncEngine started', {
@@ -91,7 +97,13 @@ export class GitSyncEngine {
   schedulePush(): void {
     if (!this.running) return;
     if (this.pushDebounceTimer) clearTimeout(this.pushDebounceTimer);
-    this.pushDebounceTimer = setTimeout(() => this.push(), this.opts.pushDebounceMs);
+    this.pushDebounceTimer = setTimeout(() => {
+      this.push().catch((err) => {
+        this.log('error', 'Unhandled error in scheduled push', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, this.opts.pushDebounceMs);
   }
 
   // ── Push ──
@@ -142,7 +154,13 @@ export class GitSyncEngine {
         this.log('info', 'Push complete');
 
         if (this.running) {
-          setTimeout(() => this.pull(), POST_PUSH_PULL_DELAY_MS);
+          setTimeout(() => {
+            this.pull().catch((err) => {
+              this.log('error', 'Unhandled error in post-push pull', {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }, POST_PUSH_PULL_DELAY_MS);
         }
         return { status: 'ok', commitHash, filesCommitted };
       } catch (pushErr: unknown) {
@@ -180,6 +198,7 @@ export class GitSyncEngine {
   }> {
     const release = await this.mutex.acquire('low');
     try {
+      this.health.lastCycleAt = new Date().toISOString();
       await this.cleanStaleLocks();
       const git = this.createGit();
 
@@ -244,8 +263,8 @@ export class GitSyncEngine {
   }
 
   /**
-   * Stage .md files and .anvil/types/*.yaml — mirrors the staging rules
-   * from syncPush so both code paths stay consistent.
+   * Stage .md, .anvil/types/*.yaml, custom-types/*.yaml, and _graph/*.json —
+   * mirrors the staging rules from syncPush so both code paths stay consistent.
    */
   private async stageFiles(git: SimpleGit): Promise<void> {
     try {
@@ -259,6 +278,20 @@ export class GitSyncEngine {
       await git.add(['.anvil/types/*.yaml']);
     } catch {
       /* types dir doesn't exist or no yaml files */
+    }
+    try {
+      const customTypesDir = path.join(this.opts.notesPath, 'custom-types');
+      await fs.stat(customTypesDir);
+      await git.add(['custom-types/*.yaml']);
+    } catch {
+      /* custom-types dir doesn't exist or no yaml files */
+    }
+    try {
+      const graphDir = path.join(this.opts.notesPath, '_graph');
+      await fs.stat(graphDir);
+      await git.add(['_graph/*.json']);
+    } catch {
+      /* _graph dir doesn't exist or no json files */
     }
   }
 
@@ -407,7 +440,13 @@ export class GitSyncEngine {
     );
     this.log('info', `Scheduling push retry in ${backoffMs}ms`);
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = setTimeout(() => this.push(), backoffMs);
+    this.retryTimer = setTimeout(() => {
+      this.push().catch((err) => {
+        this.log('error', 'Unhandled error in push retry', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, backoffMs);
   }
 
   /**
