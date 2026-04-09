@@ -763,6 +763,7 @@ def _registry_add_sync(
             github_token=settings.github_token,
             github_repo=settings.github_repo,
             base_branch=settings.github_base_branch,
+            github_api_host=settings.github_api_host,
         )
         pr_url, _ = writer.write_page(
             page_path=registry_rel_path,
