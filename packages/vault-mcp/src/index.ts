@@ -86,6 +86,18 @@ async function callKnowledgeAPIGet(path: string): Promise<unknown> {
   return response.json();
 }
 
+// Shared optional vault parameter — scopes operations to a specific vault instance
+const VAULT_PARAM = {
+  type: "string" as const,
+  description: "Optional. Scope to a specific vault. Omit to search all vaults (reads) or use the default vault (writes).",
+};
+
+// Helper to inject vault into request body if provided
+function withVault(body: Record<string, unknown>, toolArgs: Record<string, unknown>): Record<string, unknown> {
+  if (toolArgs.vault) return { ...body, vault: toolArgs.vault };
+  return body;
+}
+
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
 const TOOLS: Tool[] = [
@@ -100,6 +112,7 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         repo: { type: "string", description: "Repository name (e.g., 'anvil', 'forge', 'vault')" },
+        vault: VAULT_PARAM,
         include_full: {
           type: "boolean",
           description: "If true, return full page content. If false (default), return summaries only.",
@@ -145,6 +158,7 @@ const TOOLS: Tool[] = [
           description: "Filter by scope (AND logic)",
         },
         limit: { type: "number", description: "Maximum results (default: 10)", default: 10 },
+        vault: VAULT_PARAM,
       },
       required: ["query"],
     },
@@ -158,6 +172,7 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         id: { type: "string", description: "Page identifier (UUID or file path, e.g., 'repos/anvil.md')" },
+        vault: VAULT_PARAM,
       },
       required: ["id"],
     },
@@ -171,6 +186,7 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         id: { type: "string", description: "Source page identifier (UUID or file path)" },
+        vault: VAULT_PARAM,
       },
       required: ["id"],
     },
@@ -198,6 +214,7 @@ const TOOLS: Tool[] = [
         },
         tags: { type: "array", items: { type: "string" }, description: "AND logic" },
         limit: { type: "number", default: 50 },
+        vault: VAULT_PARAM,
       },
       required: ["scope"],
     },
@@ -211,6 +228,7 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         content: { type: "string", description: "Full markdown with YAML frontmatter" },
+        vault: VAULT_PARAM,
       },
       required: ["content"],
     },
@@ -225,6 +243,7 @@ const TOOLS: Tool[] = [
       properties: {
         content: { type: "string", description: "Full markdown — may have partial frontmatter" },
         hints: { type: "object", description: "Optional partial knowledge to improve suggestions" },
+        vault: VAULT_PARAM,
       },
       required: ["content"],
     },
@@ -240,6 +259,7 @@ const TOOLS: Tool[] = [
         title: { type: "string", description: "Proposed page title" },
         content: { type: "string", description: "Page body content" },
         threshold: { type: "number", description: "Similarity threshold 0-1 (default: 0.75)", default: 0.75 },
+        vault: VAULT_PARAM,
       },
       required: ["title", "content"],
     },
@@ -292,6 +312,7 @@ const TOOLS: Tool[] = [
         commit_message: { type: "string", description: "Git commit message (optional)" },
         pr_title: { type: "string", description: "GitHub PR title (optional)" },
         pr_body: { type: "string", description: "GitHub PR description body (optional)" },
+        vault: VAULT_PARAM,
       },
       required: ["path", "content"],
     },
@@ -432,70 +453,70 @@ function buildServer(): Server {
 
       switch (name) {
         case "knowledge_resolve_context":
-          result = await callKnowledgeAPI("/resolve-context", {
+          result = await callKnowledgeAPI("/resolve-context", withVault({
             repo: toolArgs.repo,
             include_full: toolArgs.include_full ?? false,
             mode: toolArgs.mode ?? "search",
-          });
+          }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_search":
-          result = await callKnowledgeAPI("/search", {
+          result = await callKnowledgeAPI("/search", withVault({
             query: toolArgs.query,
             mode: toolArgs.mode,
             type: toolArgs.type,
             scope: toolArgs.scope,
             limit: toolArgs.limit ?? 10,
-          });
+          }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_get_page":
-          result = await callKnowledgeAPI("/get-page", { id: toolArgs.id });
+          result = await callKnowledgeAPI("/get-page", withVault({ id: toolArgs.id }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_get_related":
-          result = await callKnowledgeAPI("/get-related", { id: toolArgs.id });
+          result = await callKnowledgeAPI("/get-related", withVault({ id: toolArgs.id }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_list_by_scope":
-          result = await callKnowledgeAPI("/list-by-scope", {
+          result = await callKnowledgeAPI("/list-by-scope", withVault({
             scope: toolArgs.scope,
             mode: toolArgs.mode,
             type: toolArgs.type,
             tags: toolArgs.tags,
             limit: toolArgs.limit ?? 50,
-          });
+          }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_validate_page":
-          result = await callKnowledgeAPI("/validate-page", { content: toolArgs.content });
+          result = await callKnowledgeAPI("/validate-page", withVault({ content: toolArgs.content }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_suggest_metadata":
-          result = await callKnowledgeAPI("/suggest-metadata", {
+          result = await callKnowledgeAPI("/suggest-metadata", withVault({
             content: toolArgs.content,
             hints: toolArgs.hints,
-          });
+          }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_check_duplicates":
-          result = await callKnowledgeAPI("/check-duplicates", {
+          result = await callKnowledgeAPI("/check-duplicates", withVault({
             title: toolArgs.title,
             content: toolArgs.content,
             threshold: toolArgs.threshold ?? 0.75,
-          });
+          }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_get_schema":
-          result = await callKnowledgeAPI("/schema", {});
+          result = await callKnowledgeAPI("/schema", withVault({}, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_registry_add":
-          result = await callKnowledgeAPI("/registry/add", {
+          result = await callKnowledgeAPI("/registry/add", withVault({
             registry: toolArgs.registry,
             entry: toolArgs.entry,
             via_pr: toolArgs.via_pr ?? false,
-          });
+          }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_write_page":
-          result = await callKnowledgeAPI("/write-page", {
+          result = await callKnowledgeAPI("/write-page", withVault({
             path: toolArgs.path,
             content: toolArgs.content,
             commit_message: toolArgs.commit_message,
             pr_title: toolArgs.pr_title,
             pr_body: toolArgs.pr_body,
-          });
+          }, toolArgs as Record<string, unknown>));
           break;
         case "knowledge_create_edge":
           result = await callKnowledgeAPI("/graph/edges", {
