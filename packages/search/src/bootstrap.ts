@@ -30,6 +30,8 @@ const BASE_SCHEMA: CollectionCreateSchema = {
     { name: 'confidence', type: 'int32', optional: true },
     { name: 'auto_generated', type: 'bool', facet: true, optional: true },
     { name: 'aliases', type: 'string[]', facet: true, optional: true },
+    // Vault UUID identity (optional — Anvil/Forge documents are unaffected)
+    { name: 'page_uuid', type: 'string', optional: true },
     // Forge-specific fields (optional — Anvil/Vault documents are unaffected)
     { name: 'local_path', type: 'string', optional: true },
     { name: 'remote_url', type: 'string', optional: true },
