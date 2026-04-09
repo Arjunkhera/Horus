@@ -29,6 +29,7 @@ import { handleCreateType, type CreateTypeInput } from '../tools/create-type.js'
 import { handleUpdateType, type UpdateTypeInput } from '../tools/update-type.js';
 import { handleExecuteView, type ExecuteViewInput } from '../tools/execute-view.js';
 import { handleRecurrenceSweep } from '../tools/recurrence-sweep.js';
+import { setupPersonalTaskDefaults } from '../setup/personal-task-defaults.js';
 import {
   CreateNoteInputSchema,
   GetNoteInputSchema,
@@ -670,6 +671,15 @@ export function createMcpServer(ctx: ToolContext): Server {
         required: ['entityId'],
       },
     },
+    {
+      name: 'anvil_setup_personal_tasks',
+      description:
+        'Create default nodes for the Personal Task Management system: areas (Inbox, Personal, Office), views (Today, Inbox, Upcoming, Weekly Review, Waiting On), and dashboard (Morning Briefing). Idempotent — skips existing nodes.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
   ];
 
   // Register ListTools handler
@@ -1241,6 +1251,11 @@ export function createMcpServer(ctx: ToolContext): Server {
             type: params.type,
           });
           return { content: [{ type: 'text', text: JSON.stringify({ entityId: params.entityId, descendants, total: descendants.length }) }] };
+        }
+
+        case 'anvil_setup_personal_tasks': {
+          const result = await setupPersonalTaskDefaults(ctx);
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
         }
 
         default:
