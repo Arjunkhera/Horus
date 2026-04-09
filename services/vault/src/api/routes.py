@@ -975,30 +975,32 @@ def _graph_unavailable_response():
     )
 
 
-def _create_edge_sync(request: CreateEdgeRequest, graph: Any) -> EdgeResponse:
+def _create_edge_sync(request: CreateEdgeRequest, graph: Any, registry=None) -> EdgeResponse:
     """Synchronous implementation of POST /graph/edges."""
+    source_id = _resolve_id(request.source_id, registry)
+    target_id = _resolve_id(request.target_id, registry)
     edge_type = EdgeType.from_str(request.edge_type)
     props = EdgeProperties(
         mechanism=request.properties.mechanism,
         role=request.properties.role,
     )
     edge = Edge(
-        source_id=request.source_id,
-        target_id=request.target_id,
+        source_id=source_id,
+        target_id=target_id,
         edge_type=edge_type,
         properties=props,
     )
     _create_edge(graph, edge)
     return EdgeResponse(
-        source_id=request.source_id,
-        target_id=request.target_id,
+        source_id=source_id,
+        target_id=target_id,
         edge_type=edge_type.value,
         properties=props.to_dict(),
     )
 
 
 @router.post("/graph/edges", response_model=EdgeResponse)
-async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends) -> Any:
+async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Create a directed edge between two knowledge pages in Neo4j.
 
@@ -1007,29 +1009,30 @@ async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends) -> 
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_create_edge_sync, request, graph)
+    return await asyncio.to_thread(_create_edge_sync, request, graph, registry)
 
 
-def _get_edges_sync(request: GetEdgesRequest, graph: Any) -> GetEdgesResponse:
+def _get_edges_sync(request: GetEdgesRequest, graph: Any, registry=None) -> GetEdgesResponse:
     """Synchronous implementation of POST /graph/edges/get."""
+    page_id = _resolve_id(request.page_id, registry)
     edge_type: "EdgeType | None" = None
     if request.edge_type:
         edge_type = EdgeType.from_str(request.edge_type)
-    raw_edges = _get_edges(graph, request.page_id, edge_type)
+    raw_edges = _get_edges(graph, page_id, edge_type)
     edges = [
         EdgeResponse(
-            source_id=request.page_id,
+            source_id=page_id,
             target_id=e["target_id"],
             edge_type=e["edge_type"],
             properties=e.get("properties", {}),
         )
         for e in raw_edges
     ]
-    return GetEdgesResponse(page_id=request.page_id, edges=edges)
+    return GetEdgesResponse(page_id=page_id, edges=edges)
 
 
 @router.post("/graph/edges/get", response_model=GetEdgesResponse)
-async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends) -> Any:
+async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Get all edges for a page, optionally filtered by edge type.
 
@@ -1038,18 +1041,20 @@ async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends) -> Any:
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_get_edges_sync, request, graph)
+    return await asyncio.to_thread(_get_edges_sync, request, graph, registry)
 
 
-def _delete_edge_sync(request: DeleteEdgeRequest, graph: Any) -> dict:
+def _delete_edge_sync(request: DeleteEdgeRequest, graph: Any, registry=None) -> dict:
     """Synchronous implementation of POST /graph/edges/delete."""
+    source_id = _resolve_id(request.source_id, registry)
+    target_id = _resolve_id(request.target_id, registry)
     edge_type = EdgeType.from_str(request.edge_type)
-    _delete_edge(graph, request.source_id, request.target_id, edge_type)
-    return {"deleted": True, "source_id": request.source_id, "target_id": request.target_id, "edge_type": edge_type.value}
+    _delete_edge(graph, source_id, target_id, edge_type)
+    return {"deleted": True, "source_id": source_id, "target_id": target_id, "edge_type": edge_type.value}
 
 
 @router.post("/graph/edges/delete")
-async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends) -> Any:
+async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Delete a specific directed edge between two pages.
 
@@ -1057,24 +1062,25 @@ async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends) -> 
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_delete_edge_sync, request, graph)
+    return await asyncio.to_thread(_delete_edge_sync, request, graph, registry)
 
 
-def _traverse_graph_sync(request: TraverseGraphRequest, graph: Any) -> TraverseGraphResponse:
+def _traverse_graph_sync(request: TraverseGraphRequest, graph: Any, registry=None) -> TraverseGraphResponse:
     """Synchronous implementation of POST /graph/traverse."""
+    start_id = _resolve_id(request.start_page_id, registry)
     edge_types: "list[EdgeType] | None" = None
     if request.edge_types:
         edge_types = [EdgeType.from_str(et) for et in request.edge_types]
-    pages = _traverse_graph(graph, request.start_page_id, edge_types, request.max_depth)
+    pages = _traverse_graph(graph, start_id, edge_types, request.max_depth)
     return TraverseGraphResponse(
-        start_page_id=request.start_page_id,
+        start_page_id=start_id,
         pages=pages,
         depth=request.max_depth,
     )
 
 
 @router.post("/graph/traverse", response_model=TraverseGraphResponse)
-async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDepends) -> Any:
+async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Traverse the knowledge graph from a starting page up to max_depth hops.
 
@@ -1083,7 +1089,7 @@ async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDe
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_traverse_graph_sync, request, graph)
+    return await asyncio.to_thread(_traverse_graph_sync, request, graph, registry)
 
 
 # ============================================================================
