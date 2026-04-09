@@ -92,7 +92,8 @@ export async function handleRecurrenceSweep(
       `SELECT note_id, title, due, recurrence
        FROM notes
        WHERE note_id = ? AND type = 'task' AND recurrence IS NOT NULL AND recurrence != ''
-         AND status = 'done'`,
+         AND status = 'done'
+         AND (last_swept_at IS NULL OR last_swept_at < modified)`,
       [input.taskId],
     )
   } else {
@@ -165,8 +166,12 @@ export async function handleRecurrenceSweep(
         continue
       }
 
-      // Update last_swept_at on the source task
-      db.run('UPDATE notes SET last_swept_at = ? WHERE note_id = ?', [now, task.note_id])
+      // Update last_swept_at on the source task (via normal update pipeline so it persists to frontmatter)
+      const { handleUpdateNote } = await import('./update-note.js')
+      await handleUpdateNote(
+        { noteId: task.note_id, content: undefined, fields: { last_swept_at: now } },
+        ctx,
+      )
     } catch (err) {
       result.errors.push(`Error sweeping task ${task.note_id}: ${(err as Error).message}`)
     }
