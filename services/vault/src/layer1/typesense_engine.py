@@ -120,6 +120,7 @@ class TypesenseSearchEngine(SearchStore):
 
         doc: dict = {
             "id": file_path,
+            "page_uuid": getattr(parsed, "id", "") or "",
             "source": SOURCE,
             "source_type": parsed.type or "concept",
             "title": parsed.title or "Untitled",
@@ -237,6 +238,7 @@ class TypesenseSearchEngine(SearchStore):
                         score=score,
                         snippet=snippet,
                         collection=fp.split("/")[0] if "/" in fp else "",
+                        id=doc.get("page_uuid") or None,
                     )
                 )
                 if len(results) >= limit:
@@ -283,6 +285,7 @@ class TypesenseSearchEngine(SearchStore):
                         score=1.0,
                         snippet=(doc.get("body") or "")[:200],
                         collection=fp.split("/")[0] if "/" in fp else "",
+                        id=doc.get("page_uuid") or None,
                     )
                 )
             return results

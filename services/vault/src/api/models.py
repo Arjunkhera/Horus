@@ -65,7 +65,8 @@ class PageSummary(BaseModel):
     Progressive disclosure object — description only, no body.
     Used in search results and listings to let agents filter before reading full pages.
     """
-    id: str = Field(..., description="File path of the page")
+    id: str = Field(..., description="UUIDv4 page identifier")
+    path: Optional[str] = Field(None, description="File path of the page (internal, for resolution)")
     title: str
     description: str = Field(..., description="~150 char summary for progressive disclosure")
     type: str = Field(..., description="Page type: repo-profile, guide, concept, procedure, keystone, learning")
@@ -139,8 +140,8 @@ class SearchResponse(BaseModel):
 # ============================================================================
 
 class GetPageRequest(BaseModel):
-    """Request to retrieve a full page by its identifier (file path or title)."""
-    id: str = Field(..., description="File path or title of the page to retrieve")
+    """Request to retrieve a full page by its identifier (UUID, file path, or title)."""
+    id: str = Field(..., description="UUID, file path, or title of the page to retrieve")
 
 
 # Response is PageFull directly
@@ -152,7 +153,7 @@ class GetPageRequest(BaseModel):
 
 class GetRelatedRequest(BaseModel):
     """Request to follow links from a page to find related pages."""
-    id: str = Field(..., description="File path or title of the source page")
+    id: str = Field(..., description="UUID, file path, or title of the source page")
 
 
 class GetRelatedResponse(BaseModel):

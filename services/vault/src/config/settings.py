@@ -34,6 +34,7 @@ class VaultSettings:
     github_token: str = ""
     github_repo: str = ""
     github_base_branch: str = "master"
+    github_api_host: str = ""
     neo4j_uri: str = "bolt://neo4j:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "horus-neo4j"
@@ -171,6 +172,7 @@ def load_settings(
         "GITHUB_TOKEN": ("github_token", str),
         "GITHUB_REPO": ("github_repo", str),
         "GITHUB_BASE_BRANCH": ("github_base_branch", str),
+        "GITHUB_API_HOST": ("github_api_host", str),
         "NEO4J_URI": ("neo4j_uri", str),
         "NEO4J_USER": ("neo4j_user", str),
         "NEO4J_PASSWORD": ("neo4j_password", str),

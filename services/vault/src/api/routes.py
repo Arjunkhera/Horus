@@ -90,8 +90,28 @@ from .models import (
 )
 
 
+import re
+
+# UUID v4 pattern for detecting UUID-based identifiers
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
+
 # Create router
 router = APIRouter()
+
+
+def _resolve_id(page_id: str, registry) -> str:
+    """
+    Resolve a page identifier to a file path.
+
+    If *page_id* looks like a UUID and a registry is available, resolve it
+    to the corresponding file path.  Otherwise return *page_id* unchanged
+    (assumed to already be a file path).
+    """
+    if registry and _UUID_RE.match(page_id):
+        resolved = registry.resolve(page_id)
+        if resolved:
+            return resolved
+    return page_id
 
 
 # Dependency to get SearchStore from app state
@@ -146,6 +166,19 @@ def get_settings() -> VaultSettings:
 
 
 SettingsDepends = Annotated[VaultSettings, Depends(get_settings)]
+
+
+def get_uuid_registry():
+    """
+    Dependency injection for UUIDRegistry.
+
+    Placeholder replaced via dependency_overrides in main.py.
+    Returns None if registry is not configured.
+    """
+    return None
+
+
+UUIDRegistryDepends = Annotated[Optional[Any], Depends(get_uuid_registry)]
 
 
 def get_graph() -> Optional[Any]:
@@ -408,36 +441,38 @@ async def search(request: SearchRequest, store: StoreDepends) -> SearchResponse:
     return await asyncio.to_thread(_search_sync, request, store)
 
 
-def _get_page_sync(request: GetPageRequest, store: SearchStore) -> PageFull:
+def _get_page_sync(request: GetPageRequest, store: SearchStore, registry=None) -> PageFull:
     """Synchronous implementation of get-page."""
-    content = store.get_document(request.id)
+    file_path = _resolve_id(request.id, registry)
+    content = store.get_document(file_path)
 
     if not content:
         raise not_found("Page", request.id)
 
     parsed = parse_page(content)
-    return to_page_full(parsed, request.id)
+    return to_page_full(parsed, file_path)
 
 
 @router.post("/get-page", response_model=PageFull)
-async def get_page(request: GetPageRequest, store: StoreDepends) -> PageFull:
-    """Retrieve a full page by its identifier (file path or title)."""
-    return await asyncio.to_thread(_get_page_sync, request, store)
+async def get_page(request: GetPageRequest, store: StoreDepends, registry: UUIDRegistryDepends = None) -> PageFull:
+    """Retrieve a full page by its identifier (UUID, file path, or title)."""
+    return await asyncio.to_thread(_get_page_sync, request, store, registry)
 
 
-def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None) -> GetRelatedResponse:
+def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None, registry=None) -> GetRelatedResponse:
     """Synchronous implementation of get-related.
 
     Tries graph-based edge traversal first (when graph client is available),
     then falls back to link_navigator frontmatter-based resolution.
     """
-    content = store.get_document(request.id)
+    file_path = _resolve_id(request.id, registry)
+    content = store.get_document(file_path)
 
     if not content:
         raise not_found("Page", request.id)
 
     parsed = parse_page(content)
-    source_summary = to_page_summary(parsed, request.id)
+    source_summary = to_page_summary(parsed, file_path)
 
     related_pages_tuples: list[tuple] = []
 
@@ -449,28 +484,28 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None
                 RETURN DISTINCT q.page_id AS id
                 LIMIT 50
                 """,
-                {"page_id": request.id}
+                {"page_id": file_path}
             )
             doc_cache = store.get_all_documents()
             for row in results:
-                page_id = row.get("id")
-                if not page_id:
+                related_path = row.get("id")
+                if not related_path:
                     continue
-                page_content = doc_cache.get(page_id) or store.get_document(page_id)
+                page_content = doc_cache.get(related_path) or store.get_document(related_path)
                 if page_content:
                     rel_parsed = parse_page(page_content)
-                    related_pages_tuples.append((rel_parsed, page_id))
+                    related_pages_tuples.append((rel_parsed, related_path))
         except Exception:
             logger.warning(
                 "Graph-based get-related failed for page '%s', falling back to link_navigator",
-                request.id,
+                file_path,
                 exc_info=True,
             )
             graph = None  # trigger fallback
 
     if graph is None:
         # Legacy link_navigator fallback — follows frontmatter relationship fields
-        related_pages_tuples = get_related_pages(parsed, store)
+        related_pages_tuples = get_related_pages(parsed, store, registry)
 
     related_summaries = to_summaries(related_pages_tuples)
 
@@ -485,13 +520,14 @@ async def get_related(
     request: GetRelatedRequest,
     store: StoreDepends,
     graph: GraphDepends,
+    registry: UUIDRegistryDepends = None,
 ) -> GetRelatedResponse:
     """Follow links from a page to find related pages.
 
     Uses Neo4j graph edge traversal when the graph client is available;
     falls back to link_navigator (frontmatter-based) otherwise.
     """
-    return await asyncio.to_thread(_get_related_sync, request, store, graph)
+    return await asyncio.to_thread(_get_related_sync, request, store, graph, registry)
 
 
 def _list_by_scope_sync(request: ListByScopeRequest, store: SearchStore) -> ListByScopeResponse:
@@ -727,6 +763,7 @@ def _registry_add_sync(
             github_token=settings.github_token,
             github_repo=settings.github_repo,
             base_branch=settings.github_base_branch,
+            github_api_host=settings.github_api_host,
         )
         pr_url, _ = writer.write_page(
             page_path=registry_rel_path,
@@ -768,8 +805,9 @@ async def registry_add(
     return await asyncio.to_thread(_registry_add_sync, request, loader, settings)
 
 
-def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: VaultSettings) -> WritePageResponse:
+def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: VaultSettings, registry=None) -> WritePageResponse:
     """Synchronous implementation of write-page."""
+    import uuid as _uuid
     import frontmatter as fm
     import hashlib
     from datetime import datetime
@@ -794,6 +832,19 @@ def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: 
         raise parse_error(
             f"Failed to parse YAML frontmatter: {e}",
             {"error_type": type(e).__name__}
+        )
+
+    # Ensure page has a UUID identity — generate one if missing
+    if not metadata.get("id"):
+        page_uuid = str(_uuid.uuid4())
+        post.metadata["id"] = page_uuid
+        # Re-serialize content with the new UUID in frontmatter
+        request = WritePageRequest(
+            path=request.path,
+            content=fm.dumps(post),
+            commit_message=request.commit_message,
+            pr_title=request.pr_title,
+            pr_body=request.pr_body,
         )
 
     # Validate against schema
@@ -851,6 +902,11 @@ def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: 
         extra={"commit_sha": commit_sha}
     )
 
+    # Update UUID registry with the new/updated page
+    page_uuid = post.metadata.get("id")
+    if registry and page_uuid:
+        registry.register(page_uuid, path)
+
     return WritePageResponse(
         pr_url=pr_url,
         branch=branch,
@@ -864,6 +920,7 @@ async def write_page(
     request: WritePageRequest,
     loader: SchemaLoaderDepends,
     settings: SettingsDepends,
+    registry: UUIDRegistryDepends = None,
 ) -> WritePageResponse:
     """
     Write a validated knowledge page to the knowledge-base repo, commit it to a new branch,
@@ -880,7 +937,7 @@ async def write_page(
 
     Requires GitHub configuration (GITHUB_TOKEN, GITHUB_REPO).
     """
-    return await asyncio.to_thread(_write_page_sync, request, loader, settings)
+    return await asyncio.to_thread(_write_page_sync, request, loader, settings, registry)
 
 
 # ============================================================================

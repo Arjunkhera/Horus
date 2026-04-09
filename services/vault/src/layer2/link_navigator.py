@@ -1,7 +1,7 @@
 """
 Link navigator for following relationships between knowledge pages.
 
-Follows wiki-links and the `related` field to discover connected pages.
+Follows wiki-links, UUIDs, and the `related` field to discover connected pages.
 This is the legacy fallback path used when the Neo4j graph client is unavailable.
 Edge fields (depends_on, consumed_by, applies_to) have been migrated to the graph (#968f4051).
 """
@@ -12,62 +12,55 @@ from typing import Optional
 from ..layer1.interface import SearchStore
 from .frontmatter import ParsedPage, parse_page
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
-def get_related_pages(page: ParsedPage, store: SearchStore) -> list[tuple[ParsedPage, str]]:
+
+def get_related_pages(
+    page: ParsedPage, store: SearchStore, registry=None
+) -> list[tuple[ParsedPage, str]]:
     """
     Follow links from a page to find all related pages.
 
-    Strategy:
-    1. Collect references from the page's relationship fields:
-       - related: explicitly linked pages
-    2. Extract reference text from various formats:
-       - Wiki-links: [[Page Title]] → "Page Title"
-       - Dict refs: {"repo": "name"} → "name"
-       - Plain strings: "name" → "name"
-    3. Search for each reference in the store
-    4. Parse and verify matches
-    5. Return deduplicated list of (ParsedPage, file_path) tuples
-
-    Note: depends_on, consumed_by, and applies_to were edge fields that have
-    been migrated to the Neo4j graph (#968f4051). This fallback now follows
-    only the `related` frontmatter field.
+    Resolution order per reference:
+    1. If the reference is a UUID and a registry is available → resolve directly
+    2. Otherwise fall back to search-based resolution (wiki-links, dicts, strings)
 
     Args:
         page: Source ParsedPage to follow links from
         store: SearchStore instance for searching
+        registry: Optional UUIDRegistry for direct UUID resolution
 
     Returns:
         List of (ParsedPage, file_path) tuples for all related pages found
         Deduplicated by file_path.
-
-    Example:
-        >>> page = ParsedPage(
-        ...     title="Document Service",
-        ...     related=["[[Search Service]]", {"repo": "auth-service"}],
-        ... )
-        >>> related = get_related_pages(page, store)
-        >>> # Returns pages for Search Service, auth-service
     """
-    # Collect all reference fields into a single list
-    all_references = []
-    all_references.extend(page.related)
-    
-    # Extract reference text from each item
-    reference_texts = []
+    all_references: list = list(page.related)
+
+    found_pages: dict[str, tuple[ParsedPage, str]] = {}
+
     for ref in all_references:
+        # Try UUID resolution first
+        ref_str = str(ref).strip() if isinstance(ref, str) else ""
+        if registry and ref_str and _UUID_RE.match(ref_str):
+            file_path = registry.resolve(ref_str)
+            if file_path and file_path not in found_pages:
+                content = store.get_document(file_path)
+                if content:
+                    parsed = parse_page(content)
+                    found_pages[file_path] = (parsed, file_path)
+                    continue
+
+        # Fall back to text-based search
         extracted = _extract_reference_text(ref)
         if extracted:
-            reference_texts.append(extracted)
-    
-    # Search for each reference and collect matches
-    found_pages = {}  # Use dict to deduplicate by file_path
-    
-    for ref_text in reference_texts:
-        matches = _search_for_reference(ref_text, store)
-        for parsed, path in matches:
-            if path not in found_pages:
-                found_pages[path] = (parsed, path)
-    
+            matches = _search_for_reference(extracted, store)
+            for parsed, path in matches:
+                if path not in found_pages:
+                    found_pages[path] = (parsed, path)
+
     return list(found_pages.values())
 
 

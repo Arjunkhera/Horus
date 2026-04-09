@@ -26,11 +26,12 @@ from .config.settings import load_settings
 from .layer1.typesense_engine import TypesenseSearchEngine
 from .layer1.filesystem_store import FilesystemStore
 from .layer2.schema import SchemaLoader
-from .api.routes import router, get_store, get_schema_loader, get_settings, get_graph
+from .api.routes import router, get_store, get_schema_loader, get_settings, get_graph, get_uuid_registry
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
 from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
 from .graph import GraphClient, GraphConnectionError
 from .layer2.graph_export import import_graph
+from .layer2.uuid_registry import UUIDRegistry
 
 
 # Configure logging
@@ -108,6 +109,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("%s index build failed (non-fatal): %s", engine_name, e)
 
+    # Build UUID registry from page frontmatter
+    uuid_registry = UUIDRegistry()
+    try:
+        uuid_registry.build(settings.knowledge_repo_path)
+        logger.info("UUID registry ready: %d pages", uuid_registry.count())
+    except Exception as e:
+        logger.warning("UUID registry build failed (non-fatal): %s", e)
+
+    app.state.uuid_registry = uuid_registry
+
     # Store search engine in app state for dependency injection
     app.state.store = store
 
@@ -147,13 +158,18 @@ async def lifespan(app: FastAPI):
     app.state.graph = graph_client
 
     # Start sync daemon (git pull loop + workspace watcher)
+    # Rebuild UUID registry after each successful reindex
+    def _rebuild_registry():
+        uuid_registry.build(settings.knowledge_repo_path)
+
     logger.info("Starting sync daemon...")
     git_pull_task, workspace_observer = await start_sync_daemon(
         store=store,
         knowledge_repo_path=settings.knowledge_repo_path,
         workspace_path=settings.workspace_path,
         sync_interval=settings.sync_interval,
-        debounce_seconds=5.0
+        debounce_seconds=5.0,
+        on_reindex=_rebuild_registry,
     )
 
     app.state.git_pull_task = git_pull_task
@@ -259,6 +275,14 @@ def get_graph_override(request: Request):
 
 
 app.dependency_overrides[get_graph] = get_graph_override
+
+
+def get_uuid_registry_override(request: Request):
+    """Dependency override to inject UUIDRegistry from app state."""
+    return getattr(request.app.state, "uuid_registry", None)
+
+
+app.dependency_overrides[get_uuid_registry] = get_uuid_registry_override
 
 # Include API routes
 app.include_router(router, prefix="", tags=["knowledge"])

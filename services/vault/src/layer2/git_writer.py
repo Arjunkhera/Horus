@@ -30,7 +30,8 @@ class GitWriter:
         repo_path: str,
         github_token: str,
         github_repo: str,
-        base_branch: str = "master"
+        base_branch: str = "master",
+        github_api_host: str = "",
     ) -> None:
         """
         Initialize GitWriter.
@@ -40,11 +41,19 @@ class GitWriter:
             github_token: GitHub personal access token (with repo scope)
             github_repo: GitHub repo in format "owner/repo" (e.g., "arkhera/knowledge-base")
             base_branch: Base branch to branch from (default: "master")
+            github_api_host: GitHub API hostname (empty → api.github.com; set for GHE)
         """
         self.repo_path = repo_path
         self.github_token = github_token
         self.github_repo = github_repo
         self.base_branch = base_branch
+
+        # Construct API base URL: public GitHub vs GitHub Enterprise
+        host = (github_api_host or "").strip()
+        if not host or host == "github.com":
+            self._api_base = "https://api.github.com"
+        else:
+            self._api_base = f"https://{host}/api/v3"
 
     def write_page(
         self,
@@ -197,7 +206,7 @@ class GitWriter:
             raise github_api_error("httpx library not available")
 
         try:
-            url = f"https://api.github.com/repos/{self.github_repo}/pulls"
+            url = f"{self._api_base}/repos/{self.github_repo}/pulls"
             headers = {
                 "Authorization": f"Bearer {self.github_token}",
                 "Accept": "application/vnd.github+json",
