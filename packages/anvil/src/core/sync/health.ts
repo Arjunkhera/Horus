@@ -51,16 +51,20 @@ export function isHealthCritical(state: SyncHealthState): boolean {
   if (state.pushConsecutiveFailures >= 3) return true;
   if (state.conflictBranch !== null) return true;
 
-  if (
-    state.lastPushAttempt !== null &&
-    state.lastPushSuccess !== null &&
-    Date.now() - new Date(state.lastPushSuccess).getTime() > PUSH_STALE_MS
-  ) {
-    return true;
-  }
+  // Push staleness only matters when there are pending files — if nothing
+  // changed, lastPushSuccess naturally ages without indicating a problem.
+  if (state.pendingFiles > 0 || state.aheadBy > 0) {
+    if (
+      state.lastPushAttempt !== null &&
+      state.lastPushSuccess !== null &&
+      Date.now() - new Date(state.lastPushSuccess).getTime() > PUSH_STALE_MS
+    ) {
+      return true;
+    }
 
-  if (state.lastPushAttempt !== null && state.lastPushSuccess === null) {
-    return true;
+    if (state.lastPushAttempt !== null && state.lastPushSuccess === null) {
+      return true;
+    }
   }
 
   // Detect dead sync loop: daemon claims alive but no cycle in 3x the interval
