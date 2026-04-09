@@ -44,43 +44,53 @@ class UUIDRegistry:
 
     # -- bulk build ----------------------------------------------------------
 
-    def build(self, knowledge_repo_path: str) -> None:
+    def build(self, knowledge_repo_path: str, collection_paths: Optional[dict[str, str]] = None) -> None:
         """
-        Scan all .md files under *knowledge_repo_path*, parse frontmatter,
-        and populate both maps.  Existing entries are replaced.
+        Scan all .md files and populate both maps.  Existing entries are replaced.
+
+        If *collection_paths* is provided (e.g. ``{"shared": "/data/knowledge-repo"}``),
+        paths are stored with the collection prefix (``shared/repos/horus.md``) so they
+        match what ``SearchStore.get_document()`` expects.  Otherwise falls back to
+        scanning *knowledge_repo_path* under a ``"shared"`` prefix.
         """
         self._uuid_to_path.clear()
         self._path_to_uuid.clear()
 
-        base = Path(knowledge_repo_path)
-        md_files = sorted(base.rglob("*.md"))
-        # Exclude hidden dirs and _schema/
-        md_files = [
-            f for f in md_files
-            if not any(
-                part.startswith(".") or part.startswith("_")
-                for part in f.relative_to(base).parts
-            )
-        ]
+        if collection_paths is None:
+            collection_paths = {"shared": knowledge_repo_path}
 
         skipped = 0
-        for md_file in md_files:
-            try:
-                content = md_file.read_text(encoding="utf-8")
-                parsed = parse_page(content)
-                rel_path = str(md_file.relative_to(base))
+        for collection_name, root_path in collection_paths.items():
+            base = Path(root_path)
+            if not base.exists():
+                continue
+            md_files = sorted(base.rglob("*.md"))
+            # Exclude hidden dirs and _schema/
+            md_files = [
+                f for f in md_files
+                if not any(
+                    part.startswith(".") or part.startswith("_")
+                    for part in f.relative_to(base).parts
+                )
+            ]
 
-                if not parsed.id:
+            for md_file in md_files:
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    parsed = parse_page(content)
+                    rel_path = f"{collection_name}/{md_file.relative_to(base)}"
+
+                    if not parsed.id:
+                        skipped += 1
+                        logger.warning("Page has no id, skipping: %s", rel_path)
+                        continue
+
+                    self._uuid_to_path[parsed.id] = rel_path
+                    self._path_to_uuid[rel_path] = parsed.id
+
+                except Exception as exc:
                     skipped += 1
-                    logger.warning("Page has no id, skipping: %s", rel_path)
-                    continue
-
-                self._uuid_to_path[parsed.id] = rel_path
-                self._path_to_uuid[rel_path] = parsed.id
-
-            except Exception as exc:
-                skipped += 1
-                logger.warning("Failed to parse %s: %s", md_file, exc)
+                    logger.warning("Failed to parse %s: %s", md_file, exc)
 
         logger.info(
             "UUID registry built: %d pages indexed, %d skipped",

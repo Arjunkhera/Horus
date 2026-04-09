@@ -109,10 +109,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("%s index build failed (non-fatal): %s", engine_name, e)
 
-    # Build UUID registry from page frontmatter
+    # Build UUID registry from page frontmatter (collection-prefixed paths)
     uuid_registry = UUIDRegistry()
     try:
-        uuid_registry.build(settings.knowledge_repo_path)
+        uuid_registry.build(settings.knowledge_repo_path, collection_paths)
         logger.info("UUID registry ready: %d pages", uuid_registry.count())
     except Exception as e:
         logger.warning("UUID registry build failed (non-fatal): %s", e)
@@ -160,7 +160,7 @@ async def lifespan(app: FastAPI):
     # Start sync daemon (git pull loop + workspace watcher)
     # Rebuild UUID registry after each successful reindex
     def _rebuild_registry():
-        uuid_registry.build(settings.knowledge_repo_path)
+        uuid_registry.build(settings.knowledge_repo_path, collection_paths)
 
     logger.info("Starting sync daemon...")
     git_pull_task, workspace_observer = await start_sync_daemon(
