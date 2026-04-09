@@ -505,7 +505,7 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None
 
     if graph is None:
         # Legacy link_navigator fallback — follows frontmatter relationship fields
-        related_pages_tuples = get_related_pages(parsed, store)
+        related_pages_tuples = get_related_pages(parsed, store, registry)
 
     related_summaries = to_summaries(related_pages_tuples)
 
