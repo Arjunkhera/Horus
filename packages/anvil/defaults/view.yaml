@@ -1,0 +1,35 @@
+id: view
+name: View
+description: "Saved query definition for displaying filtered, sorted, and grouped results"
+icon: "eye"
+fields:
+  query:
+    type: object
+    required: true
+    search_mode: none
+  format:
+    type: enum
+    values: [board, table, list, count]
+    default: list
+    required: false
+    search_mode: term
+  group_by:
+    type: string
+    required: false
+    search_mode: none
+  sort_by:
+    type: string
+    required: false
+    search_mode: none
+  description:
+    type: text
+    required: false
+    search_mode: text
+template:
+  frontmatter:
+    format: list
+    tags: []
+  body: |
+    ## Description
+
+    ## Query Notes

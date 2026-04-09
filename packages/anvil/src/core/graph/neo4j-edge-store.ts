@@ -252,6 +252,121 @@ export class Neo4jEdgeStore {
   }
 
   // ---------------------------------------------------------------------------
+  // Graph traversal operations
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get direct children of an entity via a specific intent (default: parent_of).
+   *
+   * Returns the child nodes with their metadata. Optionally filters by
+   * child type and/or status.
+   *
+   * @param entityId   - The parent entity ID.
+   * @param options    - Optional filters: intent, type, status.
+   */
+  async getChildren(
+    entityId: string,
+    options?: { intent?: string; type?: string; status?: string },
+  ): Promise<Array<{ id: string; title: string; type: string; status?: string; priority?: string; due?: string }>> {
+    const intent = options?.intent ?? 'parent_of'
+    const session = this.session()
+    try {
+      let typeClause = ''
+      let statusClause = ''
+      const params: Record<string, string> = { entityId, intent }
+
+      if (options?.type) {
+        typeClause = ' AND child.type = $childType'
+        params.childType = options.type
+      }
+      if (options?.status) {
+        statusClause = ' AND child.status = $childStatus'
+        params.childStatus = options.status
+      }
+
+      const result = await session.run(
+        `MATCH (parent:${NODE_LABEL} {id: $entityId})-[r:${REL_TYPE} {intent: $intent}]->(child:${NODE_LABEL})
+         WHERE true${typeClause}${statusClause}
+         RETURN child.id       AS id,
+                child.title    AS title,
+                child.type     AS type,
+                child.status   AS status,
+                child.priority AS priority,
+                child.due      AS due
+         ORDER BY child.title`,
+        params,
+      )
+
+      return result.records.map((record) => ({
+        id: record.get('id') as string,
+        title: record.get('title') as string,
+        type: record.get('type') as string,
+        status: (record.get('status') as string) || undefined,
+        priority: (record.get('priority') as string) || undefined,
+        due: (record.get('due') as string) || undefined,
+      }))
+    } finally {
+      await session.close()
+    }
+  }
+
+  /**
+   * Get the full subtree under an entity via a specific intent (default: parent_of).
+   *
+   * Returns all descendants with depth information. Uses variable-length
+   * path matching for recursive traversal.
+   *
+   * @param entityId  - The root entity ID.
+   * @param options   - Optional: intent, maxDepth (default 10), type filter.
+   */
+  async getSubtree(
+    entityId: string,
+    options?: { intent?: string; maxDepth?: number; type?: string },
+  ): Promise<Array<{ id: string; title: string; type: string; depth: number; status?: string; priority?: string }>> {
+    const intent = options?.intent ?? 'parent_of'
+    const maxDepth = options?.maxDepth ?? 10
+    const session = this.session()
+    try {
+      let typeClause = ''
+      const params: Record<string, unknown> = {
+        entityId,
+        intent,
+        maxDepth: neo4j.int(maxDepth),
+      }
+
+      if (options?.type) {
+        typeClause = ' AND descendant.type = $childType'
+        params.childType = options.type
+      }
+
+      const result = await session.run(
+        `MATCH path = (root:${NODE_LABEL} {id: $entityId})-[r:${REL_TYPE} *1..]->(descendant:${NODE_LABEL})
+         WHERE ALL(rel IN relationships(path) WHERE rel.intent = $intent)
+           AND length(path) <= $maxDepth${typeClause}
+         RETURN descendant.id       AS id,
+                descendant.title    AS title,
+                descendant.type     AS type,
+                descendant.status   AS status,
+                descendant.priority AS priority,
+                length(path)        AS depth
+         ORDER BY depth, descendant.title`,
+        params,
+      )
+
+      return result.records.map((record) => ({
+        id: record.get('id') as string,
+        title: record.get('title') as string,
+        type: record.get('type') as string,
+        depth: neo4j.integer.toNumber(record.get('depth')),
+        status: (record.get('status') as string) || undefined,
+        priority: (record.get('priority') as string) || undefined,
+      }))
+    } finally {
+      await session.close()
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Bulk operations
   // ---------------------------------------------------------------------------
 

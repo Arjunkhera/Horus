@@ -27,6 +27,8 @@ import { handleDeleteEdge, type DeleteEdgeParams } from '../tools/delete-edge.js
 import { handleGetEdges, type GetEdgesParams } from '../tools/get-edges.js';
 import { handleCreateType, type CreateTypeInput } from '../tools/create-type.js';
 import { handleUpdateType, type UpdateTypeInput } from '../tools/update-type.js';
+import { handleExecuteView, type ExecuteViewInput } from '../tools/execute-view.js';
+import { handleRecurrenceSweep } from '../tools/recurrence-sweep.js';
 import {
   CreateNoteInputSchema,
   GetNoteInputSchema,
@@ -585,6 +587,89 @@ export function createMcpServer(ctx: ToolContext): Server {
         required: ['typeId', 'fields'],
       },
     },
+    {
+      name: 'anvil_execute_view',
+      description:
+        'Execute a saved view by reading its query definition and returning formatted results. Pass the view node ID to run its saved query.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          viewId: {
+            type: 'string',
+            description: 'UUID of the view node to execute',
+          },
+        },
+        required: ['viewId'],
+      },
+    },
+    {
+      name: 'anvil_recurrence_sweep',
+      description:
+        'Run the recurrence sweep to generate next instances of completed recurring tasks. Pass a taskId to sweep a single task, or omit for a full catchup sweep.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          taskId: {
+            type: 'string',
+            description: 'Optional: UUID of a specific completed recurring task to sweep. If omitted, sweeps all eligible tasks.',
+          },
+        },
+      },
+    },
+    {
+      name: 'anvil_get_children',
+      description:
+        'Get direct children of an entity via the parent_of edge intent. Returns child nodes with metadata. Supports optional type and status filters.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          entityId: {
+            type: 'string',
+            description: 'UUID of the parent entity',
+          },
+          intent: {
+            type: 'string',
+            description: 'Edge intent to traverse (default: parent_of)',
+          },
+          type: {
+            type: 'string',
+            description: 'Filter children by type (e.g., "task")',
+          },
+          status: {
+            type: 'string',
+            description: 'Filter children by status (e.g., "open")',
+          },
+        },
+        required: ['entityId'],
+      },
+    },
+    {
+      name: 'anvil_get_subtree',
+      description:
+        'Get the full subtree (recursive descendants) under an entity via the parent_of edge intent. Returns all descendants with depth information.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          entityId: {
+            type: 'string',
+            description: 'UUID of the root entity',
+          },
+          intent: {
+            type: 'string',
+            description: 'Edge intent to traverse (default: parent_of)',
+          },
+          maxDepth: {
+            type: 'number',
+            description: 'Maximum traversal depth (default: 10)',
+          },
+          type: {
+            type: 'string',
+            description: 'Filter descendants by type',
+          },
+        },
+        required: ['entityId'],
+      },
+    },
   ];
 
   // Register ListTools handler
@@ -1100,6 +1185,62 @@ export function createMcpServer(ctx: ToolContext): Server {
             };
           }
           return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_execute_view': {
+          const params = args as unknown as ExecuteViewInput;
+          const result = await handleExecuteView(params, ctx);
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_recurrence_sweep': {
+          const params = args as { taskId?: string };
+          const result = await handleRecurrenceSweep(params, ctx);
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        }
+
+        case 'anvil_get_children': {
+          if (!ctx.edgeStore) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 graph subsystem not available — Neo4j required')) }],
+              isError: true,
+            };
+          }
+          const params = args as { entityId: string; intent?: string; type?: string; status?: string };
+          const children = await ctx.edgeStore.getChildren(params.entityId, {
+            intent: params.intent,
+            type: params.type,
+            status: params.status,
+          });
+          return { content: [{ type: 'text', text: JSON.stringify({ entityId: params.entityId, children, total: children.length }) }] };
+        }
+
+        case 'anvil_get_subtree': {
+          if (!ctx.edgeStore) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(makeError('SERVER_ERROR', 'V2 graph subsystem not available — Neo4j required')) }],
+              isError: true,
+            };
+          }
+          const params = args as { entityId: string; intent?: string; maxDepth?: number; type?: string };
+          const descendants = await ctx.edgeStore.getSubtree(params.entityId, {
+            intent: params.intent,
+            maxDepth: params.maxDepth,
+            type: params.type,
+          });
+          return { content: [{ type: 'text', text: JSON.stringify({ entityId: params.entityId, descendants, total: descendants.length }) }] };
         }
 
         default:
