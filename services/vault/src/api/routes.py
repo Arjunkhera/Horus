@@ -804,8 +804,9 @@ async def registry_add(
     return await asyncio.to_thread(_registry_add_sync, request, loader, settings)
 
 
-def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: VaultSettings) -> WritePageResponse:
+def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: VaultSettings, registry=None) -> WritePageResponse:
     """Synchronous implementation of write-page."""
+    import uuid as _uuid
     import frontmatter as fm
     import hashlib
     from datetime import datetime
@@ -830,6 +831,19 @@ def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: 
         raise parse_error(
             f"Failed to parse YAML frontmatter: {e}",
             {"error_type": type(e).__name__}
+        )
+
+    # Ensure page has a UUID identity — generate one if missing
+    if not metadata.get("id"):
+        page_uuid = str(_uuid.uuid4())
+        post.metadata["id"] = page_uuid
+        # Re-serialize content with the new UUID in frontmatter
+        request = WritePageRequest(
+            path=request.path,
+            content=fm.dumps(post),
+            commit_message=request.commit_message,
+            pr_title=request.pr_title,
+            pr_body=request.pr_body,
         )
 
     # Validate against schema
@@ -887,6 +901,11 @@ def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: 
         extra={"commit_sha": commit_sha}
     )
 
+    # Update UUID registry with the new/updated page
+    page_uuid = post.metadata.get("id")
+    if registry and page_uuid:
+        registry.register(page_uuid, path)
+
     return WritePageResponse(
         pr_url=pr_url,
         branch=branch,
@@ -900,6 +919,7 @@ async def write_page(
     request: WritePageRequest,
     loader: SchemaLoaderDepends,
     settings: SettingsDepends,
+    registry: UUIDRegistryDepends = None,
 ) -> WritePageResponse:
     """
     Write a validated knowledge page to the knowledge-base repo, commit it to a new branch,
@@ -916,7 +936,7 @@ async def write_page(
 
     Requires GitHub configuration (GITHUB_TOKEN, GITHUB_REPO).
     """
-    return await asyncio.to_thread(_write_page_sync, request, loader, settings)
+    return await asyncio.to_thread(_write_page_sync, request, loader, settings, registry)
 
 
 # ============================================================================

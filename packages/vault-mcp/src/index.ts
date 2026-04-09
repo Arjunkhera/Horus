@@ -283,12 +283,12 @@ const TOOLS: Tool[] = [
     name: "knowledge_write_page",
     description:
       "Write a validated knowledge page to the knowledge-base repo, commit it to a new branch, " +
-      "and open a GitHub PR for human review. Returns the PR URL.",
+      "and open a GitHub PR for human review. A UUID is auto-generated if not present in frontmatter. Returns the PR URL.",
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Relative page path, e.g. 'repos/anvil.md'" },
-        content: { type: "string", description: "Full markdown content with YAML frontmatter" },
+        content: { type: "string", description: "Full markdown content with YAML frontmatter (UUID auto-generated if missing)" },
         commit_message: { type: "string", description: "Git commit message (optional)" },
         pr_title: { type: "string", description: "GitHub PR title (optional)" },
         pr_body: { type: "string", description: "GitHub PR description body (optional)" },
