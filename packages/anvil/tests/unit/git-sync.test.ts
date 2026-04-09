@@ -136,6 +136,22 @@ describe('Git Sync Operations', () => {
       expect(status).toContain('?? readme.txt'); // txt file should not be staged
     });
 
+    it('should stage custom-types yaml files', async () => {
+      // Create custom type file
+      await fs.mkdir(join(tmpDir, 'custom-types'), { recursive: true });
+      await fs.writeFile(join(tmpDir, 'custom-types', 'my-type.yaml'), 'name: My Type');
+
+      const result = await syncPush(tmpDir, 'Add custom type');
+      expect(isAnvilError(result)).toBe(false);
+      if (!isAnvilError(result)) {
+        expect(['ok', 'push_failed']).toContain(result.status);
+      }
+
+      // Verify custom type was committed
+      const status = execSync('git status --porcelain', { cwd: tmpDir }).toString();
+      expect(status).not.toContain('custom-types/my-type.yaml');
+    });
+
     it('should never stage .anvil/.local/ directory', async () => {
       // Create files in .anvil/.local
       await fs.mkdir(join(tmpDir, '.anvil', '.local'), { recursive: true });
