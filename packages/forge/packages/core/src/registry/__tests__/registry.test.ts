@@ -150,15 +150,21 @@ describe('Registry', () => {
   });
 
   describe('publish()', () => {
-    it('writes artifact to adapter', async () => {
+    it('writes artifact to adapter in versioned directory', async () => {
       const bundle = {
         meta: { id: 'new-skill', name: 'New Skill', version: '1.0.0', description: 'Test', type: 'skill' as const, tags: [], dependencies: {}, files: [] },
         content: '# New Skill',
         contentPath: 'SKILL.md',
       };
       await registry.publish('skill', 'new-skill', bundle);
-      const exists = await new FilesystemAdapter(tmpDir).exists('skill', 'new-skill');
+      const adapter = new FilesystemAdapter(tmpDir);
+      const exists = await adapter.exists('skill', 'new-skill');
       expect(exists).toBe(true);
+
+      // Verify versioned directory layout
+      const versionDir = path.join(tmpDir, 'skills', 'new-skill', '1.0.0');
+      const metaExists = await fs.access(path.join(versionDir, 'metadata.yaml')).then(() => true, () => false);
+      expect(metaExists).toBe(true);
     });
   });
 });
