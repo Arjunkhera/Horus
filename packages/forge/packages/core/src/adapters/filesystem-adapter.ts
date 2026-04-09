@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { createHash } from 'crypto';
 import path from 'path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import * as semver from 'semver';
@@ -11,7 +12,7 @@ import {
   PersonaMetaSchema,
   WorkspaceConfigMetaSchema,
 } from '../models/index.js';
-import { ArtifactNotFoundError, InvalidMetadataError } from './errors.js';
+import { ArtifactNotFoundError, InvalidMetadataError, VersionConflictError } from './errors.js';
 
 // Directory names for each artifact type
 const TYPE_DIRS: Record<ArtifactType, string> = {
@@ -310,32 +311,48 @@ export class FilesystemAdapter implements DataAdapter {
   async write(type: ArtifactType, rawId: string, bundle: ArtifactBundle): Promise<void> {
     const { id } = parseVersionedId(rawId);
     const version = bundle.meta.version;
+    const versionDir = path.join(this.artifactDir(type, id), version);
 
-    // Determine target directory based on existing layout:
-    // - If the artifact already uses versioned layout, write to version subdir
-    // - If the artifact already uses flat layout (metadata.yaml at root), overwrite in place
-    // - If the artifact doesn't exist yet, use flat layout (backward compatible)
-    const baseDir = this.artifactDir(type, id);
-    const existingVersions = await this.detectVersions(baseDir);
-
-    let targetDir: string;
-    if (existingVersions !== null) {
-      // Already versioned layout — write to version subdir
-      targetDir = path.join(baseDir, version);
-    } else {
-      // Flat layout (existing or new) — write to base dir
-      targetDir = baseDir;
+    // Check for version conflict before writing
+    try {
+      await fs.access(versionDir);
+      throw new VersionConflictError(type, id, version);
+    } catch (err: any) {
+      if (err instanceof VersionConflictError) throw err;
+      // ENOENT is expected — directory doesn't exist yet
     }
 
-    await fs.mkdir(targetDir, { recursive: true });
+    await fs.mkdir(versionDir, { recursive: true });
 
-    const metaPath = path.join(targetDir, 'metadata.yaml');
-    await fs.writeFile(metaPath, stringifyYaml(bundle.meta), 'utf-8');
+    // Write metadata.yaml
+    const metaYaml = stringifyYaml(bundle.meta);
+    await fs.writeFile(path.join(versionDir, 'metadata.yaml'), metaYaml, 'utf-8');
 
+    // Write content file (SKILL.md, AGENT.md, etc.)
+    const contentFile = CONTENT_FILES[type];
+    let contentData = '';
     if (bundle.content) {
-      const contentPath = path.join(targetDir, CONTENT_FILES[type]);
-      await fs.writeFile(contentPath, bundle.content, 'utf-8');
+      contentData = bundle.content;
+      await fs.writeFile(path.join(versionDir, contentFile), contentData, 'utf-8');
     }
+
+    // Generate and write manifest.yaml with SHA256 checksums
+    const manifestFiles: Array<{ name: string; sha256: string }> = [
+      { name: 'metadata.yaml', sha256: this.sha256(metaYaml) },
+    ];
+    if (contentData) {
+      manifestFiles.push({ name: contentFile, sha256: this.sha256(contentData) });
+    }
+    const manifest = {
+      version,
+      files: manifestFiles,
+      published_at: new Date().toISOString(),
+    };
+    await fs.writeFile(path.join(versionDir, 'manifest.yaml'), stringifyYaml(manifest), 'utf-8');
+  }
+
+  private sha256(data: string): string {
+    return createHash('sha256').update(data, 'utf-8').digest('hex');
   }
 
   async readResourceFile(type: ArtifactType, rawId: string, relativePath: string): Promise<string | null> {

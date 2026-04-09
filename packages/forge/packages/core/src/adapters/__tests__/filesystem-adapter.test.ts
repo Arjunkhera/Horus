@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { stringify as toYaml } from 'yaml';
+import { stringify as toYaml, parse as parseYaml } from 'yaml';
 import { FilesystemAdapter } from '../filesystem-adapter.js';
-import { ArtifactNotFoundError, InvalidMetadataError } from '../errors.js';
+import { ArtifactNotFoundError, InvalidMetadataError, VersionConflictError } from '../errors.js';
 
 describe('FilesystemAdapter', () => {
   let tmpDir: string;
@@ -347,7 +347,7 @@ Tabs:	here	and	there.
   });
 
   describe('write()', () => {
-    it('creates artifact directory and writes metadata and content', async () => {
+    it('creates versioned directory and writes metadata, content, and manifest', async () => {
       const bundle = {
         meta: {
           id: 'new-skill',
@@ -363,13 +363,118 @@ Tabs:	here	and	there.
         contentPath: 'SKILL.md',
       };
       await adapter.write('skill', 'new-skill', bundle);
+
+      // Verify versioned directory layout
+      const versionDir = path.join(tmpDir, 'skills', 'new-skill', '1.0.0');
+      const metaExists = await fs.access(path.join(versionDir, 'metadata.yaml')).then(() => true, () => false);
+      const contentExists = await fs.access(path.join(versionDir, 'SKILL.md')).then(() => true, () => false);
+      const manifestExists = await fs.access(path.join(versionDir, 'manifest.yaml')).then(() => true, () => false);
+      expect(metaExists).toBe(true);
+      expect(contentExists).toBe(true);
+      expect(manifestExists).toBe(true);
+
+      // Verify read-back works
       expect(await adapter.exists('skill', 'new-skill')).toBe(true);
       const readBack = await adapter.read('skill', 'new-skill');
       expect(readBack.meta.id).toBe('new-skill');
       expect(readBack.content).toBe('# New Skill\nHello.');
     });
 
-    it('writes agent with AGENT.md', async () => {
+    it('generates manifest.yaml with correct SHA256 checksums', async () => {
+      const bundle = {
+        meta: {
+          id: 'manifest-test',
+          name: 'Manifest Test',
+          version: '1.0.0',
+          description: 'Test manifest generation',
+          type: 'skill' as const,
+          tags: [],
+          dependencies: {},
+          files: [],
+        },
+        content: '# Manifest Test',
+        contentPath: 'SKILL.md',
+      };
+      await adapter.write('skill', 'manifest-test', bundle);
+
+      const manifestPath = path.join(tmpDir, 'skills', 'manifest-test', '1.0.0', 'manifest.yaml');
+      const manifestRaw = await fs.readFile(manifestPath, 'utf-8');
+      const manifest = parseYaml(manifestRaw);
+      expect(manifest.version).toBe('1.0.0');
+      expect(manifest.files).toHaveLength(2);
+      expect(manifest.files[0].name).toBe('metadata.yaml');
+      expect(manifest.files[0].sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(manifest.files[1].name).toBe('SKILL.md');
+      expect(manifest.files[1].sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(manifest.published_at).toBeTruthy();
+    });
+
+    it('throws VersionConflictError when version already exists', async () => {
+      const bundle = {
+        meta: {
+          id: 'conflict-test',
+          name: 'Conflict Test',
+          version: '1.0.0',
+          description: 'Test',
+          type: 'skill' as const,
+          tags: [],
+          dependencies: {},
+          files: [],
+        },
+        content: '# Conflict Test',
+        contentPath: 'SKILL.md',
+      };
+      await adapter.write('skill', 'conflict-test', bundle);
+
+      // Second write with same version should throw
+      await expect(adapter.write('skill', 'conflict-test', bundle)).rejects.toThrow(VersionConflictError);
+    });
+
+    it('allows two different versions to coexist', async () => {
+      const bundleV1 = {
+        meta: {
+          id: 'multi-version',
+          name: 'Multi Version',
+          version: '1.0.0',
+          description: 'Version 1',
+          type: 'skill' as const,
+          tags: [],
+          dependencies: {},
+          files: [],
+        },
+        content: '# Version 1',
+        contentPath: 'SKILL.md',
+      };
+      const bundleV2 = {
+        meta: {
+          id: 'multi-version',
+          name: 'Multi Version',
+          version: '2.0.0',
+          description: 'Version 2',
+          type: 'skill' as const,
+          tags: [],
+          dependencies: {},
+          files: [],
+        },
+        content: '# Version 2',
+        contentPath: 'SKILL.md',
+      };
+      await adapter.write('skill', 'multi-version', bundleV1);
+      await adapter.write('skill', 'multi-version', bundleV2);
+
+      // Both versions should exist on disk
+      const v1Exists = await fs.access(path.join(tmpDir, 'skills', 'multi-version', '1.0.0', 'metadata.yaml')).then(() => true, () => false);
+      const v2Exists = await fs.access(path.join(tmpDir, 'skills', 'multi-version', '2.0.0', 'metadata.yaml')).then(() => true, () => false);
+      expect(v1Exists).toBe(true);
+      expect(v2Exists).toBe(true);
+
+      // List should return both versions
+      const allMetas = await adapter.list('skill');
+      const multiVersionMetas = allMetas.filter(m => m.id === 'multi-version');
+      expect(multiVersionMetas).toHaveLength(2);
+    });
+
+    it('writes agent with AGENT.md in versioned directory', async () => {
       const bundle = {
         meta: {
           id: 'new-agent',
@@ -411,29 +516,6 @@ Tabs:	here	and	there.
       expect(await adapter.exists('plugin', 'new-plugin')).toBe(true);
       const readBack = await adapter.read('plugin', 'new-plugin');
       expect(readBack.meta.id).toBe('new-plugin');
-    });
-
-    it('overwrites existing artifact', async () => {
-      await createSkillFixture('overwrite-test');
-      const bundle = {
-        meta: {
-          id: 'overwrite-test',
-          name: 'Updated Name',
-          version: '2.0.0',
-          description: 'Updated description',
-          type: 'skill' as const,
-          tags: ['updated'],
-          dependencies: {},
-          files: [],
-        },
-        content: '# Updated\nNew content',
-        contentPath: 'SKILL.md',
-      };
-      await adapter.write('skill', 'overwrite-test', bundle);
-      const readBack = await adapter.read('skill', 'overwrite-test');
-      expect(readBack.meta.name).toBe('Updated Name');
-      expect(readBack.meta.version).toBe('2.0.0');
-      expect(readBack.content).toBe('# Updated\nNew content');
     });
 
     it('creates nested directories as needed', async () => {
