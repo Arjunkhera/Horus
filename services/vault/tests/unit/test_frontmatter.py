@@ -1,7 +1,11 @@
 """Tests for the frontmatter parser."""
 
+import re
+
 from src.layer2.frontmatter import parse_page, to_page_summary, to_page_full, ParsedPage
 from tests.conftest import ANVIL_REPO_PROFILE, CONCEPT_PAGE, CODING_STANDARDS_PROCEDURE, REPO_PROFILE_WITH_WORKFLOW
+
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 
 class TestParsePage:
@@ -79,6 +83,29 @@ title: Minimal
         page = parse_page(ANVIL_REPO_PROFILE)
         assert not hasattr(page, "source")
 
+    def test_auto_generates_uuid_when_missing(self):
+        """Pages without an id field in frontmatter get an auto-generated UUIDv4."""
+        page = parse_page(ANVIL_REPO_PROFILE)
+        assert page.id is not None
+        assert UUID_RE.match(page.id)
+
+    def test_reads_uuid_from_frontmatter(self):
+        """Pages with an id field in frontmatter use that value."""
+        content = """---
+id: 550e8400-e29b-41d4-a716-446655440000
+title: Test Page
+---
+# Test
+"""
+        page = parse_page(content)
+        assert page.id == "550e8400-e29b-41d4-a716-446655440000"
+
+    def test_auto_generated_uuids_are_unique(self):
+        """Each parse call generates a distinct UUID."""
+        page1 = parse_page("# Page 1")
+        page2 = parse_page("# Page 2")
+        assert page1.id != page2.id
+
 
 class TestHostingAndWorkflowFields:
     def test_parses_hosting_hostname(self):
@@ -125,12 +152,28 @@ title: Minimal
 
 
 class TestToPageSummary:
-    def test_creates_summary(self):
+    def test_creates_summary_with_uuid_id(self):
         page = parse_page(ANVIL_REPO_PROFILE)
         summary = to_page_summary(page, "repos/anvil.md", score=0.95)
-        assert summary.id == "repos/anvil.md"
+        assert UUID_RE.match(summary.id), f"Expected UUID, got: {summary.id}"
+        assert summary.path == "repos/anvil.md"
         assert summary.title == "Anvil"
         assert summary.relevance_score == 0.95
+
+    def test_uses_frontmatter_uuid_when_present(self):
+        content = """---
+id: 550e8400-e29b-41d4-a716-446655440000
+title: Test
+description: Test page
+type: concept
+mode: reference
+---
+# Test
+"""
+        page = parse_page(content)
+        summary = to_page_summary(page, "concepts/test.md")
+        assert summary.id == "550e8400-e29b-41d4-a716-446655440000"
+        assert summary.path == "concepts/test.md"
 
     def test_summary_no_body(self):
         page = parse_page(ANVIL_REPO_PROFILE)
@@ -145,10 +188,11 @@ class TestToPageSummary:
 
 
 class TestToPageFull:
-    def test_creates_full_page(self):
+    def test_creates_full_page_with_uuid_id(self):
         page = parse_page(ANVIL_REPO_PROFILE)
         full = to_page_full(page, "repos/anvil.md")
-        assert full.id == "repos/anvil.md"
+        assert UUID_RE.match(full.id), f"Expected UUID, got: {full.id}"
+        assert full.path == "repos/anvil.md"
         assert full.body is not None
         assert "# Anvil" in full.body
 
