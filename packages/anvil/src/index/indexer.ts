@@ -84,9 +84,9 @@ function upsertNoteInternal(db: AnvilDb, note: Note): void {
     `INSERT OR REPLACE INTO notes (
       note_id, type, title, description, file_path, created, modified,
       archived, pinned, scope_context, scope_team, scope_service,
-      status, priority, due, effort, body_text
+      status, priority, due, effort, recurrence, last_swept_at, body_text
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       note.noteId,
       note.type,
@@ -104,6 +104,8 @@ function upsertNoteInternal(db: AnvilDb, note: Note): void {
       note.priority || null,
       note.due || null,
       note.effort || null,
+      note.fields?.recurrence || null,
+      note.fields?.last_swept_at || null,
       note.body,
     ]
   );
