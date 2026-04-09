@@ -18,7 +18,16 @@ knowledge_get_page({ id: "shared/concepts/horus-package-architecture.md" })
 
 ## What This Service Does
 
-FastAPI knowledge service with 23 REST endpoints. Manages knowledge pages (guides, procedures, repo profiles, learnings) with schema-validated write-path, Neo4j knowledge graph, and Typesense search. Two-layer architecture: `src/layer1/` (storage I/O) and `src/layer2/` (business logic).
+FastAPI knowledge service with 23 REST endpoints. Manages knowledge pages (guides, procedures, repo profiles, learnings) with UUID-based page identity, schema-validated write-path, Neo4j knowledge graph, and Typesense search. Two-layer architecture: `src/layer1/` (storage I/O) and `src/layer2/` (business logic).
+
+## Page Identity
+
+Every page has a **UUIDv4 `id`** in frontmatter as its primary identifier. File paths are a storage detail.
+
+- `src/layer2/frontmatter.py` — reads UUID from frontmatter, auto-generates if missing
+- `src/layer2/uuid_registry.py` — bidirectional UUID-to-path index, built on startup, rebuilt on reindex
+- All API endpoints (`get-page`, `get-related`, graph operations) accept UUID or file path
+- Write path auto-stamps UUID into frontmatter for new pages
 
 ## Build & Test
 
@@ -40,5 +49,6 @@ pytest tests/integration/ -v     # Integration (needs Typesense)
 - **Never run `docker compose build vault`** — push to master and let CI build the GHCR image
 - Changes here trigger CI build of `ghcr.io/arjunkhera/horus/vault`
 - Claude never talks to this service directly — the chain is: Claude → Vault MCP → Vault Router → here
-- The Typesense collection schema must stay in sync with `packages/search/src/bootstrap.ts`
+- The Typesense collection schema must stay in sync with `packages/search/src/bootstrap.ts` (includes `page_uuid` field)
+- Pages use UUID identity — `src/layer2/uuid_registry.py` maps UUIDs to file paths
 - Healthcheck is Python-based — do NOT replace with curl (slim image has no curl)
