@@ -42,6 +42,18 @@ const MVP_INTENTS: IntentDefinition[] = [
     inverseLabel: 'referenced_by',
     description: 'Formal citation — source references target',
   },
+  {
+    id: 'parent_of',
+    direction: 'directional',
+    inverseLabel: 'child_of',
+    description: 'Structural hierarchy — parent contains or owns the target',
+  },
+  {
+    id: 'belongs_to',
+    direction: 'directional',
+    inverseLabel: 'contains',
+    description: 'Membership — source is a member of or belongs to the target',
+  },
 ]
 
 /**

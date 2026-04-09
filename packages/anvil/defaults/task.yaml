@@ -36,6 +36,15 @@ fields:
     ref_type: project
     required: false
     search_mode: term
+  recurrence:
+    type: enum
+    values: [daily, weekly, biweekly, monthly, quarterly, yearly]
+    required: false
+    search_mode: term
+  last_swept_at:
+    type: datetime
+    required: false
+    search_mode: none
 template:
   frontmatter:
     status: open

@@ -16,6 +16,10 @@ fields:
     type: string
     required: false
     search_mode: text
+  birthday:
+    type: date
+    required: false
+    search_mode: term
 template:
   frontmatter:
     tags: []

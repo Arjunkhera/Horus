@@ -1,0 +1,23 @@
+id: dashboard
+name: Dashboard
+description: "Composed collection of views, linked via parent_of edges"
+icon: "layout-dashboard"
+fields:
+  description:
+    type: text
+    required: false
+    search_mode: text
+  layout:
+    type: enum
+    values: [vertical, grid]
+    default: vertical
+    required: false
+    search_mode: term
+template:
+  frontmatter:
+    layout: vertical
+    tags: []
+  body: |
+    ## Description
+
+    ## Notes

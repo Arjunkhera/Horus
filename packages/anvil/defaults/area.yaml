@@ -1,0 +1,16 @@
+id: area
+name: Area
+description: "Life area for organizing tasks and notes — Personal, Office, Health, Finance, etc."
+icon: "folder-open"
+fields:
+  description:
+    type: text
+    required: false
+    search_mode: text
+template:
+  frontmatter:
+    tags: []
+  body: |
+    ## Description
+
+    ## Notes
