@@ -130,6 +130,30 @@ if [ -f "$NOTES_PATH/.anvil/types/_core.yaml" ] && [ -d /app/defaults ]; then
   fi
 fi
 
+# Step 3: Ensure .gitignore excludes .anvil/.local/ (local-only derived data).
+# This covers repos cloned before the gitignore was set up, or repos where
+# index.db was accidentally committed — prevents the sync engine from seeing
+# perpetual pendingFiles and reporting health as critical.
+GITIGNORE_PATH="$NOTES_PATH/.gitignore"
+if [ -d "$NOTES_PATH/.git" ]; then
+  # Add .anvil/.local/ to .gitignore if not already present
+  if ! grep -qF '.anvil/.local/' "$GITIGNORE_PATH" 2>/dev/null; then
+    echo '.anvil/.local/' >> "$GITIGNORE_PATH"
+    git -C "$NOTES_PATH" add .gitignore 2>/dev/null || true
+    git -C "$NOTES_PATH" commit -m "chore: ensure .anvil/.local/ is gitignored" 2>/dev/null || true
+    git -C "$NOTES_PATH" push 2>/dev/null || log_warn "Gitignore push failed (non-fatal)"
+    log "Added .anvil/.local/ to .gitignore"
+  fi
+
+  # Untrack .anvil/.local/ files if they were previously committed
+  if git -C "$NOTES_PATH" ls-files --error-unmatch .anvil/.local/ >/dev/null 2>&1; then
+    git -C "$NOTES_PATH" rm -r --cached .anvil/.local/ 2>/dev/null || true
+    git -C "$NOTES_PATH" commit -m "fix: untrack .anvil/.local/ (should be gitignored)" 2>/dev/null || true
+    git -C "$NOTES_PATH" push 2>/dev/null || log_warn "Untrack push failed (non-fatal)"
+    log "Untracked .anvil/.local/ from git"
+  fi
+fi
+
 # Step 4: Start Anvil MCP server in HTTP mode.
 # Git sync is now handled in-process by GitSyncEngine (packages/anvil/src/core/sync/engine.ts).
 # Run node as a background process and wait for it, allowing SIGTERM to be handled
