@@ -90,8 +90,28 @@ from .models import (
 )
 
 
+import re
+
+# UUID v4 pattern for detecting UUID-based identifiers
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
+
 # Create router
 router = APIRouter()
+
+
+def _resolve_id(page_id: str, registry) -> str:
+    """
+    Resolve a page identifier to a file path.
+
+    If *page_id* looks like a UUID and a registry is available, resolve it
+    to the corresponding file path.  Otherwise return *page_id* unchanged
+    (assumed to already be a file path).
+    """
+    if registry and _UUID_RE.match(page_id):
+        resolved = registry.resolve(page_id)
+        if resolved:
+            return resolved
+    return page_id
 
 
 # Dependency to get SearchStore from app state
@@ -421,36 +441,38 @@ async def search(request: SearchRequest, store: StoreDepends) -> SearchResponse:
     return await asyncio.to_thread(_search_sync, request, store)
 
 
-def _get_page_sync(request: GetPageRequest, store: SearchStore) -> PageFull:
+def _get_page_sync(request: GetPageRequest, store: SearchStore, registry=None) -> PageFull:
     """Synchronous implementation of get-page."""
-    content = store.get_document(request.id)
+    file_path = _resolve_id(request.id, registry)
+    content = store.get_document(file_path)
 
     if not content:
         raise not_found("Page", request.id)
 
     parsed = parse_page(content)
-    return to_page_full(parsed, request.id)
+    return to_page_full(parsed, file_path)
 
 
 @router.post("/get-page", response_model=PageFull)
-async def get_page(request: GetPageRequest, store: StoreDepends) -> PageFull:
-    """Retrieve a full page by its identifier (file path or title)."""
-    return await asyncio.to_thread(_get_page_sync, request, store)
+async def get_page(request: GetPageRequest, store: StoreDepends, registry: UUIDRegistryDepends = None) -> PageFull:
+    """Retrieve a full page by its identifier (UUID, file path, or title)."""
+    return await asyncio.to_thread(_get_page_sync, request, store, registry)
 
 
-def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None) -> GetRelatedResponse:
+def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None, registry=None) -> GetRelatedResponse:
     """Synchronous implementation of get-related.
 
     Tries graph-based edge traversal first (when graph client is available),
     then falls back to link_navigator frontmatter-based resolution.
     """
-    content = store.get_document(request.id)
+    file_path = _resolve_id(request.id, registry)
+    content = store.get_document(file_path)
 
     if not content:
         raise not_found("Page", request.id)
 
     parsed = parse_page(content)
-    source_summary = to_page_summary(parsed, request.id)
+    source_summary = to_page_summary(parsed, file_path)
 
     related_pages_tuples: list[tuple] = []
 
@@ -462,21 +484,21 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None
                 RETURN DISTINCT q.page_id AS id
                 LIMIT 50
                 """,
-                {"page_id": request.id}
+                {"page_id": file_path}
             )
             doc_cache = store.get_all_documents()
             for row in results:
-                page_id = row.get("id")
-                if not page_id:
+                related_path = row.get("id")
+                if not related_path:
                     continue
-                page_content = doc_cache.get(page_id) or store.get_document(page_id)
+                page_content = doc_cache.get(related_path) or store.get_document(related_path)
                 if page_content:
                     rel_parsed = parse_page(page_content)
-                    related_pages_tuples.append((rel_parsed, page_id))
+                    related_pages_tuples.append((rel_parsed, related_path))
         except Exception:
             logger.warning(
                 "Graph-based get-related failed for page '%s', falling back to link_navigator",
-                request.id,
+                file_path,
                 exc_info=True,
             )
             graph = None  # trigger fallback
@@ -498,13 +520,14 @@ async def get_related(
     request: GetRelatedRequest,
     store: StoreDepends,
     graph: GraphDepends,
+    registry: UUIDRegistryDepends = None,
 ) -> GetRelatedResponse:
     """Follow links from a page to find related pages.
 
     Uses Neo4j graph edge traversal when the graph client is available;
     falls back to link_navigator (frontmatter-based) otherwise.
     """
-    return await asyncio.to_thread(_get_related_sync, request, store, graph)
+    return await asyncio.to_thread(_get_related_sync, request, store, graph, registry)
 
 
 def _list_by_scope_sync(request: ListByScopeRequest, store: SearchStore) -> ListByScopeResponse:

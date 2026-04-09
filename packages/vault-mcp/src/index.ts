@@ -152,12 +152,12 @@ const TOOLS: Tool[] = [
   {
     name: "knowledge_get_page",
     description:
-      "Retrieve the full content of a specific knowledge page by its ID (file path). " +
+      "Retrieve the full content of a specific knowledge page by its ID (UUID or file path). " +
       "Use this after finding a relevant page via search or resolve-context.",
     inputSchema: {
       type: "object",
       properties: {
-        id: { type: "string", description: "Page identifier (e.g., 'repos/anvil.md')" },
+        id: { type: "string", description: "Page identifier (UUID or file path, e.g., 'repos/anvil.md')" },
       },
       required: ["id"],
     },
@@ -170,7 +170,7 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        id: { type: "string", description: "Source page identifier" },
+        id: { type: "string", description: "Source page identifier (UUID or file path)" },
       },
       required: ["id"],
     },
@@ -305,7 +305,7 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        source_id: { type: "string", description: "Page ID of the source node (e.g. file path)" },
+        source_id: { type: "string", description: "Page ID of the source node (UUID or file path)" },
         target_id: { type: "string", description: "Page ID of the target node" },
         edge_type: {
           type: "string",
