@@ -902,10 +902,10 @@ def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: 
         extra={"commit_sha": commit_sha}
     )
 
-    # Update UUID registry with the new/updated page
+    # Update UUID registry with the new/updated page (collection-prefixed path)
     page_uuid = post.metadata.get("id")
     if registry and page_uuid:
-        registry.register(page_uuid, path)
+        registry.register(page_uuid, f"shared/{path}")
 
     return WritePageResponse(
         pr_url=pr_url,
