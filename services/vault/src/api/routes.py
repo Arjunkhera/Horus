@@ -148,6 +148,19 @@ def get_settings() -> VaultSettings:
 SettingsDepends = Annotated[VaultSettings, Depends(get_settings)]
 
 
+def get_uuid_registry():
+    """
+    Dependency injection for UUIDRegistry.
+
+    Placeholder replaced via dependency_overrides in main.py.
+    Returns None if registry is not configured.
+    """
+    return None
+
+
+UUIDRegistryDepends = Annotated[Optional[Any], Depends(get_uuid_registry)]
+
+
 def get_graph() -> Optional[Any]:
     """
     Dependency injection for the Neo4j graph client.

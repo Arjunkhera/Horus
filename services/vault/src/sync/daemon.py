@@ -31,10 +31,11 @@ class ReindexLock:
     Tracks last re-index time for logging and monitoring.
     """
     
-    def __init__(self) -> None:
+    def __init__(self, on_reindex=None) -> None:
         self.lock = asyncio.Lock()
         self.last_reindex: Optional[datetime] = None
         self.reindex_count = 0
+        self._on_reindex = on_reindex
     
     async def reindex(self, store: SearchStore, trigger: str) -> bool:
         """
@@ -65,6 +66,14 @@ class ReindexLock:
                 self.reindex_count += 1
                 
                 logger.info(f"Re-index complete (trigger: {trigger}, elapsed: {elapsed:.2f}s, total: {self.reindex_count})")
+
+                # Rebuild UUID registry after successful reindex
+                if self._on_reindex:
+                    try:
+                        await loop.run_in_executor(None, self._on_reindex)
+                    except Exception as cb_err:
+                        logger.warning("on_reindex callback failed: %s", cb_err)
+
                 return True
                 
             except Exception as e:
@@ -387,28 +396,30 @@ async def start_sync_daemon(
     knowledge_repo_path: str,
     workspace_path: str,
     sync_interval: int,
-    debounce_seconds: float = 5.0
+    debounce_seconds: float = 5.0,
+    on_reindex=None,
 ) -> tuple[Optional[asyncio.Task[None]], Optional[Any]]:
     """
     Start both sync daemon components.
-    
+
     Convenience function to start git pull loop and workspace watcher together.
-    
+
     Args:
         store: SearchStore instance
         knowledge_repo_path: Path to knowledge repo
         workspace_path: Path to workspace
         sync_interval: Seconds between git pulls
         debounce_seconds: Seconds to debounce workspace changes
-    
+        on_reindex: Optional callback invoked after each successful reindex
+
     Returns:
         Tuple of (git_pull_task, workspace_observer)
         Either component may be None if it failed to start
     """
     logger.info("Starting sync daemon...")
-    
+
     # Create shared reindex lock
-    reindex_lock = ReindexLock()
+    reindex_lock = ReindexLock(on_reindex=on_reindex)
     
     # Start git pull loop as asyncio task
     git_pull_task: asyncio.Task[None] = asyncio.create_task(
