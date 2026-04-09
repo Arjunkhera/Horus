@@ -124,7 +124,7 @@ export async function syncPull(
 
 /**
  * Perform a git push operation (add + commit + push)
- * Only stages .md files and .anvil/types/*.yaml files
+ * Stages .md files, .anvil/types/*.yaml, custom-types/*.yaml, and _graph/*.json
  * Never stages .anvil/.local/ directory
  */
 export async function syncPush(
@@ -145,7 +145,7 @@ export async function syncPush(
     // 1. Check current status
     const statusBefore = await git.status();
 
-    // 2. Stage only .md, .anvil/types/*.yaml, and _graph/*.json files (never .anvil/.local/)
+    // 2. Stage .md, .anvil/types/*.yaml, custom-types/*.yaml, and _graph/*.json (never .anvil/.local/)
     // Handle patterns separately since missing patterns cause errors
     try {
       // First try to add markdown files
@@ -167,6 +167,19 @@ export async function syncPush(
         }
       } catch {
         // No type files might exist, continue
+      }
+
+      // Then try to add custom type YAML files if the directory exists
+      try {
+        const customTypesPath = `${vaultPath}/custom-types`;
+        try {
+          await fs.stat(customTypesPath);
+          await git.add(['custom-types/*.yaml']);
+        } catch {
+          // Directory doesn't exist, skip
+        }
+      } catch {
+        // No custom type files might exist, continue
       }
 
       // Then try to add graph backup JSON files if the directory exists
@@ -193,9 +206,12 @@ export async function syncPush(
     const statusAfter = await git.status();
     const isStagedEmpty = (statusAfter.staged?.length ?? 0) === 0 && (statusAfter.files?.length ?? 0) === 0;
 
-    // Only count untracked files that would actually be staged (.md or .anvil/types/*.yaml)
+    // Only count untracked files that would actually be staged
     const relevantNotAdded = (statusBefore.not_added ?? []).filter(
-      (f) => f.endsWith('.md') || (f.startsWith('.anvil/types/') && f.endsWith('.yaml'))
+      (f) => f.endsWith('.md') ||
+        (f.startsWith('.anvil/types/') && f.endsWith('.yaml')) ||
+        (f.startsWith('custom-types/') && f.endsWith('.yaml')) ||
+        (f.startsWith('_graph/') && f.endsWith('.json'))
     );
     if (isStagedEmpty && relevantNotAdded.length === 0) {
       return { status: 'no_changes' };
