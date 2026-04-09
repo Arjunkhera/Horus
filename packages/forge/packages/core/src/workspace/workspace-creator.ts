@@ -15,7 +15,7 @@ import { loadGlobalConfig } from '../config/global-config-loader.js';
 import { expandPath } from '../config/path-utils.js';
 import { loadRepoIndex } from '../repo/repo-index-store.js';
 import { RepoIndexQuery } from '../repo/repo-index-query.js';
-import { updateClaudeMcpServers, updateCursorMcpServers, emitPreToolUseHook, type McpServerEntry } from './mcp-settings-writer.js';
+import { updateClaudeMcpServers, updateCursorMcpServers, emitPreToolUseHook, emitReadGuardHook, type McpServerEntry } from './mcp-settings-writer.js';
 import type { ClaudePermissions } from '../models/global-config.js';
 
 /**
@@ -374,6 +374,14 @@ export class WorkspaceCreator {
         await emitPreToolUseHook(workspacePath, hostWorkspacePath);
       } catch (err: any) {
         console.warn(`[Forge] Warning: Could not emit PreToolUse hook: ${err.message}`);
+      }
+
+      // Step 8c: Emit PreToolUse hook to block Read/Glob/Grep on source repos.
+      // Allows reads inside workspaces, sessions, and the managed clone pool (horus-repos).
+      try {
+        await emitReadGuardHook(workspacePath, hostWorkspacePath);
+      } catch (err: any) {
+        console.warn(`[Forge] Warning: Could not emit read guard hook: ${err.message}`);
       }
 
       // Step 9: Emit environment variables file

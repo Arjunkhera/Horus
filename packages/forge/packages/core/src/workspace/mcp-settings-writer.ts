@@ -333,6 +333,155 @@ export async function updateCursorMcpServers(
 }
 
 /**
+ * Emit the guard-source-reads.sh script and register a Read|Glob|Grep PreToolUse
+ * hook in .claude/settings.local.json that blocks read operations targeting source
+ * repo paths. Directs agents to use Vault or managed clones instead.
+ *
+ * Allows reads inside:
+ *   - $HORUS_DATA_DIR/workspaces/ (workspace clones)
+ *   - $HORUS_DATA_DIR/sessions/   (forge_develop worktrees)
+ *   - $HORUS_DATA_DIR/horus-repos/ (managed clone pool)
+ *
+ * Empty path (Glob/Grep CWD default) is allowed through.
+ *
+ * @param workspacePath      Container-side workspace root (where files are written)
+ * @param hostWorkspacePath  Host-side workspace root (used in hook command path)
+ */
+export async function emitReadGuardHook(
+  workspacePath: string,
+  hostWorkspacePath: string,
+): Promise<void> {
+  // 1. Write the guard script
+  const scriptsDir = path.join(workspacePath, '.claude', 'scripts');
+  await fs.mkdir(scriptsDir, { recursive: true });
+
+  const guardScript = `#!/bin/bash
+# Guard script: blocks Read/Glob/Grep on source repos, directing to Vault or managed clones.
+# Emitted by Forge during workspace creation. Do not edit manually.
+#
+# Covers three tool surfaces:
+#   1. Read tool  — checks tool_input.file_path
+#   2. Glob tool  — checks tool_input.path (optional, may be absent)
+#   3. Grep tool  — checks tool_input.path (optional, may be absent)
+#
+# Allowed repos: anything inside $HORUS_DATA_DIR/workspaces/ (workspace clones),
+#                $HORUS_DATA_DIR/sessions/ (forge_develop worktrees),
+#                or $HORUS_DATA_DIR/horus-repos/ (managed clone pool).
+
+input=$(cat)
+
+# Check jq is available
+if ! command -v jq &>/dev/null; then
+  exit 0
+fi
+
+HORUS_DATA_DIR="\${HORUS_DATA_DIR:-$HOME/.horus/data}"
+
+is_allowed_repo() {
+  local repo_root="$1"
+  [[ "$repo_root" == "$HORUS_DATA_DIR/workspaces/"* ]] && return 0
+  [[ "$repo_root" == "$HORUS_DATA_DIR/sessions/"* ]]   && return 0
+  [[ "$repo_root" == "$HORUS_DATA_DIR/horus-repos/"* ]] && return 0
+  return 1
+}
+
+# Extract path from whichever tool is calling
+file_path=$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.path // empty')
+
+if [ -z "$file_path" ]; then
+  # No path provided (Glob/Grep default to CWD) — allow
+  exit 0
+fi
+
+# Resolve to absolute path if relative
+if [[ "$file_path" != /* ]]; then
+  file_path="$(pwd)/$file_path"
+fi
+
+# Find the git repo root for this file (if any)
+file_dir="$file_path"
+if [ ! -d "$file_dir" ]; then
+  file_dir=$(dirname "$file_path")
+fi
+repo_root=$(git -C "$file_dir" rev-parse --show-toplevel 2>/dev/null)
+
+# Not inside a git repo — allow
+if [ -z "$repo_root" ]; then
+  exit 0
+fi
+
+if is_allowed_repo "$repo_root"; then
+  exit 0
+fi
+
+# It's a source repo — block the read
+repo_name=$(basename "$repo_root")
+
+cat >&2 <<MSG
+BLOCKED: Cannot read files from source repository '\${repo_name}' directly.
+
+Source repos may be stale. Use these instead:
+  1. For architecture/conventions: use knowledge_resolve_context or knowledge_search (Vault)
+  2. For current source code: use forge_repo_resolve to find the repo in the managed clone pool
+  3. For coding sessions: use forge_develop to create an isolated worktree
+MSG
+exit 2
+`;
+
+  const scriptPath = path.join(scriptsDir, 'guard-source-reads.sh');
+  await fs.writeFile(scriptPath, guardScript, { mode: 0o755 });
+
+  // 2. Merge the Read|Glob|Grep PreToolUse hook into .claude/settings.local.json
+  const settingsPath = path.join(workspacePath, '.claude', 'settings.local.json');
+  let settings: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(settingsPath, 'utf-8');
+    settings = JSON.parse(raw);
+  } catch {
+    // File absent or unparseable — start fresh.
+  }
+
+  // Derive HORUS_DATA_DIR from the workspace path ($DATA_DIR/workspaces/$ID)
+  // and pass it explicitly so the guard script uses the correct value regardless
+  // of the user's environment (avoids the wrong $HOME/.horus/data default).
+  const horusDataDir = path.dirname(path.dirname(hostWorkspacePath));
+  const hookCommand = `HORUS_DATA_DIR=${JSON.stringify(horusDataDir)} bash ${hostWorkspacePath}/.claude/scripts/guard-source-reads.sh`;
+
+  const hooks = (settings.hooks as Record<string, unknown[]>) ?? {};
+  const preToolUse = (hooks.PreToolUse as Array<Record<string, unknown>>) ?? [];
+
+  // Avoid duplicate: check if we already have this read guard hooked
+  const existing = preToolUse.find(
+    (entry) => Array.isArray(entry.hooks) &&
+      (entry.hooks as Array<Record<string, unknown>>).some(
+        (h) => h.type === 'command' && typeof h.command === 'string' &&
+          (h.command as string).includes('guard-source-reads.sh'),
+      ),
+  );
+
+  if (!existing) {
+    preToolUse.push({
+      matcher: 'Read|Glob|Grep',
+      hooks: [
+        {
+          type: 'command',
+          command: hookCommand,
+        },
+      ],
+    });
+  }
+
+  hooks.PreToolUse = preToolUse;
+  settings.hooks = hooks;
+
+  await fs.writeFile(
+    settingsPath,
+    JSON.stringify(settings, null, 2) + '\n',
+    'utf-8',
+  );
+}
+
+/**
  * @deprecated No longer needed — native HTTP transport eliminates mcp-remote.
  * Retained to avoid breaking any code that imports this function.
  */
