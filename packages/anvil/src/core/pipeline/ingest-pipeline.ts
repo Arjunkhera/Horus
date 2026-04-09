@@ -225,6 +225,7 @@ export class IngestPipeline {
         id: entityId,
         title,
         type: input.type,
+        status: fields.status as string | undefined,
       })
 
       if (input.edges && input.edges.length > 0) {

@@ -29,6 +29,7 @@ import { handleCreateType, type CreateTypeInput } from '../tools/create-type.js'
 import { handleUpdateType, type UpdateTypeInput } from '../tools/update-type.js';
 import { handleExecuteView, type ExecuteViewInput } from '../tools/execute-view.js';
 import { handleRecurrenceSweep } from '../tools/recurrence-sweep.js';
+import { handleExecuteDashboard, type ExecuteDashboardInput } from '../tools/execute-dashboard.js';
 import { setupPersonalTaskDefaults } from '../setup/personal-task-defaults.js';
 import {
   CreateNoteInputSchema,
@@ -672,6 +673,21 @@ export function createMcpServer(ctx: ToolContext): Server {
       },
     },
     {
+      name: 'anvil_execute_dashboard',
+      description:
+        'Execute a dashboard by walking its child views (via parent_of edges) and returning all results combined. Each section corresponds to one child view.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          dashboardId: {
+            type: 'string',
+            description: 'UUID of the dashboard node to execute',
+          },
+        },
+        required: ['dashboardId'],
+      },
+    },
+    {
       name: 'anvil_setup_personal_tasks',
       description:
         'Create default nodes for the Personal Task Management system: areas (Inbox, Personal, Office), views (Today, Inbox, Upcoming, Weekly Review, Waiting On), and dashboard (Morning Briefing). Idempotent — skips existing nodes.',
@@ -1251,6 +1267,18 @@ export function createMcpServer(ctx: ToolContext): Server {
             type: params.type,
           });
           return { content: [{ type: 'text', text: JSON.stringify({ entityId: params.entityId, descendants, total: descendants.length }) }] };
+        }
+
+        case 'anvil_execute_dashboard': {
+          const params = args as unknown as ExecuteDashboardInput;
+          const result = await handleExecuteDashboard(params, ctx);
+          if (isAnvilError(result)) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
         }
 
         case 'anvil_setup_personal_tasks': {
