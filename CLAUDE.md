@@ -38,7 +38,7 @@ Load a specific package guide when working on that package:
 | `packages/search` | `shared/guides/horus-search-package.md` |
 | `packages/ui-server` + `packages/ui-client` | `shared/guides/horus-ui-package.md` |
 
-To load a page: `knowledge_get_page({ id: "<page-id>" })`
+To load a page: `knowledge_get_page({ id: "<page-id>" })` — accepts UUID or file path (e.g., `shared/guides/horus-vault-service.md`)
 
 ## Quick Reference
 
