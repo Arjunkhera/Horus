@@ -19,6 +19,7 @@ class SearchResult:
     score: float
     snippet: str
     collection: str
+    id: Optional[str] = None  # UUIDv4 page identity (None for unmigrated pages)
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Document:
     file_path: str
     content: str
     collection: str
+    id: Optional[str] = None  # UUIDv4 page identity
 
 
 class SearchStore(ABC):
