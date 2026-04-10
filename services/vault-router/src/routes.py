@@ -240,7 +240,8 @@ async def list_by_scope(
     for vault_name, data in results.items():
         if "error" in data:
             continue
-        for page in data.get("results", []):
+        # Vault returns {"pages": [...]}, not {"results": [...]}
+        for page in data.get("pages", data.get("results", [])):
             page_id = page.get("id")
             if page_id and page_id in seen_uuids:
                 continue
@@ -252,7 +253,7 @@ async def list_by_scope(
     limit = body.get("limit", 20)
     offset = body.get("offset", 0)
     paginated = all_pages[offset: offset + limit]
-    return {"results": paginated, "total": len(all_pages)}
+    return {"pages": paginated, "total": len(all_pages)}
 
 
 @router.post("/check-duplicates")
