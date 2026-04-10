@@ -340,7 +340,7 @@ export async function updateCursorMcpServers(
  * Allows reads inside:
  *   - $HORUS_DATA_DIR/workspaces/ (workspace clones)
  *   - $HORUS_DATA_DIR/sessions/   (forge_develop worktrees)
- *   - $HORUS_DATA_DIR/horus-repos/ (managed clone pool)
+ *   - $HORUS_DATA_DIR/repos/ (managed clone pool)
  *
  * Empty path (Glob/Grep CWD default) is allowed through.
  *
@@ -366,7 +366,7 @@ export async function emitReadGuardHook(
 #
 # Allowed repos: anything inside $HORUS_DATA_DIR/workspaces/ (workspace clones),
 #                $HORUS_DATA_DIR/sessions/ (forge_develop worktrees),
-#                or $HORUS_DATA_DIR/horus-repos/ (managed clone pool).
+#                or $HORUS_DATA_DIR/repos/ (managed clone pool).
 
 input=$(cat)
 
@@ -381,7 +381,7 @@ is_allowed_repo() {
   local repo_root="$1"
   [[ "$repo_root" == "$HORUS_DATA_DIR/workspaces/"* ]] && return 0
   [[ "$repo_root" == "$HORUS_DATA_DIR/sessions/"* ]]   && return 0
-  [[ "$repo_root" == "$HORUS_DATA_DIR/horus-repos/"* ]] && return 0
+  [[ "$repo_root" == "$HORUS_DATA_DIR/repos/"* ]]      && return 0
   return 1
 }
 
