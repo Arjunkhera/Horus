@@ -1,0 +1,66 @@
+name: CLI Build and Validate
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'packages/cli/**'
+      - 'docs/**'
+      - '.github/workflows/cli-build.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'packages/cli/**'
+      - 'docs/**'
+      - '.github/workflows/cli-build.yml'
+
+jobs:
+  build:
+    name: Build and validate @arkhera30/cli
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build guides (schema validate + index)
+        run: pnpm --filter @arkhera30/cli build:guides
+
+      - name: Build CLI
+        run: pnpm --filter @arkhera30/cli build
+
+      - name: Typecheck
+        run: pnpm --filter @arkhera30/cli typecheck
+
+      - name: Test
+        run: pnpm --filter @arkhera30/cli test
+
+      - name: Verify tarball contents
+        working-directory: packages/cli
+        run: |
+          echo "=== npm pack --dry-run ==="
+          npm pack --dry-run 2>&1 | tee /tmp/pack.out
+          echo ""
+          echo "=== Checking that guides/ is in the tarball ==="
+          if ! grep -q 'guides/' /tmp/pack.out; then
+            echo "ERROR: guides/ not included in the npm tarball"
+            exit 1
+          fi
+          if ! grep -q 'guides/index.json' /tmp/pack.out; then
+            echo "ERROR: guides/index.json not included in the npm tarball"
+            exit 1
+          fi
+          echo "OK: guides/ and guides/index.json present in tarball"

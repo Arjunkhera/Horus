@@ -7,7 +7,8 @@
     "horus": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "npm run build:guides && tsup src/index.ts --format esm --dts",
+    "build:guides": "node scripts/build-guides.mjs",
     "dev": "tsup src/index.ts --format esm --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -32,7 +33,8 @@
   },
   "files": [
     "dist",
-    "compose"
+    "compose",
+    "guides"
   ],
   "repository": {
     "type": "git",
