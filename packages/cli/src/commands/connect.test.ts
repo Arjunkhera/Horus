@@ -33,6 +33,8 @@ import {
   buildStdioServers,
   getMcpRemoteWrapperPath,
   mergeAndWriteConfig,
+  detectNpxPath,
+  buildClaudeDesktopServers,
 } from './connect.js';
 
 const mockExistsSync = vi.mocked(existsSync);
@@ -245,6 +247,67 @@ describe('buildStdioServers', () => {
   it('respects custom host', () => {
     const servers = buildStdioServers(config, '/wrapper', '192.168.1.10');
     expect(servers.anvil.args[0]).toBe('http://192.168.1.10:8100/mcp');
+  });
+});
+
+// ── detectNpxPath ────────────────────────────────────────────────────────────
+
+describe('detectNpxPath', () => {
+  it('returns /opt/homebrew/bin/npx when it exists', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    expect(detectNpxPath()).toBe('/opt/homebrew/bin/npx');
+  });
+
+  it('returns /usr/local/bin/npx when homebrew path is absent', () => {
+    mockExistsSync.mockImplementation((p) => p === '/usr/local/bin/npx');
+    expect(detectNpxPath()).toBe('/usr/local/bin/npx');
+  });
+
+  it('falls back to bare "npx" when no known path exists', () => {
+    mockExistsSync.mockReturnValue(false);
+    expect(detectNpxPath()).toBe('npx');
+  });
+});
+
+// ── buildClaudeDesktopServers ────────────────────────────────────────────────
+
+describe('buildClaudeDesktopServers', () => {
+  const config = {
+    ports: { anvil: 8100, vault_mcp: 8300, forge: 8200 },
+  } as any;
+
+  it('uses npx mcp-remote with env.PATH override when homebrew npx exists', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    const servers = buildClaudeDesktopServers(config, 'localhost');
+
+    expect(servers.anvil.command).toBe('/opt/homebrew/bin/npx');
+    expect(servers.anvil.args).toEqual(['mcp-remote', 'http://localhost:8100/mcp']);
+    expect(servers.anvil.env?.PATH).toMatch(/^\/opt\/homebrew\/bin/);
+
+    expect(servers.vault.args[1]).toBe('http://localhost:8300/mcp');
+    expect(servers.forge.args[1]).toBe('http://localhost:8200/mcp');
+  });
+
+  it('falls back to bare npx when no known path exists', () => {
+    mockExistsSync.mockReturnValue(false);
+    const servers = buildClaudeDesktopServers(config, 'localhost');
+    expect(servers.anvil.command).toBe('npx');
+    expect(servers.anvil.args[0]).toBe('mcp-remote');
+  });
+
+  it('includes env.PATH on every entry', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    const servers = buildClaudeDesktopServers(config, 'localhost');
+    for (const entry of Object.values(servers)) {
+      expect(entry.env).toBeDefined();
+      expect(entry.env?.PATH).toBeTruthy();
+    }
+  });
+
+  it('respects custom host', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    const servers = buildClaudeDesktopServers(config, '192.168.1.5');
+    expect(servers.anvil.args[1]).toBe('http://192.168.1.5:8100/mcp');
   });
 });
 
