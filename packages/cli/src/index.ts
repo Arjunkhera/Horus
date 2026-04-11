@@ -13,6 +13,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { backupCommand } from './commands/backup.js';
 import { testEnvCommand } from './commands/test-env.js';
 import { helpCommand } from './commands/help.js';
+import { guideCommand } from './commands/guide.js';
 import { CLI_VERSION } from './lib/constants.js';
 
 const program = new Command();
@@ -34,6 +35,7 @@ program.addCommand(doctorCommand);
 program.addCommand(backupCommand);
 program.addCommand(testEnvCommand);
 program.addCommand(helpCommand);
+program.addCommand(guideCommand);
 
 // Global error handling
 program.exitOverride();
