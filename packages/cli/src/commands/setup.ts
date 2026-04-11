@@ -214,7 +214,7 @@ export const setupCommand = new Command('setup')
         default: false,
       });
 
-      let ports: { anvil: number; vault_rest: number; vault_mcp: number; vault_router: number; forge: number; typesense: number; neo4j_http: number; neo4j_bolt: number } = { ...DEFAULT_PORTS };
+      let ports: { anvil: number; vault_rest: number; vault_mcp: number; vault_router: number; ui: number; forge: number; typesense: number; neo4j_http: number; neo4j_bolt: number } = { ...DEFAULT_PORTS };
 
       if (customize_ports) {
         const anvil = await number({
@@ -242,6 +242,7 @@ export const setupCommand = new Command('setup')
           vault_rest: vault_rest ?? DEFAULT_PORTS.vault_rest,
           vault_mcp: vault_mcp ?? DEFAULT_PORTS.vault_mcp,
           vault_router: vault_router ?? DEFAULT_PORTS.vault_router,
+          ui: DEFAULT_PORTS.ui,
           forge: forge ?? DEFAULT_PORTS.forge,
           typesense: DEFAULT_PORTS.typesense,
           neo4j_http: DEFAULT_PORTS.neo4j_http,

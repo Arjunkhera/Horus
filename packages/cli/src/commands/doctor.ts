@@ -270,7 +270,7 @@ async function checkServices(runtime: Awaited<ReturnType<typeof detectRuntime>>)
 // Only anvil and forge have git sync daemons.
 async function checkSyncHealth(
   serviceName: 'anvil' | 'forge',
-  ports: typeof DEFAULT_PORTS
+  ports: { anvil: number; forge: number }
 ): Promise<CheckResult> {
   const portMap = { anvil: ports.anvil, forge: ports.forge };
   const port = portMap[serviceName];
