@@ -1,7 +1,7 @@
 ---
 title: Contributing to Horus Guides
 description: How to author, validate, and ship the bundled getting-started guides that ride inside the Horus CLI.
-slug: _contributing
+slug: contributing
 tags: [meta, contributing, schema]
 schema_version: 1
 keywords: [contributing, schema, frontmatter, guide, authoring, validator]
@@ -40,7 +40,9 @@ Every file in this folder is part of a shared contract. Before you add, edit, or
 | `/docs/_contributing.md` | This file. Meta — not shipped to end users as a guide. |
 | `/docs/.schema/guide-frontmatter.schema.json` | JSON Schema for front-matter validation, consumed by the CI validator in story `8381c62a`. |
 
-**Files whose slug starts with `_` are meta** (not indexed, not shipped to `packages/cli/guides/`, not surfaced by `horus help` or `horus guide`).
+**Meta-exclusion convention:** any file whose **filename** (not slug) begins with `_` is meta — the CI build script (story `8381c62a`) filters these out *before* schema validation, and they are never copied into `packages/cli/guides/` or indexed in `index.json`. This keeps meta files out of `horus help` / `horus guide` output while still allowing them to live alongside the guides for authoring convenience.
+
+Meta files still carry normal front-matter (schema-compliant slug) for two reasons: (1) the file acts as a working reference implementation of the schema, and (2) when the Docusaurus workstream unparks, the meta files can be optionally surfaced in the docs site if authors choose.
 
 ---
 
