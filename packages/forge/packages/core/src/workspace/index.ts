@@ -18,3 +18,4 @@ export {
   WRAPPER_PATH,
   type McpServerEntry,
 } from './mcp-settings-writer.js';
+export { runStartupMigrations } from './workspace-migration.js';

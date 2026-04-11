@@ -377,7 +377,7 @@ export class WorkspaceCreator {
       }
 
       // Step 8c: Emit PreToolUse hook to block Read/Glob/Grep on source repos.
-      // Allows reads inside workspaces, sessions, and the managed clone pool (horus-repos).
+      // Allows reads inside workspaces, sessions, and the managed clone pool (repos).
       try {
         await emitReadGuardHook(workspacePath, hostWorkspacePath);
       } catch (err: any) {
