@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Arjunkhera/Horus/docs/.schema/guide-frontmatter.schema.json",
+  "title": "Horus Guide Front-Matter",
+  "description": "Schema for YAML front-matter on files under /docs/*.md. Consumed by the CI validator (story 8381c62a) and authored against by contributors (see /docs/_contributing.md).",
+  "type": "object",
+  "required": [
+    "title",
+    "description",
+    "slug",
+    "tags",
+    "schema_version",
+    "keywords",
+    "related_commands"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-facing title. Shown in `horus guide` list, `horus help` See-also, and host-agent prompts."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "One-line summary. ≤140 chars recommended. Shown in topic index and Docusaurus sidebar."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable kebab-case identifier. Globally unique across /docs/. Part of the user-facing command surface — treat as frozen once shipped."
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      },
+      "description": "Broad categorization (e.g. onboarding, anvil, forge). ≥1 entry."
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Currently must equal 1. Bump when introducing breaking changes."
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Retrieval signal — boosts BM25 scoring for synonyms and alternate phrasings. Empty array triggers a warning but does not fail the build."
+    },
+    "related_commands": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^horus [a-z][a-z0-9-]*( [a-z0-9-]+)*$"
+      },
+      "description": "Commands rendered in the `horus guide <topic>` output footer. Empty array is allowed."
+    },
+    "sidebar_position": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Docusaurus-only. Ignored by CLI retrieval. Kept for schema compatibility when the Docusaurus workstream unparks."
+    }
+  }
+}
