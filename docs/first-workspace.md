@@ -4,7 +4,7 @@ description: What a Forge workspace is, how it differs from a code session, and 
 slug: first-workspace
 tags: [forge, workspace, onboarding]
 schema_version: 1
-keywords: [workspace, forge, context, isolation, mcp, skills, plugins, environment]
+keywords: [workspace, forge, context, isolation, isolated, create, mcp, skills, plugins, environment, setup, initialize]
 related_commands: [horus status]
 sidebar_position: 3
 ---

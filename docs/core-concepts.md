@@ -1,6 +1,6 @@
 ---
 title: Horus Core Concepts
-description: The mental model for Anvil, Vault, Forge, and the supporting services that make Horus work.
+description: The mental model for Anvil, Vault, Forge, and the supporting services Horus depends on.
 slug: core-concepts
 tags: [concepts, architecture, onboarding, anvil, vault, forge]
 schema_version: 1

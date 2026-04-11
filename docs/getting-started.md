@@ -4,7 +4,7 @@ description: Install the Horus CLI, run first setup, and connect Claude — typi
 slug: getting-started
 tags: [onboarding, cli, install, setup]
 schema_version: 1
-keywords: [start, begin, first-time, install, setup, fresh, new, quickstart, onboarding, initialize]
+keywords: [start, begin, first, time, first-time, install, setup, set, up, connect, configure, fresh, new, quickstart, onboarding, initialize]
 related_commands: [horus setup, horus status, horus connect, horus doctor]
 sidebar_position: 1
 ---
