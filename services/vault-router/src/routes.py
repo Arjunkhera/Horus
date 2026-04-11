@@ -240,7 +240,7 @@ async def list_by_scope(
     for vault_name, data in results.items():
         if "error" in data:
             continue
-        for page in data.get("results", []):
+        for page in data.get("pages", []):
             page_id = page.get("id")
             if page_id and page_id in seen_uuids:
                 continue
