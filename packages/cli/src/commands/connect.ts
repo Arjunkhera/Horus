@@ -20,6 +20,7 @@ interface HttpMcpServerEntry {
 interface StdioMcpServerEntry {
   command: string;
   args: string[];
+  env?: Record<string, string>;
 }
 
 type McpServerEntry = HttpMcpServerEntry | StdioMcpServerEntry;
@@ -111,6 +112,33 @@ export function buildStdioServers(
     anvil: { command: wrapperPath, args: [`http://${host}:${config.ports.anvil}/mcp`, '--transport', 'http-only'] },
     vault: { command: wrapperPath, args: [`http://${host}:${config.ports.vault_mcp}/mcp`, '--transport', 'http-only'] },
     forge: { command: wrapperPath, args: [`http://${host}:${config.ports.forge}/mcp`, '--transport', 'http-only'] },
+  };
+}
+
+// ── Claude Desktop: mcp-remote bridge ────────────────────────────────────────
+
+export function detectNpxPath(): string {
+  const candidates = ['/opt/homebrew/bin/npx', '/usr/local/bin/npx'];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return 'npx';
+}
+
+export function buildClaudeDesktopServers(
+  config: Config,
+  host: string,
+): Record<string, StdioMcpServerEntry> {
+  const npxPath = detectNpxPath();
+  const npxDir = npxPath === 'npx' ? '/usr/local/bin' : npxPath.substring(0, npxPath.lastIndexOf('/'));
+  const envPath = `${npxDir}:/usr/local/bin:/usr/bin:/bin`;
+
+  return {
+    anvil: { command: npxPath, args: ['mcp-remote', `http://${host}:${config.ports.anvil}/mcp`], env: { PATH: envPath } },
+    vault: { command: npxPath, args: ['mcp-remote', `http://${host}:${config.ports.vault_mcp}/mcp`], env: { PATH: envPath } },
+    forge: { command: npxPath, args: ['mcp-remote', `http://${host}:${config.ports.forge}/mcp`], env: { PATH: envPath } },
   };
 }
 
@@ -248,14 +276,15 @@ export async function runConnect(
   // Write config for each target
   for (const target of targets) {
     if (target === 'claude-desktop') {
-      // Claude Desktop supports HTTP URLs natively (Streamable HTTP transport).
-      // Previous versions required mcp-remote-wrapper as a stdio bridge, but this
-      // caused permanent MCP disconnects on container restarts (mcp-remote has no
-      // reconnect logic — it tears down the stdio pipe when the backend drops).
+      // Claude Desktop only supports stdio-based MCP servers — it rejects bare HTTP
+      // url entries. We use mcp-remote (via npx) as a stdio-to-HTTP bridge.
+      // A PATH override is required to ensure Node >=20 is used rather than any
+      // older version (e.g. nvm's default) that Claude Desktop may inherit.
       const desktopSpinner = ora(`Configuring ${chalk.cyan('claude-desktop')}...`).start();
       try {
         const configPath = getConfigPath(target);
-        mergeAndWriteConfig(configPath, httpServers);
+        const desktopServers = buildClaudeDesktopServers(config, host);
+        mergeAndWriteConfig(configPath, desktopServers);
         desktopSpinner.succeed(`Configured ${chalk.cyan('claude-desktop')} — ${chalk.dim(configPath)}`);
         configured.push(target);
       } catch (error) {

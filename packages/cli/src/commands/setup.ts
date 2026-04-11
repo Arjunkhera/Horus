@@ -66,6 +66,7 @@ export const setupCommand = new Command('setup')
   .option('--vault-repo <url>', 'Vault knowledge-base repository URL (matches positionally with --vault-name)')
   .option('--forge-repo <url>', 'Forge registry repository URL')
   .option('--github-token <token>', 'GitHub personal access token for private repos (primary host)')
+  .option('--claude-desktop', 'Configure Claude Desktop MCP servers during setup (non-interactive opt-in)')
   .action(async (opts) => {
     console.log('');
     console.log(chalk.bold('Horus Setup'));
@@ -547,11 +548,35 @@ export const setupCommand = new Command('setup')
     const detectedClients = detectInstalledClients();
     if (detectedClients.length > 0) {
       console.log(chalk.bold('Configuring AI clients...'));
-      try {
-        await runConnect(config, runtime, detectedClients, 'localhost');
-      } catch (error) {
-        console.log(chalk.yellow('Could not configure AI clients automatically.'));
-        console.log(chalk.dim(`Run ${chalk.cyan('horus connect')} to configure them manually.`));
+
+      let clientsToConnect = [...detectedClients];
+
+      // Claude Desktop requires an explicit opt-in: prompt in interactive mode,
+      // flag-controlled in non-interactive mode.
+      if (clientsToConnect.includes('claude-desktop')) {
+        let configureDesktop: boolean;
+        if (opts.yes) {
+          configureDesktop = opts.claudeDesktop === true;
+          if (!configureDesktop) {
+            console.log(chalk.dim('Skipping Claude Desktop (pass --claude-desktop to configure it).'));
+          }
+        } else {
+          configureDesktop = opts.claudeDesktop === false
+            ? false
+            : await confirm({ message: 'Setup for Claude Desktop?', default: true });
+        }
+        if (!configureDesktop) {
+          clientsToConnect = clientsToConnect.filter((c) => c !== 'claude-desktop');
+        }
+      }
+
+      if (clientsToConnect.length > 0) {
+        try {
+          await runConnect(config, runtime, clientsToConnect, 'localhost');
+        } catch (error) {
+          console.log(chalk.yellow('Could not configure AI clients automatically.'));
+          console.log(chalk.dim(`Run ${chalk.cyan('horus connect')} to configure them manually.`));
+        }
       }
     } else {
       console.log(chalk.dim(`No AI clients detected. Run ${chalk.cyan('horus connect')} after installing Claude Desktop, Claude Code, or Cursor.`));
