@@ -1,0 +1,86 @@
+{
+  "$comment": "Retrieval-quality fixture. Each entry pins a canonical query to the expected top-1 guide slug. Drives packages/cli/test/retrieval.fixture.test.ts, which runs the full BM25 retrieval pipeline against the real CI-built index and fails the build on any regression. Story: 5719ce0e. Design ref: 7fff3764.",
+  "schema_version": 1,
+  "entries": [
+    {
+      "query": "how do I install horus",
+      "expectedTop": "getting-started",
+      "covers": "install + onboarding path"
+    },
+    {
+      "query": "set up horus for the first time",
+      "expectedTop": "getting-started",
+      "covers": "alternate phrasing of setup"
+    },
+    {
+      "query": "begin fresh install with docker",
+      "expectedTop": "getting-started",
+      "covers": "docker-centric onboarding phrasing"
+    },
+    {
+      "query": "get started from scratch",
+      "expectedTop": "getting-started",
+      "covers": "generic starter phrasing"
+    },
+    {
+      "query": "connect claude to horus",
+      "expectedTop": "getting-started",
+      "covers": "client connection step (covered in step 5 of getting-started)"
+    },
+    {
+      "query": "what is a forge workspace",
+      "expectedTop": "first-workspace",
+      "covers": "workspace definition query"
+    },
+    {
+      "query": "create my first isolated workspace",
+      "expectedTop": "first-workspace",
+      "covers": "isolated-context phrasing"
+    },
+    {
+      "query": "start coding on a repo",
+      "expectedTop": "first-session",
+      "covers": "canonical code-session trigger phrase"
+    },
+    {
+      "query": "set up a code session for a work item",
+      "expectedTop": "first-session",
+      "covers": "session creation phrasing"
+    },
+    {
+      "query": "what is a git worktree session",
+      "expectedTop": "first-session",
+      "covers": "worktree-specific technical phrasing"
+    },
+    {
+      "query": "create an anvil note",
+      "expectedTop": "first-note",
+      "covers": "basic note creation"
+    },
+    {
+      "query": "how do anvil types work",
+      "expectedTop": "first-note",
+      "covers": "dynamic type system"
+    },
+    {
+      "query": "make my first project in anvil",
+      "expectedTop": "first-note",
+      "covers": "project-creation tutorial"
+    },
+    {
+      "query": "horus architecture concepts",
+      "expectedTop": "core-concepts",
+      "covers": "architecture-oriented concept query"
+    },
+    {
+      "query": "how does vault work",
+      "expectedTop": "core-concepts",
+      "covers": "vault concept query"
+    },
+    {
+      "query": "what are the three systems in horus",
+      "expectedTop": "core-concepts",
+      "covers": "three-systems mental model"
+    }
+  ]
+}

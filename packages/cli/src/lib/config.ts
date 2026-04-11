@@ -33,6 +33,7 @@ export interface Config {
     vault_rest: number;
     vault_mcp: number;
     vault_router: number;
+    ui: number;
     forge: number;
     typesense: number;
     neo4j_http: number;
@@ -135,6 +136,7 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
       vault_rest: parsedPorts?.vault_rest ?? defaults.ports.vault_rest,
       vault_mcp: parsedPorts?.vault_mcp ?? defaults.ports.vault_mcp,
       vault_router: parsedPorts?.vault_router ?? defaults.ports.vault_router,
+      ui: parsedPorts?.ui ?? defaults.ports.ui,
       forge: parsedPorts?.forge ?? defaults.ports.forge,
       typesense: parsedPorts?.typesense ?? defaults.ports.typesense,
       neo4j_http: parsedPorts?.neo4j_http ?? defaults.ports.neo4j_http,

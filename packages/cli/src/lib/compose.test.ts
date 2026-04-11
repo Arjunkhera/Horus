@@ -42,6 +42,7 @@ function makeConfig(): Config {
       vault_rest: 8000,
       vault_mcp: 8300,
       vault_router: 8050,
+      ui: 8400,
       forge: 8200,
       typesense: 8108,
       neo4j_http: 7474,
