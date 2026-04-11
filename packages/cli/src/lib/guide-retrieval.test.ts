@@ -42,8 +42,8 @@ function makeIndex(): GuideIndex {
 }
 
 describe('tokenizeQuery', () => {
-  it('lowercases and splits on non-word chars', () => {
-    expect(tokenizeQuery('How do I START coding?')).toEqual(['how', 'do', 'start', 'coding']);
+  it('lowercases, splits, and drops stop words', () => {
+    expect(tokenizeQuery('How do I START coding?')).toEqual(['start', 'coding']);
   });
 
   it('drops tokens shorter than 2 chars', () => {
@@ -58,6 +58,11 @@ describe('tokenizeQuery', () => {
   it('returns empty array for empty or whitespace input', () => {
     expect(tokenizeQuery('')).toEqual([]);
     expect(tokenizeQuery('   ')).toEqual([]);
+  });
+
+  it('drops common English stop words', () => {
+    expect(tokenizeQuery('the quick brown fox')).toEqual(['quick', 'brown', 'fox']);
+    expect(tokenizeQuery('my first note')).toEqual(['first', 'note']);
   });
 });
 

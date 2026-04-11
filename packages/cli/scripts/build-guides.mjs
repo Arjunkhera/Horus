@@ -129,6 +129,26 @@ function validate(fm, schema) {
 // ── Tokenizer for BM25 retrieval ────────────────────────────────────────────
 // Strips code fences, inline code, and markdown punctuation.
 // Keeps duplicates so retrieval can compute term frequency.
+// Filters English stop words so rare filler tokens (like "my") don't dominate
+// BM25 scoring when they happen to appear in only one guide.
+//
+// NOTE: this tokenizer MUST stay in sync with the one in
+// packages/cli/src/lib/guide-retrieval.ts. Diverging would silently break
+// retrieval quality.
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'while',
+  'of', 'in', 'on', 'at', 'to', 'from', 'for', 'with', 'by', 'as', 'about',
+  'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their',
+  'he', 'she', 'we', 'you', 'your', 'our', 'my', 'me', 'us', 'his', 'her', 'him',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
+  'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+  'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall',
+  'not', 'no', 'yes', 'so', 'too', 'very', 'just', 'only', 'also',
+  'all', 'any', 'some', 'each', 'every', 'more', 'most', 'much', 'many',
+  'one', 'two', 'three',
+  'here', 'there', 'where', 'how', 'why', 'what', 'who', 'which',
+]);
+
 function tokenize(text) {
   return text
     .toLowerCase()
@@ -137,7 +157,7 @@ function tokenize(text) {
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/\s+/)
-    .filter((t) => t.length >= 2);
+    .filter((t) => t.length >= 2 && !STOP_WORDS.has(t));
 }
 
 // ── Front-matter extraction ─────────────────────────────────────────────────

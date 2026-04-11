@@ -31,7 +31,23 @@ export interface RetrievalResult {
   alternates: GuideEntry[];
 }
 
-// ── Tokenizer (must match scripts/build-guides.mjs) ─────────────────────────
+// ── Tokenizer ───────────────────────────────────────────────────────────────
+// Must stay in sync with scripts/build-guides.mjs. Divergence would silently
+// break retrieval quality — query tokens would fail to match index tokens.
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'while',
+  'of', 'in', 'on', 'at', 'to', 'from', 'for', 'with', 'by', 'as', 'about',
+  'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their',
+  'he', 'she', 'we', 'you', 'your', 'our', 'my', 'me', 'us', 'his', 'her', 'him',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
+  'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+  'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall',
+  'not', 'no', 'yes', 'so', 'too', 'very', 'just', 'only', 'also',
+  'all', 'any', 'some', 'each', 'every', 'more', 'most', 'much', 'many',
+  'one', 'two', 'three',
+  'here', 'there', 'where', 'how', 'why', 'what', 'who', 'which',
+]);
+
 export function tokenizeQuery(text: string): string[] {
   return text
     .toLowerCase()
@@ -40,7 +56,7 @@ export function tokenizeQuery(text: string): string[] {
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/\s+/)
-    .filter((t) => t.length >= 2);
+    .filter((t) => t.length >= 2 && !STOP_WORDS.has(t));
 }
 
 // ── BM25 ────────────────────────────────────────────────────────────────────
