@@ -8,7 +8,7 @@ import {
   type CallToolRequest,
   type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ForgeCore, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions, type ArtifactType, type ArtifactBundle, type ArtifactMeta } from '@forge/core';
+import { ForgeCore, runStartupMigrations, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions, type ArtifactType, type ArtifactBundle, type ArtifactMeta } from '@forge/core';
 import * as http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { promises as fsPromises } from 'node:fs';
@@ -1019,6 +1019,7 @@ function buildServer(workspaceRoot: string): Server {
  * Used for local Claude Code integration.
  */
 export async function startMcpServer(workspaceRoot: string = process.env.FORGE_WORKSPACE_PATH ?? process.cwd()): Promise<void> {
+  await runStartupMigrations();
   const server = buildServer(workspaceRoot);
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -1044,6 +1045,8 @@ export interface HttpServerOptions {
  */
 export async function startMcpServerHttp(opts: HttpServerOptions): Promise<void> {
   const { port, host, workspaceRoot = process.env.FORGE_WORKSPACE_PATH ?? process.cwd() } = opts;
+
+  await runStartupMigrations();
 
   // Session registry: maps sessionId -> { transport, lastSeen }
   const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes
