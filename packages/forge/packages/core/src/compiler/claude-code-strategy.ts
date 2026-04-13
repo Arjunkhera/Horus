@@ -1,4 +1,4 @@
-import type { ResolvedArtifact, FileOperation } from '../models/index.js';
+import type { ResolvedArtifact, FileOperation, PersonaMeta } from '../models/index.js';
 import type { EmitStrategy, CompiledOutput } from './types.js';
 
 /**
@@ -6,6 +6,11 @@ import type { EmitStrategy, CompiledOutput } from './types.js';
  *
  * Skills emit to:   .claude/skills/{id}/SKILL.md + additional files
  * Agents emit to:   .claude/agents/{id}.md
+ * Personas emit to: .claude/personas/{id}/PERSONA.md (canonical) AND
+ *                   .claude/agents/{id}.md (invocable mirror — personas
+ *                   participate as agent-team members in discovery and
+ *                   research-council skills, so they must be discoverable
+ *                   by Claude Code's subagent loader).
  * Plugins: emits all contained skills and agents
  *
  * @example
@@ -60,11 +65,29 @@ export class ClaudeCodeStrategy implements EmitStrategy {
         operation: 'create',
       });
     } else if (ref.type === 'persona') {
-      // Personas: .claude/personas/{id}/PERSONA.md
+      // Personas: canonical location + Claude Code agent-mirror.
+      //
+      // Personas represent agent-team members (stakeholder voices, council
+      // participants). Skills invoke them via the Claude Code Agent tool,
+      // which only discovers subagents under .claude/agents/<id>.md. We
+      // therefore write two files:
+      //
+      //   1. .claude/personas/{id}/PERSONA.md — canonical, forge-native
+      //   2. .claude/agents/{id}.md — invocable mirror with Claude Code
+      //      frontmatter synthesised from persona metadata
+      const meta = bundle.meta as PersonaMeta;
       const personaPath = `.claude/personas/${ref.id}/PERSONA.md`;
       operations.push({
         path: personaPath,
         content: bundle.content,
+        sourceRef: ref,
+        operation: 'create',
+      });
+
+      const agentMirrorPath = `.claude/agents/${ref.id}.md`;
+      operations.push({
+        path: agentMirrorPath,
+        content: buildPersonaAgentMirror(meta, bundle.content),
         sourceRef: ref,
         operation: 'create',
       });
@@ -74,4 +97,23 @@ export class ClaudeCodeStrategy implements EmitStrategy {
       // Nothing to emit directly — dependencies handle it
     }
   }
+}
+
+/**
+ * Build the Claude Code agent-mirror content for a persona.
+ *
+ * The authored PERSONA.md carries its own frontmatter (forge-internal:
+ * {id, name}). Claude Code's subagent loader requires {name, description}
+ * where `name` matches the filename stem. This helper strips any existing
+ * leading frontmatter block and prepends frontmatter synthesised from
+ * persona metadata — leaving the persona body (identity, goals, concerns,
+ * communication style) intact as the subagent's instructions.
+ */
+function buildPersonaAgentMirror(meta: PersonaMeta, personaContent: string): string {
+  const stripped = personaContent.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  const indentedDescription = meta.description
+    .split(/\r?\n/)
+    .map((line) => `  ${line}`)
+    .join('\n');
+  return `---\nname: ${meta.id}\ndescription: >\n${indentedDescription}\n---\n\n${stripped}`;
 }
