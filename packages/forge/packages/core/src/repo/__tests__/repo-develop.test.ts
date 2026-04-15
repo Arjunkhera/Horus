@@ -499,7 +499,9 @@ describe('repoDevelop', () => {
       expect(cloneCalls.length).toBe(1);
       const cloneArgs = cloneCalls[0][1] as string[];
       expect(cloneArgs[1]).toBe(userRepoPath); // source = user-tier path
-      expect(cloneArgs[2]).toBe(path.join(tmpDir, 'repos', 'TestRepo')); // dest = managed pool
+      // dest is now tmpPath (atomic rename) — ends with .tmp.<pid> before rename
+      expect(cloneArgs[2]).toContain(path.join(tmpDir, 'repos', 'TestRepo'));
+      expect(cloneArgs[2]).toContain('.tmp.');
     });
 
     it('reuses existing managed clone on subsequent calls', async () => {
@@ -774,6 +776,7 @@ describe('repoDevelop', () => {
     });
 
     it('single name match still works without disambiguation (no regression)', async () => {
+
       const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
       const repoIndex = { repos: [entry] };
 
@@ -799,6 +802,219 @@ describe('repoDevelop', () => {
       await expect(
         repoDevelop(opts, globalConfig, repoIndex, async () => {}),
       ).rejects.toThrow('not found');
+    });
+  });
+
+  // ── Clone failure cleanup (atomic rename) ─────────────────────────────────
+
+  describe('clone failure cleanup (atomic rename)', () => {
+    async function makeUserTierSetup() {
+      const userRepoPath = path.join(tmpDir, 'user-repos', 'TestRepo');
+      await fs.mkdir(userRepoPath, { recursive: true });
+      // Remove managed pool so a fresh clone is needed
+      await fs.rm(fakeRepoPath, { recursive: true, force: true });
+      const entry = makeRepoEntry({ localPath: userRepoPath, workflow: CONFIRMED_WORKFLOW });
+      return { userRepoPath, entry };
+    }
+
+    it('throws CLONE_FAILED and leaves no tmp dir when git clone fails', async () => {
+      const { entry } = await makeUserTierSetup();
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+
+      mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+        const joined = (args as string[]).join(' ');
+        if (joined.startsWith('clone')) {
+          const err = Object.assign(new Error('clone failed'), { killed: false, stderr: 'fatal: not a repository' });
+          (cb as any)(err, { stdout: '', stderr: '' });
+        } else {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        }
+        return {} as any;
+      });
+
+      await expect(
+        repoDevelop({ repo: 'TestRepo', workItem: 'wi-fail1' }, globalConfig, { repos: [entry] }, async () => {}),
+      ).rejects.toMatchObject({ code: 'CLONE_FAILED' });
+
+      // No .tmp. directory should remain in the managed pool
+      const poolDir = path.join(tmpDir, 'repos');
+      const entries = await fs.readdir(poolDir).catch(() => [] as string[]);
+      expect(entries.filter(e => e.includes('.tmp.'))).toHaveLength(0);
+    });
+
+    it('throws CLONE_TIMEOUT (not CLONE_FAILED) when err.killed is true', async () => {
+      const { entry } = await makeUserTierSetup();
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+
+      mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+        const joined = (args as string[]).join(' ');
+        if (joined.startsWith('clone')) {
+          const err = Object.assign(new Error('timeout'), { killed: true, stderr: '' });
+          (cb as any)(err, { stdout: '', stderr: '' });
+        } else {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        }
+        return {} as any;
+      });
+
+      await expect(
+        repoDevelop({ repo: 'TestRepo', workItem: 'wi-timeout1' }, globalConfig, { repos: [entry] }, async () => {}),
+      ).rejects.toMatchObject({ code: 'CLONE_TIMEOUT' });
+    });
+
+    it('error message includes git stderr output', async () => {
+      const { entry } = await makeUserTierSetup();
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const gitStderr = 'fatal: repository not found';
+
+      mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+        const joined = (args as string[]).join(' ');
+        if (joined.startsWith('clone')) {
+          const err = Object.assign(new Error('clone failed'), { killed: false, stderr: gitStderr });
+          (cb as any)(err, { stdout: '', stderr: gitStderr });
+        } else {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        }
+        return {} as any;
+      });
+
+      try {
+        await repoDevelop({ repo: 'TestRepo', workItem: 'wi-stderr1' }, globalConfig, { repos: [entry] }, async () => {});
+        expect.fail('should have thrown');
+      } catch (err: any) {
+        expect(err.code).toBe('CLONE_FAILED');
+        expect(err.message).toContain(gitStderr);
+      }
+    });
+  });
+
+  // ── Corrupt managed clone recovery ────────────────────────────────────────
+
+  describe('corrupt managed clone recovery', () => {
+    afterEach(async () => {
+      // Reset mockImplementation overrides so subsequent tests see the default mock
+      const { execFile } = await import('child_process');
+      vi.mocked(execFile).mockReset();
+    });
+
+    it('reuses valid managed clone without re-cloning (regression check)', async () => {
+      // fakeRepoPath exists and rev-parse --git-dir succeeds → skip clone
+      const userRepoPath = path.join(tmpDir, 'user-repos', 'TestRepo');
+      await fs.mkdir(userRepoPath, { recursive: true });
+
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+
+      // Explicit default mock: rev-parse --git-dir → success; no clone needed
+      mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+        const joined = (args as string[]).join(' ');
+        if (joined.startsWith('worktree add')) {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        } else {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        }
+        return {} as any;
+      });
+
+      const entry = makeRepoEntry({ localPath: userRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const result = await repoDevelop(
+        { repo: 'TestRepo', workItem: 'wi-valid1' },
+        globalConfig,
+        { repos: [entry] },
+        async () => {},
+      );
+
+      expect(result.status).toBe('created');
+
+      const cloneCalls = mockExecFile.mock.calls.filter(
+        (call) => (call[1] as string[])?.[0] === 'clone',
+      );
+      expect(cloneCalls.length).toBe(0);
+    });
+
+    it('detects corrupt managed clone (rev-parse fails) and re-clones', async () => {
+      // fakeRepoPath exists (from beforeEach) but rev-parse --git-dir will fail → corrupt
+      const userRepoPath = path.join(tmpDir, 'user-repos', 'TestRepo');
+      await fs.mkdir(userRepoPath, { recursive: true });
+
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+
+      mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+        const joined = (args as string[]).join(' ');
+        if (joined === 'rev-parse --git-dir') {
+          // Simulate corrupt managed clone
+          (cb as any)(new Error('not a git repository'), { stdout: '', stderr: '' });
+        } else if (joined.startsWith('clone')) {
+          const destPath = (args as string[])[2];
+          if (destPath) require('fs').mkdirSync(destPath, { recursive: true });
+          (cb as any)(null, { stdout: '', stderr: '' });
+        } else if (joined.startsWith('worktree add')) {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        } else {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        }
+        return {} as any;
+      });
+
+      const entry = makeRepoEntry({ localPath: userRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const result = await repoDevelop(
+        { repo: 'TestRepo', workItem: 'wi-corrupt1' },
+        globalConfig,
+        { repos: [entry] },
+        async () => {},
+      );
+
+      expect(result.status).toBe('created');
+
+      // Clone was called (re-clone after corrupt detection)
+      const cloneCalls = mockExecFile.mock.calls.filter(
+        (call) => (call[1] as string[])?.[0] === 'clone',
+      );
+      expect(cloneCalls.length).toBe(1);
+    });
+  });
+
+  // ── Source-adaptive clone timeout ─────────────────────────────────────────
+
+  describe('source-adaptive clone timeout', () => {
+    it('uses 300_000ms timeout for local path sources', async () => {
+      const userRepoPath = path.join(tmpDir, 'user-repos', 'TestRepo');
+      await fs.mkdir(userRepoPath, { recursive: true });
+      await fs.rm(fakeRepoPath, { recursive: true, force: true });
+
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const capturedTimeouts: number[] = [];
+
+      mockExecFile.mockImplementation((cmd, args, opts: any, cb) => {
+        const joined = (args as string[]).join(' ');
+        if (joined.startsWith('clone')) {
+          if (opts?.timeout !== undefined) capturedTimeouts.push(opts.timeout);
+          const destPath = (args as string[])[2];
+          if (destPath) require('fs').mkdirSync(destPath, { recursive: true });
+          (cb as any)(null, { stdout: '', stderr: '' });
+        } else if (joined.startsWith('worktree add')) {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        } else {
+          (cb as any)(null, { stdout: '', stderr: '' });
+        }
+        return {} as any;
+      });
+
+      const entry = makeRepoEntry({ localPath: userRepoPath, workflow: CONFIRMED_WORKFLOW });
+      await repoDevelop(
+        { repo: 'TestRepo', workItem: 'wi-local-timeout' },
+        globalConfig,
+        { repos: [entry] },
+        async () => {},
+      );
+
+      expect(capturedTimeouts).toHaveLength(1);
+      expect(capturedTimeouts[0]).toBe(300_000);
     });
   });
 });
