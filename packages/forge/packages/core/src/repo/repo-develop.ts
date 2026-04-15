@@ -194,21 +194,34 @@ async function detectWorkflow(
  * Clone a repo into the managed pool as a regular clone (not bare).
  * Used for tier-3 resolution when the repo isn't indexed locally,
  * or to create a writable managed clone from a read-only user-tier repo.
+ *
+ * Uses an atomic rename pattern: clones into a temp directory first, then
+ * renames to destPath on success. On failure the temp dir is cleaned up,
+ * ensuring destPath is never left in a partial state.
  */
 async function cloneToManagedPool(
   sourceUrl: string,
   destPath: string,
 ): Promise<void> {
+  const tmpPath = `${destPath}.tmp.${process.pid}`;
   await fs.mkdir(path.dirname(destPath), { recursive: true });
+  // Local clones over virtiofs (Podman) are significantly slower than remote
+  const timeout = isLocalPath(sourceUrl) ? 300_000 : 120_000;
+  const startTime = Date.now();
   try {
-    await execFileAsync('git', ['clone', sourceUrl, destPath], {
-      timeout: 120000,
-    });
+    await execFileAsync('git', ['clone', sourceUrl, tmpPath], { timeout });
+    await fs.rename(tmpPath, destPath);
   } catch (err: any) {
+    await fs.rm(tmpPath, { recursive: true, force: true }).catch(() => {});
+    const durationMs = Date.now() - startTime;
+    const isTimeout = err.killed === true;
+    const detail = err.stderr?.trim() ? ` stderr: ${err.stderr.trim()}` : ` ${err.message}`;
     throw new ForgeError(
-      'CLONE_FAILED',
-      `Failed to clone ${sourceUrl} to ${destPath}: ${err.message}`,
-      'Check the remote URL and your network/SSH access.',
+      isTimeout ? 'CLONE_TIMEOUT' : 'CLONE_FAILED',
+      `Failed to clone ${sourceUrl} to ${destPath} after ${durationMs}ms:${detail}`,
+      isTimeout
+        ? `Clone timed out after ${durationMs}ms. This may be caused by slow filesystem I/O (e.g. Podman virtiofs). The partial clone has been removed.`
+        : 'Check the remote URL and your network/SSH access.',
     );
   }
 }
@@ -322,9 +335,16 @@ async function ensureWritableWorktreeBase(
   let managedCloneExists = false;
   try {
     await fs.access(managedClonePath);
+    // Validate it's a real git repo — guards against partial clones left by
+    // prior failures or container restarts mid-clone
+    await execFileAsync('git', ['rev-parse', '--git-dir'], {
+      cwd: managedClonePath,
+      timeout: 5000,
+    });
     managedCloneExists = true;
   } catch {
-    // Not yet cloned into managed pool
+    // Not yet cloned, or clone is corrupt — remove any partial state and start fresh
+    await fs.rm(managedClonePath, { recursive: true, force: true }).catch(() => {});
   }
 
   if (!managedCloneExists) {
