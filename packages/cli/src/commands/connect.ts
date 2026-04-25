@@ -189,15 +189,17 @@ export async function registerWithClaudeCode(
 async function syncSkills(runtime: ReturnType<typeof detectRuntime> extends Promise<infer R> ? R : never): Promise<void> {
   const home = homedir();
   const skillsBase = join(home, '.claude', 'skills');
-  const skills = ['horus-anvil', 'horus-vault', 'horus-forge'] as const;
+  const skills = ['horus-anvil', 'horus-vault', 'horus-forge', 'horus-context', 'capture', 'triage'] as const;
   const forgeContainer = 'horus-forge-1';
+
+  const homeResult = await runtime.exec(forgeContainer, 'sh', '-c', 'echo $HOME');
+  const containerHome = homeResult.stdout.trim();
 
   for (const skill of skills) {
     const destDir = join(skillsBase, skill);
     mkdirSync(destDir, { recursive: true });
-    const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
+    const src = `${containerHome}/.claude/skills/${skill}/SKILL.md`;
     const dest = join(destDir, 'SKILL.md');
-    // docker/podman cp <container>:<src> <dest>
     const result = await runtime.exec(forgeContainer, 'cat', src);
     if (result.exitCode === 0 && result.stdout.trim()) {
       writeFileSync(dest, result.stdout, 'utf-8');
@@ -211,13 +213,16 @@ async function syncSkillsForCursor(runtime: ReturnType<typeof detectRuntime> ext
   const home = homedir();
   const rulesDir = join(home, '.cursor', 'rules');
   const skillsBase = join(home, '.cursor', 'skills-cursor');
-  const skills = ['horus-anvil', 'horus-vault', 'horus-forge'] as const;
+  const skills = ['horus-anvil', 'horus-vault', 'horus-forge', 'horus-context', 'capture', 'triage'] as const;
   const forgeContainer = 'horus-forge-1';
 
   mkdirSync(rulesDir, { recursive: true });
 
+  const homeResult = await runtime.exec(forgeContainer, 'sh', '-c', 'echo $HOME');
+  const containerHome = homeResult.stdout.trim();
+
   for (const skill of skills) {
-    const src = `/home/forge/.claude/skills/${skill}/SKILL.md`;
+    const src = `${containerHome}/.claude/skills/${skill}/SKILL.md`;
     const result = await runtime.exec(forgeContainer, 'cat', src);
     if (result.exitCode === 0 && result.stdout.trim()) {
       // Emit as Cursor rule (always-on context)
