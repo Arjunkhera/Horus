@@ -29,6 +29,25 @@ function makeAgentArtifact(id: string, content = `# Agent ${id}`): ResolvedArtif
   };
 }
 
+function makePersonaArtifact(
+  id: string,
+  options: { description?: string; content?: string } = {}
+): ResolvedArtifact {
+  const description = options.description ?? `Persona ${id} description`;
+  const content =
+    options.content ??
+    `---\nid: ${id}\nname: Persona ${id}\n---\n\n# Persona ${id}\n\nPersona body`;
+  return {
+    ref: { type: 'persona', id, version: '1.0.0' },
+    bundle: {
+      meta: { id, name: `Persona ${id}`, version: '1.0.0', description, type: 'persona', tags: [] },
+      content,
+      contentPath: 'PERSONA.md',
+    },
+    dependencies: [],
+  };
+}
+
 describe('ClaudeCodeStrategy', () => {
   const strategy = new ClaudeCodeStrategy();
 
@@ -69,6 +88,59 @@ describe('ClaudeCodeStrategy', () => {
     const artifact = makeSkillArtifact('dev');
     const output = strategy.emit(artifact);
     expect(output.operations[0]!.sourceRef).toEqual({ type: 'skill', id: 'dev', version: '1.0.0' });
+  });
+
+  it('emits persona to both canonical path and invocable agent-mirror', () => {
+    const artifact = makePersonaArtifact('skeptic', {
+      description: 'Devil\'s advocate who rigorously challenges assumptions.',
+    });
+    const output = strategy.emit(artifact);
+    const paths = output.operations.map((o) => o.path);
+    expect(paths).toContain('.claude/personas/skeptic/PERSONA.md');
+    expect(paths).toContain('.claude/agents/skeptic.md');
+    expect(output.operations).toHaveLength(2);
+  });
+
+  it('persona canonical emission preserves PERSONA.md content verbatim', () => {
+    const authored =
+      '---\nid: skeptic\nname: Skeptic\n---\n\n# Skeptic\n\nChallenges assumptions.';
+    const artifact = makePersonaArtifact('skeptic', { content: authored });
+    const output = strategy.emit(artifact);
+    const canonical = output.operations.find(
+      (o) => o.path === '.claude/personas/skeptic/PERSONA.md'
+    );
+    expect(canonical?.content).toBe(authored);
+  });
+
+  it('persona agent-mirror strips original frontmatter and uses meta.id + description', () => {
+    const authored =
+      '---\nid: skeptic\nname: Skeptic\n---\n\n# Skeptic\n\nChallenges assumptions.';
+    const artifact = makePersonaArtifact('skeptic', {
+      description: 'Devil\'s advocate who challenges weak reasoning.',
+      content: authored,
+    });
+    const output = strategy.emit(artifact);
+    const mirror = output.operations.find((o) => o.path === '.claude/agents/skeptic.md');
+    expect(mirror).toBeDefined();
+    expect(mirror!.content).toMatch(/^---\nname: skeptic\n/);
+    expect(mirror!.content).toContain(
+      "description: >\n  Devil's advocate who challenges weak reasoning."
+    );
+    // Body retained, original frontmatter stripped
+    expect(mirror!.content).toContain('# Skeptic');
+    expect(mirror!.content).toContain('Challenges assumptions.');
+    expect(mirror!.content).not.toContain('id: skeptic\nname: Skeptic');
+  });
+
+  it('persona agent-mirror tolerates missing original frontmatter', () => {
+    const artifact = makePersonaArtifact('plain', {
+      content: '# Plain persona\n\nNo frontmatter here.',
+      description: 'A persona without authored frontmatter.',
+    });
+    const output = strategy.emit(artifact);
+    const mirror = output.operations.find((o) => o.path === '.claude/agents/plain.md');
+    expect(mirror!.content).toMatch(/^---\nname: plain\ndescription: >\n  A persona without/);
+    expect(mirror!.content).toContain('# Plain persona');
   });
 });
 
