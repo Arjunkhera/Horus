@@ -54,6 +54,7 @@ export class GitSyncEngine {
     this.health.daemonAlive = true;
 
     await this.cleanStaleLocks();
+    await this.ensureGitConfig(this.createGit());
     await this.push();
     await this.pull();
 
@@ -260,6 +261,12 @@ export class GitSyncEngine {
     return simpleGit(this.opts.notesPath, {
       timeout: { block: this.opts.gitTimeoutMs },
     });
+  }
+
+  private async ensureGitConfig(git: SimpleGit): Promise<void> {
+    // Suppress mode-only diffs on filesystems (e.g. podman/Docker bind mounts)
+    // that don't preserve execute bits, preventing spurious "modified" noise.
+    await git.addConfig('core.fileMode', 'false');
   }
 
   /**
