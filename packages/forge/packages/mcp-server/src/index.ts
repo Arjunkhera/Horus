@@ -216,6 +216,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'forge_repo_scan',
+    description:
+      'Trigger a full repository index rescan. Use this after cloning a new repository to make it discoverable via forge_repo_resolve and forge_develop. ' +
+      'Scan paths are read from the global Forge config — no parameters needed. ' +
+      'Returns the number of scan paths checked and repositories found.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
     name: 'forge_develop',
     description:
       'Start or resume a code session for a work item on a repository. Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/. ' +
@@ -523,6 +534,24 @@ function buildServer(workspaceRoot: string): Server {
           };
         }
 
+        case 'forge_repo_scan': {
+          const index = await forge.repoScan();
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                scanPaths: index.scanPaths,
+                reposFound: index.repos.length,
+                repos: index.repos.map((r: RepoIndexEntry) => ({
+                  name: r.name,
+                  localPath: r.localPath,
+                  remoteUrl: r.remoteUrl,
+                })),
+              }, null, 2),
+            }],
+          };
+        }
+
         case 'forge_repo_list': {
           const { query, language } = (args ?? {}) as { query?: string; language?: string };
           let repos = await forge.repoList(query);
@@ -575,7 +604,7 @@ function buildServer(workspaceRoot: string): Server {
           }
           if (!resolveResult.match) {
             return {
-              content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'REPO_NOT_FOUND', message: 'Repository not found', suggestion: 'Run: forge repo scan' }) }],
+              content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'REPO_NOT_FOUND', message: 'Repository not found', suggestion: 'Call forge_repo_scan to trigger a rescan, then retry.' }) }],
               isError: true,
             };
           }

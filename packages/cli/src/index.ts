@@ -14,6 +14,7 @@ import { backupCommand } from './commands/backup.js';
 import { testEnvCommand } from './commands/test-env.js';
 import { helpCommand } from './commands/help.js';
 import { guideCommand } from './commands/guide.js';
+import { repoCommand } from './commands/repo.js';
 import { CLI_VERSION } from './lib/constants.js';
 
 const program = new Command();
@@ -36,6 +37,7 @@ program.addCommand(backupCommand);
 program.addCommand(testEnvCommand);
 program.addCommand(helpCommand);
 program.addCommand(guideCommand);
+program.addCommand(repoCommand);
 
 // Global error handling
 program.exitOverride();
