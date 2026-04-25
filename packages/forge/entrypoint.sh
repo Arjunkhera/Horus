@@ -85,15 +85,13 @@ mkdir -p "${MANAGED_REPOS_PATH}"
 mkdir -p "$(dirname "${WORKSPACES_PATH}")/sessions"
 mkdir -p "$(dirname "${WORKSPACES_PATH}")/test-env"
 
-# Step 1b: Mark mounted repo paths as git-safe.
-# When running in containers (Podman/Docker), mounted volumes may be owned by a
-# different UID than the in-container user, causing git's "dubious ownership"
-# check to fail.  Wildcard entries cover all repos in each directory.
-git config --global --add safe.directory "${MANAGED_REPOS_PATH}/*"
-git config --global --add safe.directory "${SESSIONS_ROOT}/*"
-for _scan in $(echo "${FORGE_SCAN_PATHS}" | tr ':' ' '); do
-  [ -n "$_scan" ] && git config --global --add safe.directory "${_scan}/*"
-done
+# Step 1b: Mark all directories as git-safe.
+# Bind-mounted volumes in containers (Podman/Docker) are owned by the host UID,
+# which differs from the container UID. Git 2.35.2+ rejects such repos unless
+# safe.directory is configured. The wildcard '*' covers all paths including
+# nested subdirectories (e.g. /data/repos/ArjunKhera/Horus) that path-specific
+# globs would miss.
+git config --global --add safe.directory '*'
 
 # Step 2: One-time auto-migration from legacy ~/.forge/ if new config doesn't exist yet.
 # Copies repos.json and workspaces.json from the old location to the new config dir.
