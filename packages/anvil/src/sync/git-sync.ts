@@ -55,6 +55,7 @@ export async function syncPull(
     }
 
     const git: SimpleGit = simpleGit(vaultPath);
+    await git.addConfig('core.fileMode', 'false');
 
     // 1. Fetch from remote
     try {
@@ -141,6 +142,7 @@ export async function syncPush(
     }
 
     const git: SimpleGit = simpleGit(vaultPath);
+    await git.addConfig('core.fileMode', 'false');
 
     // 1. Check current status
     const statusBefore = await git.status();
