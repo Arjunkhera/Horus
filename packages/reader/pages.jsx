@@ -460,7 +460,7 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
         )}
 
         <article className="md">
-          {window.MD.renderMarkdown(note.body, (id) => onNavigate({ kind: 'note', id }))}
+          <window.MD.MarkdownBody body={note.body} onNavigate={(id) => onNavigate({ kind: 'note', id })} />
         </article>
       </div>
 

@@ -4,7 +4,9 @@ const { useState, useEffect, useMemo, useRef, useCallback } = React;
 // ── Tiny markdown renderer ───────────────────────────────────────
 // Supports: headings, paragraphs, lists, code blocks, inline code,
 // tables, blockquotes, hr, bold/italic, wiki-links [[...]].
-function renderMarkdown(src, onWikiClick) {
+// Pass an optional resolveTitle(text) -> note|null for custom resolution.
+function renderMarkdown(src, onWikiClick, resolveTitle) {
+  const _resolve = resolveTitle || ((t) => window.HORUS_DATA.findFuzzy(t));
   const lines = src.split('\n');
   const out = [];
   let i = 0;
@@ -20,7 +22,7 @@ function renderMarkdown(src, onWikiClick) {
     while ((m = re.exec(text)) !== null) {
       if (m.index > last) parts.push(text.slice(last, m.index));
       if (m[1] !== undefined) {
-        const note = window.HORUS_DATA.findFuzzy(m[1]);
+        const note = _resolve(m[1]);
         parts.push(
           <span
             key={k()}
@@ -205,5 +207,60 @@ function fmtRelative(s) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// ── MarkdownBody ─────────────────────────────────────────────────
+// React component wrapping renderMarkdown with async wiki-link resolution.
+// For notes loaded from Anvil, most titles resolve sync via HORUS_DATA.findFuzzy.
+// Any remaining unresolved titles are batch-searched against Anvil and resolved
+// in a second render pass ("placeholder → resolved" behaviour).
+function MarkdownBody({ body, onNavigate }) {
+  const [asyncResolved, setAsyncResolved] = useState({});
+
+  // Collect wiki-link titles that don't resolve synchronously
+  const unresolvedTitles = useMemo(() => {
+    if (!body) return [];
+    const re = /\[\[([^\]]+)\]\]/g;
+    const titles = new Set();
+    let m;
+    while ((m = re.exec(body)) !== null) {
+      if (!window.HORUS_DATA.findFuzzy(m[1])) titles.add(m[1]);
+    }
+    return [...titles];
+  }, [body]);
+
+  // Batch-search Anvil for unresolved titles
+  useEffect(() => {
+    if (!unresolvedTitles.length || !window.AnvilClient) return;
+    const pending = unresolvedTitles.filter(t => !(t in asyncResolved));
+    if (!pending.length) return;
+
+    Promise.all(
+      pending.map(async (title) => {
+        try {
+          const result = await window.AnvilClient.search({ query: title, limit: 1 });
+          const hit = result?.results?.[0];
+          // Only accept if title matches closely (avoid false positives)
+          if (hit && hit.title.toLowerCase().includes(title.toLowerCase())) {
+            return [title, { id: hit.id, title: hit.title, type: hit.type }];
+          }
+        } catch {}
+        return [title, null];
+      })
+    ).then((entries) => {
+      setAsyncResolved((prev) => {
+        const next = { ...prev };
+        entries.forEach(([t, note]) => { next[t] = note; });
+        return next;
+      });
+    });
+  }, [unresolvedTitles]);
+
+  function resolveTitle(title) {
+    return window.HORUS_DATA.findFuzzy(title) || asyncResolved[title] || null;
+  }
+
+  if (!body) return null;
+  return <>{renderMarkdown(body, onNavigate, resolveTitle)}</>;
+}
+
 // expose
-window.MD = { renderMarkdown, TypePill, StatusChip, PriorityChip, edgeLabel, fmtDate, fmtRelative };
+window.MD = { renderMarkdown, MarkdownBody, TypePill, StatusChip, PriorityChip, edgeLabel, fmtDate, fmtRelative };
