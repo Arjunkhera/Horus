@@ -193,8 +193,9 @@ window.HORUS_DATA = (function () {
   e('note-quartz-arch', 'bookmark-quartz', 'references');
 
   // ── Indexes ───────────────────────────────────────────
-  const byId = Object.fromEntries(notes.map(n => [n.id, n]));
-  const byTitle = Object.fromEntries(notes.map(n => [n.title.toLowerCase(), n.id]));
+  const byId = {};
+  const byTitle = {};
+  notes.forEach(n => { byId[n.id] = n; byTitle[n.title.toLowerCase()] = n.id; });
 
   function getEdges(id) {
     const out = edges.filter(e => e.from === id);
@@ -271,8 +272,64 @@ window.HORUS_DATA = (function () {
   }
   function savePinned(arr) { localStorage.setItem(PIN_KEY, JSON.stringify(arr)); }
 
+  // ── Live data bootstrap ───────────────────────────────
+  // Replaces mock data with real Anvil notes when Anvil is reachable.
+  // SearchV2Hit → reader note stub (body is empty until the note is opened).
+  let _onChange = null;
+  function onDataChange(fn) { _onChange = fn; }
+
+  async function loadFromAnvil() {
+    if (!window.AnvilClient) return false;
+    try {
+      const live = [];
+      const BATCH = 100;
+      let offset = 0;
+      while (true) {
+        const result = await window.AnvilClient.search({ limit: BATCH, offset });
+        if (!result || !result.results || result.results.length === 0) break;
+        for (const hit of result.results) {
+          // modified_at comes back as ISO date string from SQLite (e.g. "2026-04-29T00:00:00.000Z")
+          const modified = hit.modified_at
+            ? hit.modified_at.slice(0, 10)
+            : '';
+          live.push({
+            id: hit.id,
+            type: hit.type || 'note',
+            title: hit.title || '(untitled)',
+            tags: hit.tags || [],
+            modified,
+            fields: {
+              ...(hit.status ? { status: hit.status } : {}),
+              ...(hit.priority ? { priority: hit.priority } : {}),
+            },
+            body: '',   // loaded lazily by NotePage via useNote()
+          });
+        }
+        if (live.length >= result.total || result.results.length < BATCH) break;
+        offset += BATCH;
+      }
+      if (live.length === 0) return false; // empty vault — keep mock data
+
+      // Replace mock data in-place so all existing references update
+      notes.length = 0;
+      notes.push(...live);
+      edges.length = 0; // edges loaded lazily per-note via useEdges()
+
+      // Rebuild indexes
+      Object.keys(byId).forEach(k => delete byId[k]);
+      Object.keys(byTitle).forEach(k => delete byTitle[k]);
+      notes.forEach(n => { byId[n.id] = n; byTitle[n.title.toLowerCase()] = n.id; });
+
+      if (_onChange) _onChange();
+      return true;
+    } catch (err) {
+      console.warn('[horus] Anvil unreachable — using mock data', err);
+      return false;
+    }
+  }
+
   return {
     notes, edges, byId, byTitle, getEdges, findFuzzy, tagCounts, typeCounts, search,
-    loadPinned, savePinned,
+    loadPinned, savePinned, loadFromAnvil, onDataChange,
   };
 })();

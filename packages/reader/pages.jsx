@@ -249,12 +249,57 @@ function HomePage({ onNavigate }) {
 // ── Note view (option C: contextual right rail per type) ────────
 function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned, togglePin }) {
   const data = window.HORUS_DATA;
-  const note = data.byId[noteId];
+  const HOOKS = window.HOOKS;
+
+  // Fetch full note content from Anvil (falls back to mock data when offline)
+  const { data: liveNote, loading: noteLoading } = HOOKS
+    ? HOOKS.useNote(noteId)
+    : { data: null, loading: false };
+
+  // Merge: live note body overwrites stub; fall back to mock data entirely
+  const stub = data.byId[noteId];
+  const note = liveNote
+    ? {
+        ...stub,
+        ...liveNote,
+        // Normalise noteId → id
+        id: liveNote.noteId || liveNote.id || noteId,
+        fields: liveNote.fields || stub?.fields || {},
+        tags: liveNote.tags || stub?.tags || [],
+        modified: liveNote.modified?.slice(0, 10) || stub?.modified || '',
+      }
+    : stub;
+
+  // Cache live note in data store for wiki-link resolution (effect, not render)
+  uEp(() => {
+    if (liveNote && note) {
+      data.byId[note.id] = note;
+      if (note.title) data.byTitle[note.title.toLowerCase()] = note.id;
+    }
+  }, [liveNote]);
+
+  // Fetch edges from Neo4j via Anvil (falls back to mock edge store)
+  const { data: edgesData } = HOOKS
+    ? HOOKS.useEdges(noteId)
+    : { data: null };
+
+  // Normalise edges: prefer Neo4j result; fall back to SQLite relationships
+  let out = [], inn = [];
+  if (edgesData) {
+    out = edgesData.edges.filter(e => e.direction === 'outgoing').map(e => ({ from: e.sourceId, to: e.targetId, intent: e.intent }));
+    inn = edgesData.edges.filter(e => e.direction === 'incoming').map(e => ({ from: e.sourceId, to: e.targetId, intent: e.intent }));
+  } else {
+    const fallback = data.getEdges(noteId);
+    out = fallback.out;
+    inn = fallback.in;
+  }
+
+  if (!note && noteLoading) {
+    return <div className="main-inner"><div className="empty loading">Loading…</div></div>;
+  }
   if (!note) return <div className="main-inner"><div className="empty">Note not found</div></div>;
 
   const isPinned = (pinned || []).includes(noteId);
-
-  const { out, in: inn } = data.getEdges(noteId);
   const totalEdges = out.length + inn.length;
 
   const groupBy = (arr) => {
@@ -268,7 +313,7 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
   // Contextual content per type (shown above linked refs in the rail)
   function ContextualBlock() {
     if (note.type === 'task') {
-      const sub = data.notes.filter(n => n.type === 'task' && n.fields?.area === note.fields?.area && n.id !== note.id).slice(0, 4);
+      const sub = data.notes.filter(n => n.type === 'task' && n.fields?.area === (note.fields?.area || note.fields?.area) && n.id !== note.id).slice(0, 4);
       return (
         <div className="rail-block">
           <div className="rail-block-title">Task details</div>
@@ -438,10 +483,12 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
                       <div key={intent}>
                         <div className="edge-intent">{window.MD.edgeLabel(intent, 'out')}</div>
                         {items.map(e => {
-                          const t = data.byId[e.to]; if (!t) return null;
+                          const t = data.byId[e.to];
+                          const title = t?.title || e.targetTitle || e.to;
+                          const type = t?.type || e.targetType || 'note';
                           return (
-                            <div key={e.to + intent} className="rail-row" onClick={() => onNavigate({ kind: 'note', id: t.id })}>
-                              <span className={`type-dot ${t.type}`} /><span className="title">{t.title}</span>
+                            <div key={e.to + intent} className="rail-row" onClick={() => onNavigate({ kind: 'note', id: e.to })}>
+                              <span className={`type-dot ${type}`} /><span className="title">{title}</span>
                             </div>
                           );
                         })}
@@ -456,10 +503,12 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
                       <div key={intent}>
                         <div className="edge-intent">{window.MD.edgeLabel(intent, 'in')}</div>
                         {items.map(e => {
-                          const f = data.byId[e.from]; if (!f) return null;
+                          const f = data.byId[e.from];
+                          const title = f?.title || e.sourceTitle || e.from;
+                          const type = f?.type || e.sourceType || 'note';
                           return (
-                            <div key={e.from + intent} className="rail-row" onClick={() => onNavigate({ kind: 'note', id: f.id })}>
-                              <span className={`type-dot ${f.type}`} /><span className="title">{f.title}</span>
+                            <div key={e.from + intent} className="rail-row" onClick={() => onNavigate({ kind: 'note', id: e.from })}>
+                              <span className={`type-dot ${type}`} /><span className="title">{title}</span>
                             </div>
                           );
                         })}
@@ -639,6 +688,10 @@ function SearchPalette({ onClose, onNavigate }) {
   const [active, setActive] = uSp(0);
   const inputRef = uRp();
   const data = window.HORUS_DATA;
+  const HOOKS = window.HOOKS;
+
+  // Live search via Anvil (debounced by only running when q has a value)
+  const liveSearch = HOOKS ? HOOKS.useSearch(q.trim(), filter, 12) : { data: null, loading: false };
 
   uEp(() => {
     inputRef.current?.focus();
@@ -655,8 +708,16 @@ function SearchPalette({ onClose, onNavigate }) {
         .slice(0, 6);
       return r.map(n => ({ note: n, score: 0, snippet: '' }));
     }
+    // Prefer live Anvil results; fall back to mock search
+    if (liveSearch.data?.results?.length > 0) {
+      return liveSearch.data.results.map(hit => ({
+        note: data.byId[hit.id] || { id: hit.id, type: hit.type, title: hit.title, tags: hit.tags || [], fields: { status: hit.status }, modified: hit.modified_at?.slice(0, 10) || '', body: '' },
+        score: hit.score,
+        snippet: hit.snippet || '',
+      }));
+    }
     return data.search(q, filter).slice(0, 12);
-  }, [q, filter]);
+  }, [q, filter, liveSearch.data]);
 
   uEp(() => { setActive(0); }, [q, filter]);
 

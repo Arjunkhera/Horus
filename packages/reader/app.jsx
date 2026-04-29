@@ -33,6 +33,14 @@ function App() {
   const route = history[cursor];
 
   const data = window.HORUS_DATA;
+
+  // Increment to trigger re-render after Anvil data loads
+  const [dataVersion, setDataVersion] = uS(0);
+  uE(() => {
+    data.onDataChange(() => setDataVersion(v => v + 1));
+    data.loadFromAnvil(); // no-op and graceful if Anvil is unreachable
+  }, []);
+
   const PIN_KEY = 'horus:pinned';
   const PIN_DEFAULTS = ['proj-horus-ui', 'story-linked-refs', 'note-edge-taxonomy', 'journal-2026-04-29'];
   const [recents, setRecents] = uS(() => JSON.parse(localStorage.getItem('horus:recents') || '[]'));
@@ -52,7 +60,7 @@ function App() {
   });
   const [sideCollapsed, setSideCollapsed] = uS(() => localStorage.getItem('horus:side-collapsed') === '1');
   const [refsCollapsed, setRefsCollapsed] = uS(() => localStorage.getItem('horus:refs-collapsed') === '1');
-  const typeCounts = uM(() => data.typeCounts(), []);
+  const typeCounts = uM(() => data.typeCounts(), [dataVersion]);
 
   function togglePin(id) {
     setPinned(prev => {
