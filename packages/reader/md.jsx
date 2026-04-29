@@ -198,7 +198,8 @@ function fmtDate(s) {
 function fmtRelative(s) {
   if (!s) return '';
   const d = new Date(s);
-  const today = new Date('2026-04-29');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const diff = Math.floor((today - d) / 86400000);
   if (diff === 0) return 'today';
   if (diff === 1) return 'yesterday';

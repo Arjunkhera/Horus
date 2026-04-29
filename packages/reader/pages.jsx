@@ -118,7 +118,8 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
 function HomePage({ onNavigate }) {
   const data = window.HORUS_DATA;
   const counts = data.typeCounts();
-  const today = new Date('2026-04-29');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const greet = today.toLocaleDateString('en-US', { weekday: 'long' });
 
   const [browseOpen, setBrowseOpen] = uSp(() => localStorage.getItem('horus:home-browse') !== '0');
@@ -147,9 +148,11 @@ function HomePage({ onNavigate }) {
   }
   function toggleDay(d) { setCollapsedDays(p => ({ ...p, [d]: !p[d] })); }
 
+  const todayStr = today.toISOString().slice(0, 10);
+  const yesterdayStr = new Date(today - 86400000).toISOString().slice(0, 10);
   function dateLabel(d) {
-    if (d === '2026-04-29') return 'Today';
-    if (d === '2026-04-28') return 'Yesterday';
+    if (d === todayStr) return 'Today';
+    if (d === yesterdayStr) return 'Yesterday';
     const dt = new Date(d);
     return dt.toLocaleDateString('en-US', { weekday: 'long' });
   }
@@ -171,7 +174,7 @@ function HomePage({ onNavigate }) {
     <div className="main-inner">
       <div className="greeting">
         <h2>{greet}, welcome back.</h2>
-        <div className="sub">{today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · {data.notes.length} notes · {data.edges.length} edges</div>
+        <div className="sub">{today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · {data.notes.length} notes</div>
       </div>
 
       {/* Collapsible Browse by type */}
@@ -211,7 +214,7 @@ function HomePage({ onNavigate }) {
               className="date-input"
               value={jumpDate}
               min={allDates[allDates.length - 1] || '2026-01-01'}
-              max={today.toISOString().slice(0, 10)}
+              max={todayStr}
               onChange={e => setJumpDate(e.target.value)}
             />
             <button className="chip active" onClick={jumpTo}>Go</button>
@@ -684,14 +687,21 @@ function TypePage({ type, onNavigate }) {
 // ── Search palette ──────────────────────────────────────────────
 function SearchPalette({ onClose, onNavigate }) {
   const [q, setQ] = uSp('');
+  const [debouncedQ, setDebouncedQ] = uSp('');
   const [filter, setFilter] = uSp(null);
   const [active, setActive] = uSp(0);
   const inputRef = uRp();
   const data = window.HORUS_DATA;
   const HOOKS = window.HOOKS;
 
-  // Live search via Anvil (debounced by only running when q has a value)
-  const liveSearch = HOOKS ? HOOKS.useSearch(q.trim(), filter, 12) : { data: null, loading: false };
+  // Debounce search query by 150ms
+  uEp(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 150);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  // Live search via Anvil using debounced query
+  const liveSearch = HOOKS ? HOOKS.useSearch(debouncedQ.trim(), filter, 12) : { data: null, loading: false };
 
   uEp(() => {
     inputRef.current?.focus();
@@ -708,8 +718,8 @@ function SearchPalette({ onClose, onNavigate }) {
         .slice(0, 6);
       return r.map(n => ({ note: n, score: 0, snippet: '' }));
     }
-    // Prefer live Anvil results; fall back to mock search
-    if (liveSearch.data?.results?.length > 0) {
+    // Prefer live Anvil results (uses debounced query); fall back to local search
+    if (debouncedQ.trim() && liveSearch.data?.results?.length > 0) {
       return liveSearch.data.results.map(hit => ({
         note: data.byId[hit.id] || { id: hit.id, type: hit.type, title: hit.title, tags: hit.tags || [], fields: { status: hit.status }, modified: hit.modified_at?.slice(0, 10) || '', body: '' },
         score: hit.score,
@@ -717,7 +727,7 @@ function SearchPalette({ onClose, onNavigate }) {
       }));
     }
     return data.search(q, filter).slice(0, 12);
-  }, [q, filter, liveSearch.data]);
+  }, [q, debouncedQ, filter, liveSearch.data]);
 
   uEp(() => { setActive(0); }, [q, filter]);
 
