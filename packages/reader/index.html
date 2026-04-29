@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-density="cozy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Horus Reader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" />
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Restore theme/accent from localStorage before first paint to avoid flash -->
+  <script>
+    (function () {
+      try {
+        var t = JSON.parse(localStorage.getItem('horus:tweaks') || '{}');
+        if (t.theme) document.documentElement.setAttribute('data-theme', t.theme);
+        if (t.density) document.documentElement.setAttribute('data-density', t.density);
+        if (t.accent) {
+          var A = {
+            amber:  { dark: 'oklch(0.74 0.13 60)',   light: 'oklch(0.55 0.16 50)'  },
+            rose:   { dark: 'oklch(0.74 0.14 15)',   light: 'oklch(0.55 0.18 15)'  },
+            sage:   { dark: 'oklch(0.74 0.10 145)',  light: 'oklch(0.50 0.12 145)' },
+            indigo: { dark: 'oklch(0.72 0.14 270)',  light: 'oklch(0.50 0.16 270)' },
+          };
+          var a = A[t.accent] || A.amber;
+          var v = a[t.theme === 'light' ? 'light' : 'dark'];
+          document.documentElement.style.setProperty('--accent', v);
+          document.documentElement.style.setProperty('--link', v);
+        }
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script src="data.js"></script>
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="md.jsx"></script>
+  <script type="text/babel" src="pages.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
