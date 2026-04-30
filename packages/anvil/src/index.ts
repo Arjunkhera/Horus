@@ -363,10 +363,12 @@ async function main(): Promise<void> {
   const host = config.host || process.env.ANVIL_HOST || '0.0.0.0';
 
   if (transport === 'http') {
-    // Pass a factory so each MCP session gets its own Server instance
+    // Pass a factory so each MCP session gets its own Server instance.
+    // ctx enables REST routes at /api/* for browser clients.
     await startHttp(() => createMcpServer(ctx), {
       port,
       host,
+      ctx,
       getHealth: syncEngine ? () => syncEngine!.getHealth() : undefined,
     });
   } else {

@@ -1,1 +1,0 @@
-export { ChatBar } from './ChatBar'

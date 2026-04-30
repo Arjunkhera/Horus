@@ -6,6 +6,11 @@ import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { isHealthCritical, isHealthDegraded, type SyncHealthState } from '../../core/sync/health.js';
+import { isAnvilError } from '../../types/error.js';
+import { handleGetNote } from '../../tools/get-note.js';
+import { handleGetEdges } from '../../tools/get-edges.js';
+import { handleSearchV2 } from '../../tools/search-v2.js';
+import type { ToolContext } from '../../tools/create-note.js';
 
 const startTime = Date.now();
 
@@ -13,7 +18,32 @@ export interface HttpOptions {
   port: number;
   host: string;
   getHealth?: () => SyncHealthState;
+  /** When provided, enables REST API routes at /api/* for browser clients */
+  ctx?: ToolContext;
 }
+
+/** Read the full request body as a UTF-8 string */
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('error', reject);
+  });
+}
+
+/** Map an AnvilError code to an HTTP status code */
+function errorStatus(code: string): number {
+  if (code === 'NOT_FOUND') return 404;
+  if (code === 'VALIDATION_ERROR') return 400;
+  return 500;
+}
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
 
 /**
  * Log a message in JSON format to stderr
@@ -69,6 +99,63 @@ export async function startHttp(serverFactory: () => Server, opts: HttpOptions):
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(health));
       return;
+    }
+
+    // REST API routes (browser-friendly, CORS-enabled)
+    if (opts.ctx) {
+      const reqPath = req.url?.split('?')[0] ?? '/';
+      const search = req.url?.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      const params = new URLSearchParams(search);
+
+      // CORS preflight
+      if (req.method === 'OPTIONS' && reqPath.startsWith('/api/')) {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
+        return;
+      }
+
+      // GET /api/notes/:id
+      const noteMatch = reqPath.match(/^\/api\/notes\/([^/]+)$/);
+      if (req.method === 'GET' && noteMatch) {
+        const noteId = decodeURIComponent(noteMatch[1]);
+        const result = await handleGetNote({ noteId }, opts.ctx);
+        const status = isAnvilError(result) ? errorStatus(result.code) : 200;
+        res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // GET /api/notes/:id/edges
+      const edgesMatch = reqPath.match(/^\/api\/notes\/([^/]+)\/edges$/);
+      if (req.method === 'GET' && edgesMatch) {
+        const noteId = decodeURIComponent(edgesMatch[1]);
+        const intent = params.get('intent') || undefined;
+        if (opts.ctx.edgeStore && opts.ctx.intentRegistry) {
+          const result = await handleGetEdges(
+            { edgeStore: opts.ctx.edgeStore, intentRegistry: opts.ctx.intentRegistry },
+            { noteId, intent },
+          );
+          const status = isAnvilError(result) ? errorStatus(result.code) : 200;
+          res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+          res.end(JSON.stringify(result));
+        } else {
+          res.writeHead(503, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+          res.end(JSON.stringify({ error: true, code: 'SERVER_ERROR', message: 'Edge store not initialized' }));
+        }
+        return;
+      }
+
+      // POST /api/search
+      if (req.method === 'POST' && reqPath === '/api/search') {
+        const body = await readBody(req);
+        let searchParams: Record<string, unknown> = {};
+        try { searchParams = JSON.parse(body); } catch { /* empty body = no filters */ }
+        const result = await handleSearchV2(opts.ctx, searchParams as Parameters<typeof handleSearchV2>[1]);
+        const status = isAnvilError(result) ? errorStatus(result.code) : 200;
+        res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+        res.end(JSON.stringify(result));
+        return;
+      }
     }
 
     // Route all other requests to MCP transport
