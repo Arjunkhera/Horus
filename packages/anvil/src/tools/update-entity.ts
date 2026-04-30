@@ -11,6 +11,7 @@ import type { StorageBackend, Entity } from '../core/storage/storage-backend.js'
 import type { Neo4jEdgeStore } from '../core/graph/neo4j-edge-store.js'
 import { makeError, ERROR_CODES } from '../types/index.js'
 import type { AnvilError } from '../types/index.js'
+import { broadcast } from '../core/events.js'
 
 export interface UpdateEntityInput {
   /** Entity UUID to update */
@@ -85,6 +86,7 @@ export async function handleUpdateEntity(
     }
     updatedFields.push('modified')
 
+    broadcast({ type: 'note_updated', noteId: input.noteId, modifiedAt: new Date().toISOString() });
     return {
       noteId: input.noteId,
       updatedFields,

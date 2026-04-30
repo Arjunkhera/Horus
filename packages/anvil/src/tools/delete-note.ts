@@ -5,6 +5,7 @@ import type { AnvilError } from '../types/index.js';
 import { makeError, ERROR_CODES } from '../types/index.js';
 import { deleteNote } from '../index/indexer.js';
 import { deleteFromTypesense } from '../core/search/typesense-doc.js';
+import { broadcast } from '../core/events.js';
 import type { ToolContext } from './create-note.js';
 
 export type DeleteNoteInput = {
@@ -73,6 +74,7 @@ export async function handleDeleteNote(
       void deleteFromTypesense(ctx.typesenseClient, input.noteId);
     }
 
+    broadcast({ type: 'note_deleted', noteId: input.noteId, modifiedAt: new Date().toISOString() });
     return { noteId: input.noteId, deleted: true };
   } catch (err) {
     return makeError(

@@ -53,5 +53,35 @@
         body: JSON.stringify(params || {}),
       });
     },
+
+    /**
+     * Fetch notes modified after `since` (ISO string) for gap recovery.
+     * Uses modified_after filter — supported by handleSearchV2.
+     */
+    deltaFetch(since) {
+      return apiFetch('/api/search', {
+        method: 'POST',
+        body: JSON.stringify({ filters: { modified_after: since }, limit: 100 }),
+      });
+    },
+
+    /**
+     * Open an SSE connection to /api/events.
+     * @param {{ onEvent: (e) => void, onReconnect: () => void }} handlers
+     * @returns {EventSource}
+     */
+    connectSSE(handlers) {
+      const es = new EventSource(BASE + '/api/events');
+      es.onmessage = (ev) => {
+        try {
+          const event = JSON.parse(ev.data);
+          if (event.type !== 'connected') handlers.onEvent(event);
+        } catch {}
+      };
+      es.onerror = () => {
+        if (handlers.onReconnect) handlers.onReconnect();
+      };
+      return es;
+    },
   };
 })();

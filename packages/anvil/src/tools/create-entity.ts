@@ -9,7 +9,8 @@
  */
 
 import type { AnvilError } from '../types/error.js'
-import { makeError, ERROR_CODES } from '../types/error.js'
+import { makeError, ERROR_CODES, isAnvilError } from '../types/error.js'
+import { broadcast } from '../core/events.js'
 import {
   IngestPipeline,
   type CreateEntityInput,
@@ -92,7 +93,11 @@ export async function handleCreateEntity(
       ctx.searchIndexer,
     )
 
-    return await pipeline.createEntity(input)
+    const result = await pipeline.createEntity(input);
+    if (!isAnvilError(result) && 'noteId' in result) {
+      broadcast({ type: 'note_created', noteId: result.noteId as string, modifiedAt: new Date().toISOString() });
+    }
+    return result;
   } catch (err) {
     if (isPipelineError(err)) {
       return makeError(

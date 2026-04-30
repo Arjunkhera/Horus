@@ -9,6 +9,7 @@ import type { Neo4jEdgeStore } from '../core/graph/neo4j-edge-store.js'
 import type { FileStore } from '../core/storage/file-store.js'
 import { makeError, ERROR_CODES } from '../types/index.js'
 import type { AnvilError } from '../types/index.js'
+import { broadcast } from '../core/events.js'
 
 export interface DeleteEntityInput {
   noteId: string
@@ -87,6 +88,7 @@ export async function handleDeleteEntity(
       }
     }
 
+    broadcast({ type: 'note_deleted', noteId: input.noteId, modifiedAt: new Date().toISOString() });
     return {
       noteId: input.noteId,
       deleted: true,

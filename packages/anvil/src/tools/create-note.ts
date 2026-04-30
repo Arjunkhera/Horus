@@ -19,6 +19,7 @@ import type { AnvilWatcher } from '../storage/watcher.js';
 import type { SearchEngine } from '../core/search/engine.js';
 import type { TypesenseClient } from '@horus/search';
 import { pushToTypesense } from '../core/search/typesense-doc.js';
+import { broadcast } from '../core/events.js';
 import type { GitSyncEngine } from '../core/sync/engine.js';
 import type { StorageBackend } from '../core/storage/storage-backend.js';
 import type { FileStore } from '../core/storage/file-store.js';
@@ -185,6 +186,7 @@ export async function handleCreateNote(
     }
 
     // 11. Return result
+    broadcast({ type: 'note_created', noteId, modifiedAt: now });
     return {
       noteId,
       filePath,

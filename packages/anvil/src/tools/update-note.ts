@@ -12,6 +12,7 @@ import { getNote, upsertNote } from '../index/indexer.js';
 import { validateNote } from '../registry/validator.js';
 import type { ToolContext } from './create-note.js';
 import { pushToTypesense } from '../core/search/typesense-doc.js';
+import { broadcast } from '../core/events.js';
 
 /**
  * Handle anvil_update_note request.
@@ -223,6 +224,7 @@ export async function handleUpdateNote(
       changedFields.push('modified');
     }
 
+    broadcast({ type: 'note_updated', noteId: input.noteId, modifiedAt: now });
     return {
       noteId: input.noteId,
       updatedFields: changedFields,
