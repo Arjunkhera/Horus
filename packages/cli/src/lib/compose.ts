@@ -193,31 +193,14 @@ const TYPESENSE_SERVICE = `\
       start_period: 5s
     restart: unless-stopped`;
 
-const HORUS_UI_SERVICE = `\
-  # ── Horus UI ───────────────────────────────────────────────────────────────
-  # Web interface — React SPA served by Express proxy on port 8400.
-  # Proxies /api/anvil, /api/vault, /api/forge to the respective services.
-  # Stores dashboard configs and preferences in _system/ui/ (not indexed by Anvil).
-  horus-ui:
-    image: ghcr.io/arjunkhera/horus/horus-ui:latest
+const READER_SERVICE = `\
+  # ── Reader ─────────────────────────────────────────────────────────────────
+  # Horus Reader — CDN React SPA served by nginx:alpine on port 8400.
+  # Pure static files; connects directly to Anvil REST API from the browser.
+  reader:
+    image: ghcr.io/arjunkhera/horus/reader:latest
     ports:
       - "\${UI_PORT:-8400}:8400"
-    volumes:
-      - \${HORUS_DATA_PATH}/notes:/data/notes:rw
-    environment:
-      - PORT=8400
-      - HORUS_DATA_PATH=/data/notes
-      - ANVIL_URL=http://anvil:8100
-      - VAULT_URL=http://vault-mcp:8300
-      - FORGE_URL=http://forge:8200
-      - NODE_ENV=production
-    depends_on:
-      anvil:
-        condition: service_healthy
-      vault-mcp:
-        condition: service_healthy
-      forge:
-        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
@@ -225,14 +208,14 @@ const HORUS_UI_SERVICE = `\
     deploy:
       resources:
         limits:
-          memory: 256m
-        reservations:
           memory: 64m
+        reservations:
+          memory: 32m
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8400/api/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8400/health"]
       interval: 30s
       timeout: 5s
-      start_period: 30s
+      start_period: 10s
       retries: 3`;
 
 // ── Test compose overlay generation ──────────────────────────────────────────
@@ -302,7 +285,7 @@ services:
     volumes:
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/typesense-data:/data"
 
-  horus-ui:
+  reader:
     ports:
       - "\${TEST_PORT_UI:-9260}:8400"
 
@@ -483,7 +466,7 @@ ${vaultRouterDependsOn}
     '',
     TYPESENSE_SERVICE,
     '',
-    ...(config.enable_ui !== false ? [HORUS_UI_SERVICE, ''] : []),
+    ...(config.enable_ui !== false ? [READER_SERVICE, ''] : []),
     '# ── Networks ──────────────────────────────────────────────────────────────────',
     'networks:',
     '  horus-net:',

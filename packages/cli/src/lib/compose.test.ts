@@ -110,7 +110,7 @@ describe('installComposeFile', () => {
     expect(content).toContain('vault-mcp:');
     expect(content).toContain('forge:');
     expect(content).toContain('typesense:');
-    expect(content).toContain('horus-ui:');
+    expect(content).toContain('reader:');
   });
 
   it('test compose file uses TEST_PORT_* env vars for port remapping', () => {
