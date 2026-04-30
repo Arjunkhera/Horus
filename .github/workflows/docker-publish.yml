@@ -20,7 +20,7 @@ jobs:
       vault-router: ${{ steps.filter.outputs.vault-router }}
       vault-mcp: ${{ steps.filter.outputs.vault-mcp }}
       forge: ${{ steps.filter.outputs.forge }}
-      horus-ui: ${{ steps.filter.outputs.horus-ui }}
+      reader: ${{ steps.filter.outputs.reader }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,10 +42,8 @@ jobs:
             forge:
               - 'packages/search/**'
               - 'packages/forge/**'
-            horus-ui:
-              - 'packages/ui-server/**'
-              - 'packages/ui-client/**'
-              - 'packages/shared/**'
+            reader:
+              - 'packages/reader/**'
 
   # ── Anvil ─────────────────────────────────────────────────────────────────────
   build-anvil:
@@ -307,11 +305,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Horus UI ──────────────────────────────────────────────────────────────────
-  build-horus-ui:
-    name: Build horus-ui
+  # ── Reader (Horus Reader SPA) ─────────────────────────────────────────────────
+  build-reader:
+    name: Build reader
     needs: changes
-    if: needs.changes.outputs.horus-ui == 'true' || startsWith(github.ref, 'refs/tags/v')
+    if: needs.changes.outputs.reader == 'true' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -339,7 +337,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/arjunkhera/horus/horus-ui
+          images: ghcr.io/arjunkhera/horus/reader
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-,format=short
@@ -350,8 +348,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: packages/ui-server/Dockerfile
+          context: packages/reader
+          file: packages/reader/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
