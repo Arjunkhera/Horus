@@ -9,7 +9,7 @@ import { isHealthCritical, isHealthDegraded, type SyncHealthState } from '../../
 import { isAnvilError } from '../../types/error.js';
 import { handleGetNote } from '../../tools/get-note.js';
 import { handleGetEdges } from '../../tools/get-edges.js';
-import { handleSearchV2 } from '../../tools/search-v2.js';
+import { handleSearch } from '../../tools/search.js';
 import type { ToolContext } from '../../tools/create-note.js';
 
 const startTime = Date.now();
@@ -150,10 +150,23 @@ export async function startHttp(serverFactory: () => Server, opts: HttpOptions):
         const body = await readBody(req);
         let searchParams: Record<string, unknown> = {};
         try { searchParams = JSON.parse(body); } catch { /* empty body = no filters */ }
-        const result = await handleSearchV2(opts.ctx, searchParams as Parameters<typeof handleSearchV2>[1]);
-        const status = isAnvilError(result) ? errorStatus(result.code) : 200;
-        res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
-        res.end(JSON.stringify(result));
+        const result = await handleSearch(searchParams as Parameters<typeof handleSearch>[0], opts.ctx);
+        if (isAnvilError(result)) {
+          res.writeHead(errorStatus(result.code), { 'Content-Type': 'application/json', ...CORS_HEADERS });
+          res.end(JSON.stringify(result));
+          return;
+        }
+        // Normalize to the shape the Reader client expects: id (not noteId), modified_at (not modified)
+        const normalized = {
+          ...result,
+          results: result.results.map(({ noteId, modified, ...rest }) => ({
+            ...rest,
+            id: noteId,
+            modified_at: modified,
+          })),
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+        res.end(JSON.stringify(normalized));
         return;
       }
     }
