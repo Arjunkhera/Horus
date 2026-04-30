@@ -276,7 +276,11 @@ window.HORUS_DATA = (function () {
   // Replaces mock data with real Anvil notes when Anvil is reachable.
   // SearchV2Hit → reader note stub (body is empty until the note is opened).
   let _onChange = null;
+  let _lastSyncedAt = null;
+  let _sse = null;
+
   function onDataChange(fn) { _onChange = fn; }
+  function getLastSyncedAt() { return _lastSyncedAt; }
 
   async function loadFromAnvil() {
     if (!window.AnvilClient) return false;
@@ -328,8 +332,102 @@ window.HORUS_DATA = (function () {
     }
   }
 
+  // ── SSE / incremental update ──────────────────────────
+
+  // Patch a single note into the store after receiving a note_created/note_updated event.
+  // Fetches the note body-less stub from the API and updates byId/byTitle indexes.
+  async function fetchAndPatchNote(noteId) {
+    if (!window.AnvilClient) return;
+    try {
+      const raw = await window.AnvilClient.getNote(noteId);
+      if (!raw || raw.error) return;
+      const modified = raw.modified ? raw.modified.slice(0, 10) : '';
+      const patched = {
+        id: raw.noteId || noteId,
+        type: raw.type || 'note',
+        title: raw.title || '(untitled)',
+        tags: raw.tags || [],
+        modified,
+        fields: {
+          ...(raw.status ? { status: raw.status } : {}),
+          ...(raw.priority ? { priority: raw.priority } : {}),
+        },
+        body: '',
+      };
+      const idx = notes.findIndex(n => n.id === patched.id);
+      if (idx >= 0) {
+        notes[idx] = patched;
+      } else {
+        notes.push(patched);
+      }
+      byId[patched.id] = patched;
+      byTitle[patched.title.toLowerCase()] = patched.id;
+      _lastSyncedAt = new Date().toISOString();
+      if (_onChange) _onChange();
+    } catch (err) {
+      console.warn('[horus] fetchAndPatchNote failed', noteId, err);
+    }
+  }
+
+  // Remove a note from the store after a note_deleted event.
+  function removeNoteById(noteId) {
+    const idx = notes.findIndex(n => n.id === noteId);
+    if (idx < 0) return;
+    const n = notes[idx];
+    notes.splice(idx, 1);
+    delete byId[noteId];
+    const titleKey = n.title.toLowerCase();
+    if (byTitle[titleKey] === noteId) delete byTitle[titleKey];
+    _lastSyncedAt = new Date().toISOString();
+    if (_onChange) _onChange();
+  }
+
+  // Delta-fetch notes modified since `since` (ISO string) — used on reconnect and manual refresh.
+  async function applyDelta(since) {
+    if (!window.AnvilClient) return;
+    try {
+      const result = await window.AnvilClient.deltaFetch(since);
+      if (!result || !result.results) return;
+      for (const hit of result.results) {
+        await fetchAndPatchNote(hit.id);
+      }
+    } catch (err) {
+      console.warn('[horus] delta fetch failed', err);
+    }
+  }
+
+  function connectSSE() {
+    if (!window.AnvilClient || !window.AnvilClient.connectSSE) return;
+    if (_sse) return;
+    _sse = window.AnvilClient.connectSSE({
+      onEvent(event) {
+        if (event.type === 'note_created' || event.type === 'note_updated') {
+          fetchAndPatchNote(event.noteId);
+        } else if (event.type === 'note_deleted') {
+          removeNoteById(event.noteId);
+        }
+      },
+      onReconnect() {
+        if (_lastSyncedAt) applyDelta(_lastSyncedAt);
+      },
+    });
+  }
+
+  function disconnectSSE() {
+    if (_sse) { _sse.close(); _sse = null; }
+  }
+
+  function manualRefresh() {
+    if (_lastSyncedAt) {
+      applyDelta(_lastSyncedAt);
+    } else {
+      loadFromAnvil();
+    }
+  }
+
   return {
     notes, edges, byId, byTitle, getEdges, findFuzzy, tagCounts, typeCounts, search,
     loadPinned, savePinned, loadFromAnvil, onDataChange,
+    connectSSE, disconnectSSE, manualRefresh, getLastSyncedAt,
   };
 })();

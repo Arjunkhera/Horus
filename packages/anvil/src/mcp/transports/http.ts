@@ -11,6 +11,7 @@ import { handleGetNote } from '../../tools/get-note.js';
 import { handleGetEdges } from '../../tools/get-edges.js';
 import { handleSearchV2 } from '../../tools/search-v2.js';
 import type { ToolContext } from '../../tools/create-note.js';
+import { addSseClient, removeSseClient } from '../../core/events.js';
 
 const startTime = Date.now();
 
@@ -154,6 +155,20 @@ export async function startHttp(serverFactory: () => Server, opts: HttpOptions):
         const status = isAnvilError(result) ? errorStatus(result.code) : 200;
         res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
         res.end(JSON.stringify(result));
+        return;
+      }
+
+      // GET /api/events — SSE stream for real-time note change events
+      if (req.method === 'GET' && reqPath === '/api/events') {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          ...CORS_HEADERS,
+        });
+        res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+        addSseClient(res);
+        req.on('close', () => removeSseClient(res));
         return;
       }
     }

@@ -38,8 +38,12 @@ function App() {
   const [dataVersion, setDataVersion] = uS(0);
   uE(() => {
     data.onDataChange(() => setDataVersion(v => v + 1));
-    data.loadFromAnvil(); // no-op and graceful if Anvil is unreachable
+    data.loadFromAnvil().then(loaded => {
+      if (loaded) data.connectSSE();
+    });
+    return () => data.disconnectSSE();
   }, []);
+  const lastSyncedAt = uM(() => data.getLastSyncedAt(), [dataVersion]);
 
   const PIN_KEY = 'horus:pinned';
   const PIN_DEFAULTS = ['proj-horus-ui', 'story-linked-refs', 'note-edge-taxonomy', 'journal-2026-04-29'];
@@ -196,7 +200,7 @@ function App() {
         </div>
       </header>
 
-      <Sidebar recents={recents} currentRoute={route} onNavigate={navigate} typeCounts={typeCounts} collapsed={sideCollapsed} pinned={pinned} togglePin={togglePin} />
+      <Sidebar recents={recents} currentRoute={route} onNavigate={navigate} typeCounts={typeCounts} collapsed={sideCollapsed} pinned={pinned} togglePin={togglePin} lastSyncedAt={lastSyncedAt} onRefresh={() => data.manualRefresh()} />
 
       <main className="main">
         {pageEl}

@@ -28,9 +28,23 @@ function SideSection({ id, title, count, children, defaultOpen = true }) {
   );
 }
 
+// ── Sync footer ──────────────────────────────────────────────────
+function SyncFooter({ lastSyncedAt, onRefresh }) {
+  if (!lastSyncedAt) return null;
+  const diffMs = Date.now() - new Date(lastSyncedAt).getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const label = diffMin < 1 ? 'just now' : diffMin === 1 ? '1m ago' : `${diffMin}m ago`;
+  return (
+    <div className="side-footer">
+      <span className="side-sync-label">Synced {label}</span>
+      <button className="side-sync-btn icon-btn" title="Refresh" onClick={onRefresh}>↻</button>
+    </div>
+  );
+}
+
 // ── Sidebar ──────────────────────────────────────────────────────
 const SIDE_LIMIT = 8; // static cap for Phase 1
-function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pinned, togglePin }) {
+function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pinned, togglePin, lastSyncedAt, onRefresh }) {
   const data = window.HORUS_DATA;
 
   if (collapsed) {
@@ -110,6 +124,8 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
             );
           })}
       </SideSection>
+
+      <SyncFooter lastSyncedAt={lastSyncedAt} onRefresh={onRefresh} />
     </aside>
   );
 }
