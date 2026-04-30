@@ -212,7 +212,7 @@ const READER_SERVICE = `\
         reservations:
           memory: 32m
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8400/health"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8400/health"]
       interval: 30s
       timeout: 5s
       start_period: 10s
