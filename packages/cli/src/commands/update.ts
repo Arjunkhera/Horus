@@ -10,6 +10,7 @@ import { loadConfig } from '../lib/config.js';
 import { detectRuntime, composeStreaming } from '../lib/runtime.js';
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { HORUS_DIR, COMPOSE_PATH } from '../lib/constants.js';
+import { installComposeFile } from '../lib/compose.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -261,6 +262,20 @@ export const updateCommand = new Command('update')
       snapshotSpinner.succeed(`Snapshot saved: ${chalk.dim(snapshotPath)}`);
     } catch (error) {
       snapshotSpinner.warn('Could not save snapshot (update will proceed)');
+      console.log(chalk.dim((error as Error).message));
+    }
+
+    // Regenerate compose file from current config so the on-disk file always
+    // matches what this version of the CLI expects (service names, images,
+    // health endpoints). This is a no-op when nothing changed, but it's
+    // essential for migrations like horus-ui → reader.
+    const composeSpinner = ora('Updating compose configuration...').start();
+    try {
+      const runtimeName = runtime.name === 'podman' ? 'podman' : 'docker';
+      installComposeFile(config, runtimeName);
+      composeSpinner.succeed('Compose configuration updated');
+    } catch (error) {
+      composeSpinner.warn('Could not update compose configuration — using existing file');
       console.log(chalk.dim((error as Error).message));
     }
 
