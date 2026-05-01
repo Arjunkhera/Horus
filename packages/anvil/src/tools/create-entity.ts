@@ -94,8 +94,8 @@ export async function handleCreateEntity(
     )
 
     const result = await pipeline.createEntity(input);
-    if (!isAnvilError(result) && 'noteId' in result) {
-      broadcast({ type: 'note_created', noteId: result.noteId as string, modifiedAt: new Date().toISOString() });
+    if (!isAnvilError(result) && 'entityId' in result) {
+      broadcast({ type: 'note_created', noteId: result.entityId as string, modifiedAt: new Date().toISOString() });
     }
     return result;
   } catch (err) {
