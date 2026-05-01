@@ -289,7 +289,7 @@ window.HORUS_DATA = (function () {
       const BATCH = 100;
       let offset = 0;
       while (true) {
-        const result = await window.AnvilClient.search({ limit: BATCH, offset });
+        const result = await window.AnvilClient.search({ limit: BATCH, offset, filters: { modified_after: '2020-01-01' } });
         if (!result || !result.results || result.results.length === 0) break;
         for (const hit of result.results) {
           // modified_at comes back as ISO date string from SQLite (e.g. "2026-04-29T00:00:00.000Z")
@@ -324,6 +324,7 @@ window.HORUS_DATA = (function () {
       Object.keys(byTitle).forEach(k => delete byTitle[k]);
       notes.forEach(n => { byId[n.id] = n; byTitle[n.title.toLowerCase()] = n.id; });
 
+      _lastSyncedAt = new Date().toISOString();
       if (_onChange) _onChange();
       return true;
     } catch (err) {
