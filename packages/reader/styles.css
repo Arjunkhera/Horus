@@ -315,6 +315,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .main-inner.wide { max-width: 1080px; }
 
 /* ── Type badges & dots ──────────────────────────── */
+.type-dot { background: var(--fg-3); } /* fallback for unknown types */
 .type-dot.task { background: var(--type-task); }
 .type-dot.note { background: var(--type-note); }
 .type-dot.journal { background: var(--type-journal); }
