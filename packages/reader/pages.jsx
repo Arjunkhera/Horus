@@ -485,9 +485,6 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
 
       {/* Collapsible right rail */}
       <aside className={`note-rail${refsCollapsed ? ' collapsed' : ''}`}>
-        <button className="rail-toggle" onClick={() => setRefsCollapsed(c => !c)} title={refsCollapsed ? 'Show context' : 'Hide context'}>
-          <span>{refsCollapsed ? '◂' : '▸'}</span>
-        </button>
         {!refsCollapsed && (
           <div className="rail-inner">
             <ContextualBlock />
