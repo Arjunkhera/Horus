@@ -37,7 +37,8 @@
   --type-story:    oklch(0.72 0.13 30);    /* terracotta */
   --type-project:  oklch(0.72 0.10 300);   /* dusk purple */
   --type-area:     oklch(0.74 0.06 180);   /* teal-grey */
-  --type-bookmark: oklch(0.72 0.10 250);   /* indigo */
+  --type-bookmark:           oklch(0.72 0.10 250);   /* indigo */
+  --type-conversation-state: oklch(0.72 0.10 330);   /* rose */
 
   --radius-1: 3px;
   --radius-2: 6px;
@@ -86,7 +87,8 @@
   --type-story:    oklch(0.50 0.14 30);
   --type-project:  oklch(0.45 0.12 300);
   --type-area:     oklch(0.48 0.06 180);
-  --type-bookmark: oklch(0.45 0.10 250);
+  --type-bookmark:           oklch(0.45 0.10 250);
+  --type-conversation-state: oklch(0.45 0.10 330);   /* rose */
 }
 
 * { box-sizing: border-box; }
@@ -319,7 +321,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .type-dot.story { background: var(--type-story); }
 .type-dot.project { background: var(--type-project); }
 .type-dot.area { background: var(--type-area); }
-.type-dot.bookmark { background: var(--type-bookmark); }
+.type-dot.bookmark             { background: var(--type-bookmark); }
+.type-dot.conversation-state   { background: var(--type-conversation-state); }
 
 .type-pill {
   display: inline-flex; align-items: center; gap: 6px;

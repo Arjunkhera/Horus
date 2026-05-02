@@ -52,7 +52,7 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
       <aside className="side collapsed">
         <div className="side-rail">
           <button className="side-rail-btn" title="Recents" onClick={() => onNavigate({ kind: 'home' })}>⟲</button>
-          {['task','note','journal','story','project','bookmark'].map(t => (
+          {['task','note','journal','story','project','bookmark','conversation-state'].map(t => (
             <button key={t} className="side-rail-btn" title={t} onClick={() => onNavigate({ kind: 'type', type: t })}>
               <span className={`type-dot ${t}`}></span>
             </button>
@@ -97,7 +97,7 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
       </SideSection>
 
       <SideSection id="types" title="Browse by type">
-        {['task', 'note', 'journal', 'story', 'project', 'bookmark', 'area'].map(t => {
+        {['task', 'note', 'journal', 'story', 'project', 'bookmark', 'area', 'conversation-state'].map(t => {
           const c = typeCounts[t] || 0;
           if (!c) return null;
           const active = currentRoute.kind === 'type' && currentRoute.type === t;
@@ -157,7 +157,7 @@ function HomePage({ onNavigate }) {
   // Older note for "jump to date"
   const allDates = [...new Set(data.notes.map(n => n.modified).filter(Boolean))].sort().reverse();
 
-  const orderedTypes = ['task', 'note', 'journal', 'story', 'project', 'bookmark', 'area'];
+  const orderedTypes = ['task', 'note', 'journal', 'story', 'project', 'bookmark', 'area', 'conversation-state'];
 
   function toggleBrowse() {
     setBrowseOpen(o => { localStorage.setItem('horus:home-browse', o ? '0' : '1'); return !o; });
@@ -754,7 +754,7 @@ function SearchPalette({ onClose, onNavigate }) {
     else if (e.key === 'Enter') { e.preventDefault(); open(active); }
     else if (e.key === 'Tab') {
       e.preventDefault();
-      const types = [null, 'task', 'note', 'journal', 'story', 'project', 'bookmark'];
+      const types = [null, 'task', 'note', 'journal', 'story', 'project', 'bookmark', 'conversation-state'];
       const idx = types.indexOf(filter);
       setFilter(types[(idx + 1) % types.length]);
     }
@@ -778,7 +778,7 @@ function SearchPalette({ onClose, onNavigate }) {
         <div className="palette-filters">
           <span className="filter-label">FILTER:</span>
           <button className={`chip${filter === null ? ' active' : ''}`} onClick={() => setFilter(null)}>all</button>
-          {['task', 'note', 'journal', 'story', 'project', 'bookmark'].map(t => (
+          {['task', 'note', 'journal', 'story', 'project', 'bookmark', 'conversation-state'].map(t => (
             <button key={t} className={`chip${filter === t ? ' active' : ''}`} onClick={() => setFilter(t)}>
               <span className={`type-dot ${t}`} style={{ width: 6, height: 6, display: 'inline-block', borderRadius: '50%' }}></span>
               {t}
