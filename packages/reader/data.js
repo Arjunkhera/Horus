@@ -283,7 +283,7 @@ window.HORUS_DATA = (function () {
   function getLastSyncedAt() { return _lastSyncedAt; }
 
   async function loadFromAnvil() {
-    if (!window.AnvilClient) return false;
+    if (!window.AnvilClient) return { ok: false, count: 0 };
     try {
       const live = [];
       const BATCH = 100;
@@ -312,7 +312,7 @@ window.HORUS_DATA = (function () {
         if (live.length >= result.total || result.results.length < BATCH) break;
         offset += BATCH;
       }
-      if (live.length === 0) return false; // empty vault — keep mock data
+      if (live.length === 0) return { ok: false, count: 0 }; // empty vault — keep mock data
 
       // Replace mock data in-place so all existing references update
       notes.length = 0;
@@ -326,10 +326,10 @@ window.HORUS_DATA = (function () {
 
       _lastSyncedAt = new Date().toISOString();
       if (_onChange) _onChange();
-      return true;
+      return { ok: true, count: live.length };
     } catch (err) {
       console.warn('[horus] Anvil unreachable — using mock data', err);
-      return false;
+      return { ok: false, count: 0 };
     }
   }
 
