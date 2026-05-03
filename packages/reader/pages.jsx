@@ -83,13 +83,14 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
 
   const recentsCapped = recents.slice(0, SIDE_LIMIT);
   const pinnedCapped = (pinned || []).slice(0, SIDE_LIMIT);
+  const pinnedResolved = pinnedCapped.filter(id => !!data.byId[id]);
 
   return (
     <aside className="side">
-      <SideSection id="pinned" title="Pinned" count={pinnedCapped.length || null}>
-        {pinnedCapped.length === 0
+      <SideSection id="pinned" title="Pinned" count={pinnedResolved.length || null}>
+        {pinnedResolved.length === 0
           ? <div className="side-empty">No pins yet — open a note and click the pin icon</div>
-          : pinnedCapped.map(id => noteRow(id, { unpin: true }))}
+          : pinnedResolved.map(id => noteRow(id, { unpin: true }))}
       </SideSection>
 
       <SideSection id="recents" title="Recents" count={recentsCapped.length || null}>
