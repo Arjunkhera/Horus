@@ -38,11 +38,25 @@ function App() {
   const [dataVersion, setDataVersion] = uS(0);
   uE(() => {
     data.onDataChange(() => setDataVersion(v => v + 1));
-    data.loadFromAnvil().then(loaded => {
-      if (loaded) data.connectSSE();
+    data.loadFromAnvil().then(result => {
+      if (result.ok) {
+        setBootstrapError(false);
+        data.connectSSE();
+      } else {
+        setBootstrapError(true);
+      }
     });
     return () => data.disconnectSSE();
   }, []);
+
+  function handleRetry() {
+    data.loadFromAnvil().then(result => {
+      if (result.ok) {
+        setBootstrapError(false);
+        data.connectSSE();
+      }
+    });
+  }
   const lastSyncedAt = uM(() => data.getLastSyncedAt(), [dataVersion]);
 
   const PIN_KEY = 'horus:pinned';
@@ -64,6 +78,7 @@ function App() {
   });
   const [sideCollapsed, setSideCollapsed] = uS(() => localStorage.getItem('horus:side-collapsed') === '1');
   const [refsCollapsed, setRefsCollapsed] = uS(() => localStorage.getItem('horus:refs-collapsed') === '1');
+  const [bootstrapError, setBootstrapError] = uS(false);
   const typeCounts = uM(() => data.typeCounts(), [dataVersion]);
 
   function togglePin(id) {
@@ -203,6 +218,12 @@ function App() {
       <Sidebar recents={recents} currentRoute={route} onNavigate={navigate} typeCounts={typeCounts} collapsed={sideCollapsed} pinned={pinned} togglePin={togglePin} lastSyncedAt={lastSyncedAt} onRefresh={() => data.manualRefresh()} />
 
       <main className="main">
+        {bootstrapError && (
+          <div style={{ padding: '10px 16px', background: 'oklch(0.22 0.04 60)', borderBottom: '1px solid oklch(0.35 0.08 60)', color: 'oklch(0.85 0.10 60)', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', lineHeight: '1.4' }}>
+            <span>⚠ Could not load notes from Anvil. Showing cached/demo data.</span>
+            <button onClick={handleRetry} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: '4px', border: '1px solid oklch(0.45 0.10 60)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: '12px' }}>Retry</button>
+          </div>
+        )}
         {pageEl}
       </main>
 
