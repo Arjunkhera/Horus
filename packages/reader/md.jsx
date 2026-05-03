@@ -1,6 +1,34 @@
 // Markdown renderer + wiki-link parser + shared components
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
+// ── Mermaid diagram block ────────────────────────────────────────
+let _mermaidCounter = 0;
+function MermaidBlock({ source }) {
+  const containerRef = useRef(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!containerRef.current || !window.mermaid) return;
+    const id = `mermaid-${++_mermaidCounter}`;
+    window.mermaid.render(id, source).then(({ svg }) => {
+      if (containerRef.current) containerRef.current.innerHTML = svg;
+    }).catch(() => {
+      setError(true);
+    });
+  }, [source]);
+
+  if (error) {
+    return (
+      <div className="mermaid-block mermaid-error">
+        <span className="mermaid-error-label">diagram error</span>
+        <pre><code data-lang="mermaid">{source}</code></pre>
+      </div>
+    );
+  }
+
+  return <div className="mermaid-block" ref={containerRef} />;
+}
+
 // ── Tiny markdown renderer ───────────────────────────────────────
 // Supports: headings, paragraphs, lists, code blocks, inline code,
 // tables, blockquotes, hr, bold/italic, wiki-links [[...]].
@@ -61,9 +89,13 @@ function renderMarkdown(src, onWikiClick, resolveTitle) {
         buf.push(lines[i]); i++;
       }
       i++;
-      out.push(
-        <pre key={k()}><code data-lang={lang}>{buf.join('\n')}</code></pre>
-      );
+      if (lang === 'mermaid') {
+        out.push(<MermaidBlock key={k()} source={buf.join('\n')} />);
+      } else {
+        out.push(
+          <pre key={k()}><code data-lang={lang}>{buf.join('\n')}</code></pre>
+        );
+      }
       continue;
     }
 
