@@ -5,6 +5,18 @@ const { useState, useEffect, useMemo, useRef, useCallback } = React;
 // Supports: headings, paragraphs, lists, code blocks, inline code,
 // tables, blockquotes, hr, bold/italic, wiki-links [[...]].
 // Pass an optional resolveTitle(text) -> note|null for custom resolution.
+function MermaidBlock({ source }) {
+  const ref = React.useRef(null);
+  const idRef = React.useRef('mermaid-' + Math.random().toString(36).slice(2));
+  React.useEffect(() => {
+    if (!window.mermaid || !ref.current) return;
+    window.mermaid.render(idRef.current, source)
+      .then(({ svg }) => { if (ref.current) ref.current.innerHTML = svg; })
+      .catch(() => { if (ref.current) ref.current.textContent = source; });
+  }, [source]);
+  return React.createElement('div', { className: 'mermaid-block', ref });
+}
+
 function renderMarkdown(src, onWikiClick, resolveTitle) {
   const _resolve = resolveTitle || ((t) => window.HORUS_DATA.findFuzzy(t));
   const lines = src.split('\n');
@@ -61,9 +73,13 @@ function renderMarkdown(src, onWikiClick, resolveTitle) {
         buf.push(lines[i]); i++;
       }
       i++;
-      out.push(
-        <pre key={k()}><code data-lang={lang}>{buf.join('\n')}</code></pre>
-      );
+      if (lang === 'mermaid') {
+        out.push(<MermaidBlock key={k()} source={buf.join('\n')} />);
+      } else {
+        out.push(
+          <pre key={k()}><code data-lang={lang}>{buf.join('\n')}</code></pre>
+        );
+      }
       continue;
     }
 

@@ -1092,3 +1092,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .main::-webkit-scrollbar, .side::-webkit-scrollbar, .palette-results::-webkit-scrollbar { width: 8px; }
 .main::-webkit-scrollbar-thumb, .side::-webkit-scrollbar-thumb, .palette-results::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
 .main::-webkit-scrollbar-track, .side::-webkit-scrollbar-track, .palette-results::-webkit-scrollbar-track { background: transparent; }
+
+.mermaid-block { margin: 1.25rem 0; overflow-x: auto; }
+.mermaid-block svg { max-width: 100%; height: auto; }

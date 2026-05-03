@@ -94,6 +94,19 @@ function App() {
     document.documentElement.style.setProperty('--link', val);
   }, [tweaks]);
 
+  // Mermaid initialization
+  if (window.mermaid) {
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      darkMode: true,
+      themeVariables: {
+        background: 'oklch(0.13 0.01 264)',
+        primaryColor: 'oklch(0.74 0.13 60)',
+      }
+    });
+  }
+
   function navigate(r) {
     // Don't push duplicate of current
     if (routeKey(r) === routeKey(route)) return;
