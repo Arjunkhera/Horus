@@ -34,6 +34,19 @@ function App() {
 
   const data = window.HORUS_DATA;
 
+  // Initialize mermaid once on mount
+  uE(() => {
+    window.mermaid?.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      darkMode: true,
+      themeVariables: {
+        background: 'oklch(0.13 0.01 264)',
+        primaryColor: 'oklch(0.74 0.13 60)',
+      }
+    });
+  }, []);
+
   // Increment to trigger re-render after Anvil data loads
   const [dataVersion, setDataVersion] = uS(0);
   uE(() => {
