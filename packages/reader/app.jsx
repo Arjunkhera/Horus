@@ -143,8 +143,16 @@ function App() {
         setTimeout(() => document.removeEventListener('keydown', handler, true), 800);
       }
     }
+    function onMouse(e) {
+      if (e.button === 3) { e.preventDefault(); goBack(); }
+      else if (e.button === 4) { e.preventDefault(); goForward(); }
+    }
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    document.addEventListener('mouseup', onMouse);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mouseup', onMouse);
+    };
   }, [cursor, history.length]);
 
   const TweaksPanel = window.TweaksPanel;
