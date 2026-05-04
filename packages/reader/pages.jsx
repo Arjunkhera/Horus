@@ -203,6 +203,42 @@ function HomePage({ onNavigate }) {
         <div className="sub">{today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · {data.notes.length} notes</div>
       </div>
 
+      {/* NLP Ask Bar */}
+      <div className="ask-bar-wrap">
+        <div className="ask-bar">
+          <span className="ask-bar-icon">✦</span>
+          <input
+            className="ask-bar-input"
+            placeholder="Ask anything about your notes…"
+            onKeyDown={e => {
+              if (e.key === 'Enter' && e.target.value.trim()) {
+                const q = e.target.value.trim();
+                const sid = window.ChatSessionStore.createSession(q);
+                window.__pendingAskQuery = { sessionId: sid, question: q };
+                onNavigate({ kind: 'ask' });
+              }
+            }}
+          />
+          <button className="ask-bar-btn" onClick={e => {
+            const input = e.target.closest('.ask-bar').querySelector('.ask-bar-input');
+            const q = input.value.trim();
+            if (!q) return;
+            const sid = window.ChatSessionStore.createSession(q);
+            window.__pendingAskQuery = { sessionId: sid, question: q };
+            onNavigate({ kind: 'ask' });
+          }}>Ask ↵</button>
+        </div>
+        <div className="ask-chips">
+          {['What did I decide about auth?', 'Open tasks this week', 'Summarise Horus UI project', 'What did I write last Tuesday?', 'Any blockers on Phase 3?'].map(q => (
+            <button key={q} className="ask-chip" onClick={() => {
+              const sid = window.ChatSessionStore.createSession(q);
+              window.__pendingAskQuery = { sessionId: sid, question: q };
+              onNavigate({ kind: 'ask' });
+            }}>{q}</button>
+          ))}
+        </div>
+      </div>
+
       {/* Collapsible Browse by type */}
       <div className="home-section">
         <button className="home-section-head" onClick={toggleBrowse}>
