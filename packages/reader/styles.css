@@ -1122,6 +1122,17 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 /* ── NLP Agent Search Layout ──────────────────────────────────── */
 
+/* In ask mode, main spans both grid columns (no sidebar) */
+.app.ask-mode {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "head"
+    "main";
+}
+.app.ask-mode .main {
+  overflow: hidden;
+}
+
 /* /ask route — 3-pane grid */
 .ask-layout {
   display: grid;

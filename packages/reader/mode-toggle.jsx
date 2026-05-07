@@ -1,17 +1,28 @@
 // ModeToggle — header mode switch between Editor and Agent
 (function () {
-  function ModeToggle({ onNavigate }) {
-    const isAgent = window.location.pathname === '/ask' ||
-      (window.__currentRoute && window.__currentRoute.kind === 'ask');
+  function ModeToggle({ route, onNavigate }) {
+    const isAgent = route?.kind === 'ask';
 
     function switchToAgent() {
-      window.ChatSessionStore?.setLastEditorPath(window.location.pathname);
+      const editorPath = !route || route.kind === 'home' ? '/'
+        : route.kind === 'note' ? `/n/${route.id}`
+        : route.kind === 'tag' ? `/t/${route.tag}`
+        : route.kind === 'type' ? `/type/${route.type}`
+        : '/';
+      window.ChatSessionStore?.setLastEditorPath(editorPath);
       onNavigate({ kind: 'ask' });
     }
 
     function switchToEditor() {
       const lastPath = window.ChatSessionStore?.getLastEditorPath() || '/';
-      onNavigate({ kind: lastPath === '/' ? 'home' : 'restore', path: lastPath });
+      if (lastPath === '/') return onNavigate({ kind: 'home' });
+      const noteM = lastPath.match(/^\/n\/(.+)$/);
+      if (noteM) return onNavigate({ kind: 'note', id: noteM[1] });
+      const tagM = lastPath.match(/^\/t\/(.+)$/);
+      if (tagM) return onNavigate({ kind: 'tag', tag: tagM[1] });
+      const typeM = lastPath.match(/^\/type\/(.+)$/);
+      if (typeM) return onNavigate({ kind: 'type', type: typeM[1] });
+      onNavigate({ kind: 'home' });
     }
 
     return (
