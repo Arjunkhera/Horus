@@ -90,6 +90,7 @@
         messages: firstMessage ? [{ role: 'user', content: firstMessage, timestamp: now }] : [],
       };
       setStore(sessions);
+      window.dispatchEvent(new Event('chat-sessions-updated'));
       return id;
     },
 
