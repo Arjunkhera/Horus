@@ -195,27 +195,35 @@ const TYPESENSE_SERVICE = `\
 
 const READER_SERVICE = `\
   # ── Reader ─────────────────────────────────────────────────────────────────
-  # Horus Reader — CDN React SPA served by nginx:alpine on port 8400.
-  # Pure static files; connects directly to Anvil REST API from the browser.
+  # Horus Reader — Express server with NLP agent search at port 8400.
+  # Serves static SPA files, proxies /api/* to Anvil, and hosts POST /api/ai/ask.
   reader:
-    image: ghcr.io/arjunkhera/horus/reader:latest
+    image: ghcr.io/arjunkhera/horus/horus-ui:latest
     ports:
       - "\${UI_PORT:-8400}:8400"
+    environment:
+      - CURSOR_API_KEY=\${HORUS_AI_KEY}
+      - HORUS_AGENT_MODEL=\${HORUS_AGENT_MODEL:-composer-2}
+      - ANVIL_HOST=anvil
+      - ANVIL_PORT=8100
+    depends_on:
+      anvil:
+        condition: service_healthy
     networks:
       - horus-net
     restart: unless-stopped
-    stop_grace_period: 10s
+    stop_grace_period: 15s
     deploy:
       resources:
         limits:
-          memory: 64m
+          memory: 256m
         reservations:
-          memory: 32m
+          memory: 128m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8400/health"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 20s
       retries: 3`;
 
 // ── Test compose overlay generation ──────────────────────────────────────────

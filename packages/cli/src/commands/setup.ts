@@ -195,6 +195,9 @@ export const setupCommand = new Command('setup')
         },
         vaults,
         github_hosts,
+        ai: {
+          key: process.env.HORUS_AI_KEY || '',
+        },
       };
     } else {
       // Interactive mode
@@ -365,6 +368,17 @@ export const setupCommand = new Command('setup')
         };
       }
 
+      // AI key — optional but required for NLP agent search
+      console.log('');
+      console.log(chalk.bold('NLP Agent Search'));
+      console.log(chalk.dim('Required for the ✦ Ask bar in the Horus Reader.'));
+      console.log('');
+
+      const aiKey = await password({
+        message: 'Horus AI key (leave empty to configure later):',
+        mask: '*',
+      });
+
       config = {
         ...defaultConfig(),
         data_dir,
@@ -378,6 +392,9 @@ export const setupCommand = new Command('setup')
         },
         vaults,
         github_hosts,
+        ai: {
+          key: aiKey.trim(),
+        },
       };
     }
 

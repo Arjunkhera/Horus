@@ -46,6 +46,9 @@ export interface Config {
   search: {
     api_key: string;
   };
+  ai: {
+    key: string;
+  };
   vaults: Record<string, VaultConfig>;
   github_hosts: Record<string, GitHubHost>;
   host_repos_path: string;
@@ -67,6 +70,9 @@ export function defaultConfig(): Config {
     },
     search: {
       api_key: 'horus-local-key',
+    },
+    ai: {
+      key: '',
     },
     vaults: {},
     github_hosts: {},
@@ -148,6 +154,9 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
     },
     search: {
       api_key: ((parsed.search as Record<string, unknown> | undefined)?.api_key as string | undefined) ?? defaults.search.api_key,
+    },
+    ai: {
+      key: ((parsed.ai as Record<string, unknown> | undefined)?.key as string | undefined) ?? defaults.ai.key,
     },
     vaults: (parsed.vaults as Record<string, VaultConfig> | undefined) ?? defaults.vaults,
     github_hosts: (parsed.github_hosts as Record<string, GitHubHost> | undefined) ?? defaults.github_hosts,
@@ -306,6 +315,9 @@ export function generateEnv(config: Config): string {
     '# Search',
     `TYPESENSE_API_KEY=${config.search.api_key}`,
     '',
+    '# AI (required for NLP agent search in the Reader)',
+    `HORUS_AI_KEY=${config.ai.key}`,
+    '',
     '# Repository URLs (must be HTTPS — container services do not have SSH keys)',
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
     `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
@@ -343,6 +355,7 @@ export const CONFIG_KEYS = [
   'repo.anvil-notes',
   'repo.forge-registry',
   'search.api-key',
+  'ai.key',
   'enable-ui',
 ] as const;
 
@@ -379,6 +392,8 @@ export function getConfigValue(config: Config, key: ConfigKey): string {
       return config.repos.forge_registry;
     case 'search.api-key':
       return config.search.api_key;
+    case 'ai.key':
+      return config.ai.key;
     case 'enable-ui':
       return String(config.enable_ui);
   }
@@ -435,6 +450,9 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
       break;
     case 'search.api-key':
       updated.search = { ...updated.search, api_key: value };
+      break;
+    case 'ai.key':
+      updated.ai = { ...updated.ai, key: value };
       break;
     case 'enable-ui':
       if (value !== 'true' && value !== 'false') {
