@@ -65,6 +65,9 @@ function makeConfig(): Config {
       default: { host: 'github.com', token: 'test-token' },
     },
     enable_ui: true,
+    ai: {
+      key: '',
+    },
   } as Config;
 }
 
