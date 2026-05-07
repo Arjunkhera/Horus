@@ -44,6 +44,7 @@ jobs:
               - 'packages/forge/**'
             reader:
               - 'packages/reader/**'
+              - 'packages/reader-server/**'
 
   # ── Anvil ─────────────────────────────────────────────────────────────────────
   build-anvil:
@@ -348,8 +349,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: packages/reader
-          file: packages/reader/Dockerfile
+          context: .
+          file: packages/reader-server/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

@@ -195,10 +195,10 @@ const TYPESENSE_SERVICE = `\
 
 const READER_SERVICE = `\
   # ── Reader ─────────────────────────────────────────────────────────────────
-  # Horus Reader — Express server with NLP agent search at port 8400.
-  # Serves static SPA files, proxies /api/* to Anvil, and hosts POST /api/ai/ask.
+  # Horus Reader — Express server + NLP agent search at port 8400.
+  # Serves Reader SPA, proxies /api/* to Anvil, hosts POST /api/ai/ask.
   reader:
-    image: ghcr.io/arjunkhera/horus/horus-ui:latest
+    image: ghcr.io/arjunkhera/horus/reader:latest
     ports:
       - "\${UI_PORT:-8400}:8400"
     environment:
