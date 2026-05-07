@@ -271,6 +271,36 @@ services:
       retries: 3
 
 
+  # ── Reader Server ──────────────────────────────────────────────────────────
+  # Express server: serves reader SPA, proxies /api/* to Anvil, and handles
+  # POST /api/ai/ask with Cursor SDK agent lifecycle + SSE streaming.
+  reader-server:
+    build:
+      context: packages/reader-server
+      dockerfile: Dockerfile
+    ports:
+      - "${READER_PORT:-8400}:8400"
+    environment:
+      - CURSOR_API_KEY=${CURSOR_API_KEY}
+      - HORUS_AGENT_MODEL=${HORUS_AGENT_MODEL:-composer-2}
+      - ANVIL_HOST=anvil
+      - ANVIL_PORT=8100
+      - READER_STATIC=/app/reader
+    volumes:
+      - ./packages/reader:/app/reader:ro
+    depends_on:
+      anvil:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8400/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
   # ── Neo4j ─────────────────────────────────────────────────────────────────
   # Graph database for relationship-aware knowledge queries.
   neo4j:
