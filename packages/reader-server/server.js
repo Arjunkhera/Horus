@@ -43,9 +43,10 @@ app.post('/api/ai/ask', async (req, res) => {
   res.writeHead(200, sseHeaders());
 
   const toolCallLog = [];
-  const TIMEOUT_MS = 30000;
+  const TIMEOUT_MS = 90000;
   let timedOut = false;
   let run;
+  let accumulatedText = '';
 
   try {
     const { agent, isNew } = await getOrCreateAgent(agentId, sessionMessages);
@@ -78,7 +79,12 @@ app.post('/api/ai/ask', async (req, res) => {
         toolCallLog.push(event);
         res.write(sseEvent({ type: 'status', text: describeToolCall(event) }));
       } else if (event.type === 'assistant') {
-        res.write(sseEvent({ type: 'token', text: event.content }));
+        // SDK emits text at event.message.content[0].text, not event.content
+        const text = event.message?.content?.[0]?.text ?? '';
+        if (text) {
+          accumulatedText += text;
+          res.write(sseEvent({ type: 'token', text }));
+        }
       }
       // suppress 'thinking' events
     }
@@ -86,8 +92,15 @@ app.post('/api/ai/ask', async (req, res) => {
     clearTimeout(timeout);
 
     if (!timedOut) {
-      const result = await run.wait();
-      const parsed = parseCitations(result.result || '', toolCallLog);
+      // Use accumulated stream text for citations; fall back to run.wait() result
+      let finalText = accumulatedText;
+      if (!finalText) {
+        try {
+          const result = await run.wait();
+          finalText = result.result || '';
+        } catch {}
+      }
+      const parsed = parseCitations(finalText, toolCallLog);
       res.write(sseEvent({ type: 'references', items: parsed.references }));
       res.write(sseEvent({ type: 'followups', items: parsed.followups }));
       res.write(sseEvent({ type: 'done', agentId: agent.agentId }));
