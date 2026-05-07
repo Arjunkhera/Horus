@@ -23,6 +23,7 @@ function routeKey(r) {
   if (r.kind === 'note') return `n:${r.id}`;
   if (r.kind === 'tag') return `t:${r.tag}`;
   if (r.kind === 'type') return `y:${r.type}`;
+  if (r.kind === 'ask') return 'ask';
   return JSON.stringify(r);
 }
 
@@ -139,6 +140,11 @@ function App() {
         return next;
       });
     }
+    // Track last editor path for mode toggle
+    if (r.kind !== 'ask') {
+      const editorPath = r.kind === 'home' ? '/' : r.kind === 'note' ? `/n/${r.id}` : r.kind === 'tag' ? `/t/${r.tag}` : r.kind === 'type' ? `/type/${r.type}` : '/';
+      window.ChatSessionStore?.setLastEditorPath(editorPath);
+    }
     document.querySelector('.main')?.scrollTo({ top: 0 });
   }
 
@@ -153,6 +159,20 @@ function App() {
 
   // Persist refsCollapsed
   uE(() => { localStorage.setItem('horus:refs-collapsed', refsCollapsed ? '1' : '0'); }, [refsCollapsed]);
+
+  // Handle switch-to-editor event from NotePreviewPane
+  uE(() => {
+    function onSwitchEditor(e) {
+      const { noteId } = e.detail;
+      window.__chatReturnContext = {
+        sessionId: window.ChatSessionStore?.getLastActiveSessionId(),
+        scrollPosition: 0,
+      };
+      navigate({ kind: 'note', id: noteId });
+    }
+    window.addEventListener('switch-to-editor', onSwitchEditor);
+    return () => window.removeEventListener('switch-to-editor', onSwitchEditor);
+  }, []);
 
   // Keyboard shortcuts
   uE(() => {
@@ -195,8 +215,10 @@ function App() {
   else if (route.kind === 'note') pageEl = <NotePage noteId={route.id} onNavigate={navigate} refsCollapsed={refsCollapsed} setRefsCollapsed={setRefsCollapsed} pinned={pinned} togglePin={togglePin} />;
   else if (route.kind === 'tag') pageEl = <TagPage tag={route.tag} onNavigate={navigate} />;
   else if (route.kind === 'type') pageEl = <TypePage type={route.type} onNavigate={navigate} />;
+  else if (route.kind === 'ask') pageEl = <window.AskPage onNavigate={navigate} />;
 
   const crumb = route.kind === 'home' ? '/' :
+    route.kind === 'ask' ? '/ask' :
     route.kind === 'note' ? `/n/${route.id}` :
     route.kind === 'tag' ? `/t/${route.tag}` :
     route.kind === 'type' ? `/type/${route.type}` : '/';
@@ -218,6 +240,8 @@ function App() {
           <h1>Horus Reader</h1>
           <span className="crumb">{crumb}</span>
         </div>
+
+        {window.ModeToggle && <window.ModeToggle onNavigate={navigate} />}
 
         <div className="head-search">
           <button className="head-search-btn" onClick={() => setPaletteOpen(true)}>
@@ -246,6 +270,13 @@ function App() {
             <span>⚠ Could not load notes from Anvil. Showing cached/demo data.</span>
             <button onClick={handleRetry} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: '4px', border: '1px solid oklch(0.45 0.10 60)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: '12px' }}>Retry</button>
           </div>
+        )}
+        {route.kind === 'note' && window.__chatReturnContext && (
+          <button className="from-chat-badge" onClick={() => {
+            const ctx = window.__chatReturnContext;
+            window.__chatReturnContext = null;
+            navigate({ kind: 'ask', sessionId: ctx.sessionId });
+          }}>← from chat</button>
         )}
         {pageEl}
       </main>
