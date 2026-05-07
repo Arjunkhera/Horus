@@ -224,7 +224,7 @@ function App() {
     route.kind === 'type' ? `/type/${route.type}` : '/';
 
   return (
-    <div className={`app${sideCollapsed ? ' side-collapsed' : ''}`}>
+    <div className={`app${sideCollapsed ? ' side-collapsed' : ''}${route.kind === 'ask' ? ' ask-mode' : ''}`}>
       <header className="head">
         <button className="icon-btn" title="Toggle sidebar" onClick={toggleSide}>
           <window.Icon.Sidebar />
@@ -241,7 +241,7 @@ function App() {
           <span className="crumb">{crumb}</span>
         </div>
 
-        {window.ModeToggle && <window.ModeToggle onNavigate={navigate} />}
+        {window.ModeToggle && <window.ModeToggle route={route} onNavigate={navigate} />}
 
         <div className="head-search">
           <button className="head-search-btn" onClick={() => setPaletteOpen(true)}>
@@ -262,7 +262,7 @@ function App() {
         </div>
       </header>
 
-      <Sidebar recents={recents} currentRoute={route} onNavigate={navigate} typeCounts={typeCounts} collapsed={sideCollapsed} pinned={pinned} togglePin={togglePin} lastSyncedAt={lastSyncedAt} onRefresh={() => data.manualRefresh()} />
+      {route.kind !== 'ask' && <Sidebar recents={recents} currentRoute={route} onNavigate={navigate} typeCounts={typeCounts} collapsed={sideCollapsed} pinned={pinned} togglePin={togglePin} lastSyncedAt={lastSyncedAt} onRefresh={() => data.manualRefresh()} />}
 
       <main className="main">
         {bootstrapError && (

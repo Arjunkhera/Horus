@@ -435,7 +435,7 @@
     return (
       <div className={`ask-layout${previewState ? ' preview-open' : ''}`} style={{ height: '100%', display: 'grid', gridTemplateColumns: previewState ? 'var(--side-w) 1fr 230px' : 'var(--side-w) 1fr' }}>
         {/* Sidebar with tab switcher */}
-        <aside className="side" style={{ borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <aside className="side" style={{ gridColumn: '1', gridRow: '1', borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
           <div className="side-tabs">
             <button className={`side-tab${sideTab === 'notes' ? ' active-notes' : ''}`} onClick={() => { setSideTab('notes'); onNavigate({ kind: 'home' }); }}>Notes</button>
             <button className={`side-tab${sideTab === 'chats' ? ' active-chats' : ''}`} onClick={() => setSideTab('chats')}>✦ Chats</button>

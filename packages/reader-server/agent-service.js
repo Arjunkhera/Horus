@@ -45,11 +45,13 @@ export function buildResumeMessage(question, sessionMessages) {
 }
 
 export function describeToolCall(event) {
-  const name = event?.name || event?.tool || '';
+  // SDK wraps MCP calls as name:"mcp" with actual tool name at event.args.toolName
+  const name = event?.args?.toolName || event?.name || event?.tool || '';
   if (name === 'anvil_search') return 'searching notes…';
   if (name === 'anvil_get_note') return 'reading note…';
   if (name === 'anvil_get_edges') return 'following connections…';
   if (name === 'anvil_get_related') return 'exploring relationships…';
   if (name === 'horus_search') return 'searching across Horus…';
+  if (name === 'anvil_query_view') return 'querying notes…';
   return 'thinking…';
 }
