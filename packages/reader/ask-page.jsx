@@ -73,7 +73,7 @@
               <span className="ref-n">[{ref.n}]</span>
               <span className="ref-type-dot" style={typeDotStyle(ref.type)} />
               <span className="ref-title">{ref.title}</span>
-              <span className="ref-age">{ageStr(ref.modified)}</span>
+              <span className="ref-age">{ageStr(window.HORUS_DATA?.byId[ref.noteId]?.modified || ref.modified)}</span>
             </div>
           ))
           : (

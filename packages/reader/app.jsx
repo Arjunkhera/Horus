@@ -160,20 +160,6 @@ function App() {
   // Persist refsCollapsed
   uE(() => { localStorage.setItem('horus:refs-collapsed', refsCollapsed ? '1' : '0'); }, [refsCollapsed]);
 
-  // Handle switch-to-editor event from NotePreviewPane
-  uE(() => {
-    function onSwitchEditor(e) {
-      const { noteId } = e.detail;
-      window.__chatReturnContext = {
-        sessionId: window.ChatSessionStore?.getLastActiveSessionId(),
-        scrollPosition: 0,
-      };
-      navigate({ kind: 'note', id: noteId });
-    }
-    window.addEventListener('switch-to-editor', onSwitchEditor);
-    return () => window.removeEventListener('switch-to-editor', onSwitchEditor);
-  }, []);
-
   // Keyboard shortcuts
   uE(() => {
     function onKey(e) {
@@ -198,10 +184,10 @@ function App() {
       else if (e.button === 4) { e.preventDefault(); goForward(); }
     }
     document.addEventListener('keydown', onKey);
-    document.addEventListener('mouseup', onMouse);
+    document.addEventListener('mousedown', onMouse);
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.removeEventListener('mouseup', onMouse);
+      document.removeEventListener('mousedown', onMouse);
     };
   }, [cursor, history.length]);
 

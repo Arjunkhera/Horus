@@ -838,7 +838,7 @@ function SearchPalette({ onClose, onNavigate }) {
                 <window.MD.TypePill type={r.note.type} />
                 <div>
                   <div className="title">{q ? highlight(r.note.title, q) : r.note.title}</div>
-                  {r.snippet && <div className="snippet">{r.snippet}</div>}
+                  {r.snippet && <div className="snippet" dangerouslySetInnerHTML={{ __html: r.snippet }} />}
                 </div>
                 <span className="meta">{window.MD.fmtRelative(r.note.modified)}</span>
               </div>
