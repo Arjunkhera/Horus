@@ -475,7 +475,7 @@
     return (
       <div className={`ask-layout${previewState ? ' preview-open' : ''}${sideCollapsed ? ' side-collapsed' : ''}`} style={{ height: '100%', display: 'grid', gridTemplateColumns: sideCollapsed ? (previewState ? `1fr 4px ${previewWidth}px` : '1fr') : gridCols }}>
         {/* Sidebar with tab switcher */}
-        <aside className="side" style={{ borderRight: '1px solid var(--line)', display: sideCollapsed ? 'none' : 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <aside className="side" style={{ gridColumn: 1, gridRow: 1, borderRight: '1px solid var(--line)', display: sideCollapsed ? 'none' : 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
           <div className="side-tabs">
             <button className={`side-tab${sideTab === 'notes' ? ' active-notes' : ''}`} onClick={() => { setSideTab('notes'); onNavigate({ kind: 'home' }); }}>Notes</button>
             <button className={`side-tab${sideTab === 'chats' ? ' active-chats' : ''}`} onClick={() => setSideTab('chats')}>✦ Chats</button>
