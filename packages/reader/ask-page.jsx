@@ -108,6 +108,14 @@
       else setSession(null);
     }, [sessionId]);
 
+    uE(() => {
+      function onResponse(e) {
+        if (e.detail.id === sessionId) setSession(store().getSession(sessionId));
+      }
+      window.addEventListener('chat-session-response', onResponse);
+      return () => window.removeEventListener('chat-session-response', onResponse);
+    }, [sessionId]);
+
     // Auto-scroll during streaming
     uE(() => {
       if (streamState === 'streaming' && autoScrollRef.current && messagesRef.current) {
@@ -249,8 +257,10 @@
               <div key={i} className="msg-assistant">
                 <div className="msg-assistant-label">✦ Horus</div>
                 <div className="msg-assistant-body">
-                  <CitationText text={msg.content} references={msg.references}
-                    onCiteClick={handleRefClick} activeRefN={activeRefN} />
+                  {window.MD?.MarkdownBody
+                    ? React.createElement(window.MD.MarkdownBody, { body: msg.content, onNavigate: () => {} })
+                    : <CitationText text={msg.content} references={msg.references}
+                        onCiteClick={handleRefClick} activeRefN={activeRefN} />}
                 </div>
                 <RefList references={msg.references} activeRefN={activeRefN} onRefClick={handleRefClick} />
               </div>
@@ -270,7 +280,9 @@
               )}
               {streamState === 'streaming' && (
                 <div className="msg-assistant-body">
-                  {streamText}<span className="stream-cursor" />
+                  {window.MD?.renderMarkdown
+                    ? <>{window.MD.renderMarkdown(streamText)}<span className="stream-cursor" /></>
+                    : <>{streamText}<span className="stream-cursor" /></>}
                 </div>
               )}
             </div>
@@ -361,8 +373,8 @@
         </div>
 
         <div className="preview-body">
-          {note?.body && (window.MarkdownRenderer
-            ? <window.MarkdownRenderer body={note.body} onNavigate={() => {}} />
+          {note?.body && (window.MD?.MarkdownBody
+            ? React.createElement(window.MD.MarkdownBody, { body: note.body, onNavigate: () => {} })
             : <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{note.body}</pre>)}
         </div>
 

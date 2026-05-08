@@ -15,6 +15,7 @@ export function parseCitations(text, toolCallLog) {
 
   // Fallback: build from tool call log if no References block
   if (references.length === 0 && toolCallLog.length > 0) {
+    const noteMetaMap = extractNoteMetadata(toolCallLog);
     const seen = new Set();
     let n = 1;
     for (const call of toolCallLog) {
@@ -22,7 +23,8 @@ export function parseCitations(text, toolCallLog) {
       for (const id of ids) {
         if (!seen.has(id)) {
           seen.add(id);
-          references.push({ n: n++, noteId: id, title: 'Note', type: 'note' });
+          const meta = noteMetaMap[id] || {};
+          references.push({ n: n++, noteId: id, title: meta.title || 'Note', type: meta.type || 'note' });
         }
       }
     }
@@ -51,4 +53,26 @@ function extractNoteIds(toolCall) {
   const matches = str.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g);
   if (matches) ids.push(...[...new Set(matches)]);
   return ids;
+}
+
+function extractNoteMetadata(toolCallLog) {
+  const metaMap = {};
+  for (const call of toolCallLog) {
+    const result = call?.result;
+    if (!result) continue;
+    // anvil_search returns { results: [{noteId, title, type, ...}] }
+    if (Array.isArray(result.results)) {
+      for (const item of result.results) {
+        if (item.noteId && item.title) {
+          metaMap[item.noteId] = { title: item.title, type: item.type || 'note' };
+        }
+      }
+    }
+    // anvil_get_note returns { noteId, title, type, ... } or { note: { noteId, ... } }
+    const direct = result.noteId ? result : result.note;
+    if (direct?.noteId && direct?.title) {
+      metaMap[direct.noteId] = { title: direct.title, type: direct.type || 'note' };
+    }
+  }
+  return metaMap;
 }
