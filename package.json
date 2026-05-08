@@ -14,5 +14,8 @@
     "lint": "pnpm -r typecheck",
     "clean": "pnpm -r exec -- rm -rf dist node_modules"
   },
-  "devDependencies": {}
+  "devDependencies": {},
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
 }
