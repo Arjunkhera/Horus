@@ -16,6 +16,17 @@
       return () => window.removeEventListener('chat-sessions-updated', refresh);
     }, []);
 
+    uE(() => {
+      if (!menuOpen) return;
+      function handleOutsideClick(e) {
+        if (menuRef.current && !menuRef.current.contains(e.target)) {
+          setMenuOpen(null);
+        }
+      }
+      document.addEventListener('mousedown', handleOutsideClick);
+      return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }, [menuOpen]);
+
     const filtered = query ? store.searchSessions(query) : sessions;
 
     function groupByDate(list) {
