@@ -1572,3 +1572,170 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   margin-left: 6px;
 }
 .from-chat-badge:hover { background: var(--nlp); color: #fff; }
+
+/* ── Overflow / Context menus ────────────────────────── */
+.overflow-menu-wrap { position: relative; display: inline-flex; }
+.overflow-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-2);
+  color: var(--fg-3);
+  font-size: 16px;
+  letter-spacing: 1px;
+  transition: background .1s ease, color .1s ease;
+}
+.overflow-btn:hover { background: var(--bg-2); color: var(--fg); }
+.overflow-menu {
+  position: absolute;
+  right: 0; top: calc(100% + 4px);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-pop);
+  min-width: 140px;
+  z-index: 100;
+  overflow: hidden;
+  padding: 4px 0;
+}
+.overflow-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 14px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--fg-1);
+  transition: background .1s ease, color .1s ease;
+}
+.overflow-menu-item:hover { background: var(--bg-3); color: var(--fg); }
+.overflow-menu-item.danger { color: var(--red); }
+.overflow-menu-item.danger:hover { background: oklch(0.65 0.18 15 / 0.12); color: var(--red); }
+.overflow-menu-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+
+/* ── Sidebar context menu ────────────────────────────── */
+.side-link-wrap { position: relative; }
+.side-link-wrap .side-ctx-btn {
+  position: absolute;
+  right: 4px; top: 50%; transform: translateY(-50%);
+  width: 22px; height: 22px;
+  display: none;
+  align-items: center; justify-content: center;
+  border-radius: var(--radius-1);
+  color: var(--fg-3);
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  transition: background .1s ease, color .1s ease;
+}
+.side-link-wrap:hover .side-ctx-btn { display: inline-flex; }
+.side-ctx-btn:hover { background: var(--bg-3); color: var(--fg); }
+.side-ctx-menu {
+  position: fixed;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-pop);
+  min-width: 150px;
+  z-index: 200;
+  overflow: hidden;
+  padding: 4px 0;
+}
+.side-ctx-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 14px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--fg-1);
+  transition: background .1s ease, color .1s ease;
+}
+.side-ctx-menu-item:hover { background: var(--bg-3); color: var(--fg); }
+.side-ctx-menu-item.danger { color: var(--red); }
+.side-ctx-menu-item.danger:hover { background: oklch(0.65 0.18 15 / 0.12); color: var(--red); }
+.side-ctx-menu-sep { height: 1px; background: var(--line); margin: 4px 0; }
+
+/* ── Confirm delete modal ────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500;
+}
+.modal-box {
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-pop);
+  padding: 24px 28px;
+  width: 400px;
+  max-width: calc(100vw - 32px);
+}
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 16px;
+  font-family: var(--font-ui);
+}
+.modal-note-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+}
+.modal-note-row .type-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.modal-note-type { font-size: 12px; color: var(--fg-3); font-family: var(--font-mono); }
+.modal-note-title {
+  font-size: 13px;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-warning {
+  font-size: 13px;
+  color: var(--fg-2);
+  font-family: var(--font-body);
+  font-style: italic;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.modal-irreversible {
+  font-size: 12px;
+  color: var(--fg-3);
+  margin-bottom: 20px;
+  font-family: var(--font-mono);
+}
+.modal-error {
+  font-size: 13px;
+  color: var(--red);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.modal-actions {
+  display: flex; justify-content: flex-end; gap: 10px;
+  margin-top: 20px;
+}
+.modal-cancel-btn {
+  padding: 7px 16px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-2);
+  font-size: 13px;
+  color: var(--fg-2);
+  transition: background .1s ease, color .1s ease, border-color .1s ease;
+}
+.modal-cancel-btn:hover:not(:disabled) { background: var(--bg-2); color: var(--fg); border-color: var(--line-strong); }
+.modal-cancel-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.modal-delete-btn {
+  padding: 7px 16px;
+  border-radius: var(--radius-2);
+  background: var(--red);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity .1s ease, background .1s ease;
+}
+.modal-delete-btn:hover:not(:disabled) { opacity: 0.88; }
+.modal-delete-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.modal-delete-btn.loading { opacity: 0.7; cursor: not-allowed; }

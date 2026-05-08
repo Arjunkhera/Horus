@@ -23,6 +23,32 @@ app.use(express.json());
 // Health check
 app.get('/health', (_req, res) => res.send('ok'));
 
+// DELETE /api/notes/:id — must be registered before the proxy
+app.delete('/api/notes/:id', async (req, res) => {
+  const { id } = req.params;
+  console.log(`[delete] DELETE /api/notes/${id}`);
+  try {
+    const anvilRes = await fetch(
+      `http://${ANVIL_HOST}:${ANVIL_PORT}/api/notes/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    );
+    if (anvilRes.status === 404) {
+      console.log(`[delete] NOT FOUND: ${id}`);
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    if (!anvilRes.ok) {
+      const body = await anvilRes.text();
+      console.error(`[delete] Anvil error ${anvilRes.status}: ${body}`);
+      return res.status(500).json({ error: 'Delete failed' });
+    }
+    console.log(`[delete] OK: ${id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`[delete] Error: ${err.message}`);
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
+
 // Proxy /api/* → Anvil (except /api/ai/ask which we handle ourselves)
 app.use('/api', (req, res, next) => {
   if (req.path === '/ai/ask') return next();
