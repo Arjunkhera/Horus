@@ -123,6 +123,7 @@
       sessions[id].messages.push({ role: 'assistant', content, references: references || [], followups: followups || [], timestamp: now });
       sessions[id].modified = now;
       setStore(sessions);
+      window.dispatchEvent(new CustomEvent('chat-session-response', { detail: { id } }));
     },
 
     setAgentId(id, agentId) {

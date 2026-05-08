@@ -58,7 +58,8 @@
       const isActive = s.id === activeSessionId;
       return (
         <div key={s.id} className={`chat-session-row${isActive ? ' active' : ''}`}
-          onClick={() => onSelectSession(s.id)}>
+          onClick={() => onSelectSession(s.id)}
+          onContextMenu={e => { e.preventDefault(); setMenuOpen(menuOpen === s.id ? null : s.id); }}>
           {renaming === s.id
             ? <input autoFocus defaultValue={title} style={{ flex: 1, font: 'inherit', background: 'var(--bg-3)', border: '1px solid var(--nlp)', borderRadius: 2, padding: '0 4px', color: 'inherit' }}
                 onBlur={e => handleRename(s.id, e.target.value)}
