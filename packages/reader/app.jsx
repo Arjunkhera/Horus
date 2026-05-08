@@ -201,7 +201,7 @@ function App() {
   else if (route.kind === 'note') pageEl = <NotePage noteId={route.id} onNavigate={navigate} refsCollapsed={refsCollapsed} setRefsCollapsed={setRefsCollapsed} pinned={pinned} togglePin={togglePin} />;
   else if (route.kind === 'tag') pageEl = <TagPage tag={route.tag} onNavigate={navigate} />;
   else if (route.kind === 'type') pageEl = <TypePage type={route.type} onNavigate={navigate} />;
-  else if (route.kind === 'ask') pageEl = <window.AskPage onNavigate={navigate} />;
+  else if (route.kind === 'ask') pageEl = <window.AskPage onNavigate={navigate} sideCollapsed={sideCollapsed} toggleSide={toggleSide} />;
 
   const crumb = route.kind === 'home' ? '/' :
     route.kind === 'ask' ? '/ask' :
