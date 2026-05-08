@@ -195,7 +195,7 @@
                 followups = ev.items || [];
               } else if (ev.type === 'done') {
                 store().setAgentId(sid, ev.agentId);
-                store().addAssistantMessage(sid, fullText, refs, followups);
+                store().addAssistantMessage(sid, ev.answerText || fullText, refs, followups);
                 setSession(store().getSession(sid));
                 setStreamState('done');
                 setStreamText('');
