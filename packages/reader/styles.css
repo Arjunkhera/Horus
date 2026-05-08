@@ -1141,7 +1141,23 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   overflow: hidden;
 }
 .ask-layout.preview-open {
-  grid-template-columns: var(--side-w) 1fr 230px;
+  grid-template-columns: var(--side-w) 1fr 4px 230px;
+}
+
+/* Drag handle between chat and preview panes */
+.resize-handle {
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  border-left: 1.5px solid var(--line-soft);
+  transition: border-color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--line-soft);
+  border-left-color: var(--ink-3);
 }
 
 /* Mode toggle */
