@@ -86,4 +86,21 @@ forge_develop(repo: "Horus", workItem: "<id>")
 → commit + push + open PR
 ```
 
-The Docker container at port 8400 rebuilds on deploy. For hot iteration, start the Vite dev server (it proxies `/api` to the live Anvil stack at port 8100).
+The Docker container at port 8400 uses a **baked image with no volume mounts** — changes in the worktree are NOT reflected there without a full image rebuild. Do not verify UI changes via port 8400.
+
+### Rapid Iteration in a Forge Worktree
+
+Because the Reader has no bundler (Babel Standalone handles JSX transpilation in-browser), serve it as plain static files:
+
+```bash
+python3 -m http.server 8403 --directory packages/reader
+# open http://localhost:8403
+```
+
+**Why Python, not Node:** `npm install` inside a forge worktree fails with `EPERM: operation not permitted` — the worktree path does not have write permissions for `node_modules`. The Python server needs no dependencies.
+
+**What works:** JSX transpilation, all UI logic, mock data fallback, and live Anvil API calls (`AnvilClient` calls `localhost:8100` directly). The app behaves identically to the production container for all client-side verification.
+
+**Port selection:** 8400 = Docker production, 8401 = reader-server. Pick an unused port (e.g. 8403) to avoid conflicts.
+
+See `shared/guides/horus-reader-development.md` in Vault for full architecture context.
