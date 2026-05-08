@@ -10,6 +10,7 @@ import { isAnvilError } from '../../types/error.js';
 import { handleGetNote } from '../../tools/get-note.js';
 import { handleGetEdges } from '../../tools/get-edges.js';
 import { handleSearchV2 } from '../../tools/search-v2.js';
+import { handleUpdateNote } from '../../tools/update-note.js';
 import type { ToolContext } from '../../tools/create-note.js';
 import { addSseClient, removeSseClient } from '../../core/events.js';
 
@@ -42,7 +43,7 @@ function errorStatus(code: string): number {
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -123,6 +124,28 @@ export async function startHttp(serverFactory: () => Server, opts: HttpOptions):
         const status = isAnvilError(result) ? errorStatus(result.code) : 200;
         res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
         res.end(JSON.stringify(result));
+        return;
+      }
+
+      // PATCH /api/notes/:id — update note body
+      if (req.method === 'PATCH' && noteMatch) {
+        const noteId = decodeURIComponent(noteMatch[1]);
+        const rawBody = await readBody(req);
+        let parsed: Record<string, unknown> = {};
+        try { parsed = JSON.parse(rawBody); } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+          res.end(JSON.stringify({ error: true, code: 'VALIDATION_ERROR', message: 'Invalid JSON body' }));
+          return;
+        }
+        if (typeof parsed.body !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+          res.end(JSON.stringify({ error: true, code: 'VALIDATION_ERROR', message: 'body field is required' }));
+          return;
+        }
+        const result = await handleUpdateNote({ noteId, content: parsed.body as string }, opts.ctx);
+        const status = isAnvilError(result) ? errorStatus(result.code) : 200;
+        res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+        res.end(JSON.stringify(isAnvilError(result) ? result : { ok: true }));
         return;
       }
 

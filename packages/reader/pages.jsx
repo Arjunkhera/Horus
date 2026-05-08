@@ -42,6 +42,27 @@ function SyncFooter({ lastSyncedAt, onRefresh }) {
   );
 }
 
+// Generic overflow/context menu — items: [{ label, onClick, danger?, separator? }]
+function OverflowMenu({ items, onClose }) {
+  const ref = uRp();
+  uEp(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); }
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', onKey); };
+  }, [onClose]);
+  return (
+    <div className="overflow-menu" ref={ref}>
+      {items.map((item, i) =>
+        item.separator
+          ? <div key={i} className="overflow-menu-sep" />
+          : <button key={i} className={`overflow-menu-item${item.danger ? ' danger' : ''}`} onClick={() => { onClose(); item.onClick(); }}>{item.label}</button>
+      )}
+    </div>
+  );
+}
+
 // ── Type ordering ────────────────────────────────────────────────
 const TYPE_ORDER = ['task', 'story', 'note', 'journal', 'project', 'area', 'bookmark', 'conversation-state', 'person', 'service', 'meeting'];
 // Returns all types that have ≥1 note: known types first (TYPE_ORDER), then extras by count
@@ -56,6 +77,45 @@ function activeTypes(counts) {
 const SIDE_LIMIT = 8; // static cap for Phase 1
 function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pinned, togglePin, lastSyncedAt, onRefresh }) {
   const data = window.HORUS_DATA;
+  const [ctxMenu, setCtxMenu] = uSp(null); // { id, x, y }
+  const [deleteTarget, setDeleteTarget] = uSp(null);
+  const [deleteLoading, setDeleteLoading] = uSp(false);
+  const [deleteError, setDeleteError] = uSp(null);
+
+  uEp(() => {
+    if (!ctxMenu) return;
+    function handler() { setCtxMenu(null); }
+    function onKey(e) { if (e.key === 'Escape') setCtxMenu(null); }
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', onKey); };
+  }, [!!ctxMenu]);
+
+  async function handleSidebarDelete() {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await window.AnvilClient.deleteNote(deleteTarget.id);
+      window.HORUS_DATA.removeNoteById(deleteTarget.id);
+      if (window.HOOKS) {
+        window.HOOKS.invalidate('note:' + deleteTarget.id);
+        window.HOOKS.invalidate('edges:' + deleteTarget.id);
+      }
+      const wasViewing = currentRoute.kind === 'note' && currentRoute.id === deleteTarget.id;
+      setDeleteTarget(null);
+      setDeleteLoading(false);
+      if (wasViewing) onNavigate({ kind: 'home' });
+    } catch (err) {
+      setDeleteLoading(false);
+      if (err.status === 404) {
+        setDeleteError('This note has already been deleted.');
+        setTimeout(() => { setDeleteTarget(null); setDeleteError(null); }, 2000);
+      } else {
+        setDeleteError('Delete failed. Please try again.');
+      }
+    }
+  }
 
   if (collapsed) {
     return (
@@ -76,16 +136,39 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
     const n = data.byId[id];
     if (!n) return null;
     const active = currentRoute.kind === 'note' && currentRoute.id === id;
+    const isConvState = n.type === 'conversation-state';
+
+    function openCtxMenu(e) {
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      setCtxMenu({ id, x: rect.left, y: rect.bottom + 4 });
+    }
+
     return (
       <div key={id} className={`side-link-wrap${active ? ' active' : ''}`}>
         <button className="side-link" onClick={() => onNavigate({ kind: 'note', id })}>
           <span className={`type-dot ${n.type}`} />
           <span className="label">{n.title}</span>
         </button>
-        {opts.unpin && (
-          <button className="side-unpin" title="Unpin" onClick={(e) => { e.stopPropagation(); togglePin(id); }}>
-            <window.Icon.Pin filled={true} />
-          </button>
+        <button className="side-ctx-btn" title="More actions" onClick={openCtxMenu}>⋯</button>
+        {ctxMenu && ctxMenu.id === id && (
+          <div
+            className="side-ctx-menu"
+            style={{ top: ctxMenu.y, left: Math.min(ctxMenu.x, window.innerWidth - 160) }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <button className="side-ctx-menu-item" onClick={() => { setCtxMenu(null); togglePin(id); }}>
+              {opts.isPinned ? 'Unpin' : 'Pin'}
+            </button>
+            {!isConvState && (
+              <>
+                <div className="side-ctx-menu-sep" />
+                <button className="side-ctx-menu-item danger" onClick={() => { setCtxMenu(null); setDeleteTarget(n); }}>
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
     );
@@ -100,7 +183,7 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
       <SideSection id="pinned" title="Pinned" count={pinnedResolved.length || null}>
         {pinnedResolved.length === 0
           ? <div className="side-empty">No pins yet — open a note and click the pin icon</div>
-          : pinnedResolved.map(id => noteRow(id, { unpin: true }))}
+          : pinnedResolved.map(id => noteRow(id, { isPinned: true }))}
       </SideSection>
 
       <SideSection id="recents" title="Recents" count={recentsCapped.length || null}>
@@ -136,6 +219,16 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
       </SideSection>
 
       <SyncFooter lastSyncedAt={lastSyncedAt} onRefresh={onRefresh} />
+      {deleteTarget && (
+        <window.ConfirmDeleteModal
+          note={deleteTarget}
+          edgeCount={null}
+          onConfirm={handleSidebarDelete}
+          onCancel={() => { if (!deleteLoading) { setDeleteTarget(null); setDeleteError(null); } }}
+          isLoading={deleteLoading}
+          errorMsg={deleteError}
+        />
+      )}
     </aside>
   );
 }
@@ -315,10 +408,108 @@ function HomePage({ onNavigate }) {
 function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned, togglePin }) {
   const data = window.HORUS_DATA;
   const HOOKS = window.HOOKS;
+  const [menuOpen, setMenuOpen] = uSp(false);
+  const [deleteOpen, setDeleteOpen] = uSp(false);
+  const [deleteLoading, setDeleteLoading] = uSp(false);
+  const [deleteError, setDeleteError] = uSp(null);
+  // EDIT-2: inline body editor state
+  const [editMode, setEditMode] = uSp(false);
+  const [editBody, setEditBody] = uSp('');
+  const [editSaving, setEditSaving] = uSp(false);
+  const [editError, setEditError] = uSp(null);
+  // EDIT-3: journal append editor state
+  const [appendMode, setAppendMode] = uSp(false);
+  const [appendBody, setAppendBody] = uSp('');
+  const [appendSaving, setAppendSaving] = uSp(false);
+  const [appendError, setAppendError] = uSp(null);
+  // Version counter to force useNote refetch after save/append
+  const [noteVersion, setNoteVersion] = uSp(0);
+
+  async function handleDeleteConfirm() {
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await window.AnvilClient.deleteNote(noteId);
+      data.removeNoteById(noteId);
+      if (HOOKS) {
+        HOOKS.invalidate('note:' + noteId);
+        HOOKS.invalidate('edges:' + noteId);
+      }
+      onNavigate({ kind: 'home' });
+    } catch (err) {
+      setDeleteLoading(false);
+      if (err.status === 404) {
+        setDeleteError('This note has already been deleted.');
+        setTimeout(() => { setDeleteOpen(false); setDeleteError(null); }, 2000);
+      } else {
+        setDeleteError('Delete failed. Please try again.');
+      }
+    }
+  }
+
+  function openEditor(currentBody) {
+    setEditBody(currentBody || '');
+    setEditError(null);
+    setEditMode(true);
+  }
+
+  function cancelEditor() {
+    setEditMode(false);
+    setEditBody('');
+    setEditError(null);
+  }
+
+  async function handleSave() {
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await window.AnvilClient.updateNote(noteId, editBody);
+      // Cache invalidation: re-fetch, update store, clear TTL, fire re-render
+      const fresh = await window.AnvilClient.getNote(noteId);
+      if (fresh) {
+        const merged = { ...data.byId[noteId], ...fresh, id: fresh.noteId || fresh.id || noteId };
+        data.byId[noteId] = merged;
+        if (merged.title) data.byTitle[merged.title.toLowerCase()] = noteId;
+      }
+      if (HOOKS) HOOKS.invalidate('note:' + noteId);
+      setNoteVersion(v => v + 1);
+      setEditMode(false);
+      setEditBody('');
+    } catch (err) {
+      setEditError(err?.message || 'Save failed. Please try again.');
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function handleAppend() {
+    if (!appendBody.trim()) return;
+    setAppendSaving(true);
+    setAppendError(null);
+    const today = new Date().toISOString().slice(0, 10);
+    const entry = `## ${today}\n${appendBody}`;
+    try {
+      await window.AnvilClient.updateNote(noteId, entry);
+      const fresh = await window.AnvilClient.getNote(noteId);
+      if (fresh) {
+        const merged = { ...data.byId[noteId], ...fresh, id: fresh.noteId || fresh.id || noteId };
+        data.byId[noteId] = merged;
+        if (merged.title) data.byTitle[merged.title.toLowerCase()] = noteId;
+      }
+      if (HOOKS) HOOKS.invalidate('note:' + noteId);
+      setNoteVersion(v => v + 1);
+      setAppendMode(false);
+      setAppendBody('');
+    } catch (err) {
+      setAppendError(err?.message || 'Append failed. Please try again.');
+    } finally {
+      setAppendSaving(false);
+    }
+  }
 
   // Fetch full note content from Anvil (falls back to mock data when offline)
   const { data: liveNote, loading: noteLoading } = HOOKS
-    ? HOOKS.useNote(noteId)
+    ? HOOKS.useNote(noteId, noteVersion)
     : { data: null, loading: false };
 
   // Merge: live note body overwrites stub; fall back to mock data entirely
@@ -358,6 +549,14 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
     out = fallback.out;
     inn = fallback.in;
   }
+
+  // Warn on tab close while editor is active
+  uEp(() => {
+    if (!editMode) return;
+    function onBeforeUnload(e) { e.preventDefault(); e.returnValue = ''; }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [editMode]);
 
   if (!note && noteLoading) {
     return <div className="main-inner"><div className="empty loading">Loading…</div></div>;
@@ -484,10 +683,25 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
           </div>
           <h1 className="note-title">{note.title}</h1>
           <div className="note-title-actions">
+            {editMode && <span className="editing-badge">Editing</span>}
             <button className={`pin-btn${isPinned ? ' active' : ''}`} title={isPinned ? 'Unpin from sidebar' : 'Pin to sidebar'} onClick={() => togglePin(noteId)}>
               <window.Icon.Pin filled={isPinned} />
               <span>{isPinned ? 'Pinned' : 'Pin'}</span>
             </button>
+            {note.type !== 'conversation-state' && (
+              <div className="overflow-menu-wrap">
+                <button className="overflow-btn" title="More actions" onClick={() => setMenuOpen(o => !o)}>⋯</button>
+                {menuOpen && (
+                  <OverflowMenu
+                    items={[
+                      ...(note.type !== 'journal' ? [{ label: 'Edit', onClick: () => openEditor(note.body || '') }] : []),
+                      { label: 'Delete', danger: true, onClick: () => setDeleteOpen(true) },
+                    ]}
+                    onClose={() => setMenuOpen(false)}
+                  />
+                )}
+              </div>
+            )}
           </div>
           {(note.tags || []).length > 0 && (
             <div className="note-tags">
@@ -524,9 +738,73 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
           </div>
         )}
 
-        <article className="md">
-          <window.MD.MarkdownBody body={note.body} onNavigate={(id) => onNavigate({ kind: 'note', id })} />
-        </article>
+        {editMode ? (
+          <div className="inline-editor">
+            <div className="inline-editor-hint">
+              ⚠ Wiki-links (<code>[[...]]</code>) should not be modified to preserve note relationships.
+            </div>
+            <textarea
+              className="inline-editor-textarea"
+              value={editBody}
+              onChange={e => {
+                setEditBody(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.max(300, e.target.scrollHeight) + 'px';
+              }}
+              ref={el => {
+                if (el) { el.style.height = 'auto'; el.style.height = Math.max(300, el.scrollHeight) + 'px'; }
+              }}
+            />
+            {editError && <div className="inline-editor-error">{editError}</div>}
+            <div className="inline-editor-actions">
+              <button className="chip" onClick={cancelEditor} disabled={editSaving}>Cancel</button>
+              <button className="chip active save-btn" onClick={handleSave} disabled={editSaving}>
+                {editSaving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <article className="md">
+            <window.MD.MarkdownBody
+              body={note.body}
+              onNavigate={(id) => {
+                if (editMode && !window.confirm('Discard unsaved changes?')) return;
+                onNavigate({ kind: 'note', id });
+              }}
+            />
+          </article>
+        )}
+
+        {note.type === 'journal' && !appendMode && (
+          <button className="journal-append-btn" onClick={() => { setAppendBody(''); setAppendError(null); setAppendMode(true); }}>
+            + Add Entry
+          </button>
+        )}
+
+        {note.type === 'journal' && appendMode && (
+          <div className="inline-editor append-editor">
+            <textarea
+              className="inline-editor-textarea"
+              placeholder="Add a new journal entry…"
+              value={appendBody}
+              onChange={e => {
+                setAppendBody(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.max(150, e.target.scrollHeight) + 'px';
+              }}
+              ref={el => {
+                if (el) { el.style.height = 'auto'; el.style.height = Math.max(150, el.scrollHeight) + 'px'; el.focus(); }
+              }}
+            />
+            {appendError && <div className="inline-editor-error">{appendError}</div>}
+            <div className="inline-editor-actions">
+              <button className="chip" onClick={() => { setAppendMode(false); setAppendBody(''); setAppendError(null); }} disabled={appendSaving}>Cancel</button>
+              <button className="chip active save-btn" onClick={handleAppend} disabled={appendSaving || !appendBody.trim()}>
+                {appendSaving ? 'Saving…' : 'Append entry'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Collapsible right rail */}
@@ -583,6 +861,16 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
           </div>
         )}
       </aside>
+      {deleteOpen && note && (
+        <window.ConfirmDeleteModal
+          note={note}
+          edgeCount={totalEdges}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => { if (!deleteLoading) { setDeleteOpen(false); setDeleteError(null); } }}
+          isLoading={deleteLoading}
+          errorMsg={deleteError}
+        />
+      )}
     </div>
   );
 }

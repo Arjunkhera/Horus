@@ -23,6 +23,65 @@ app.use(express.json());
 // Health check
 app.get('/health', (_req, res) => res.send('ok'));
 
+// DELETE /api/notes/:id — must be registered before the proxy
+app.delete('/api/notes/:id', async (req, res) => {
+  const { id } = req.params;
+  console.log(`[delete] DELETE /api/notes/${id}`);
+  try {
+    const anvilRes = await fetch(
+      `http://${ANVIL_HOST}:${ANVIL_PORT}/api/notes/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    );
+    if (anvilRes.status === 404) {
+      console.log(`[delete] NOT FOUND: ${id}`);
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    if (!anvilRes.ok) {
+      const body = await anvilRes.text();
+      console.error(`[delete] Anvil error ${anvilRes.status}: ${body}`);
+      return res.status(500).json({ error: 'Delete failed' });
+    }
+    console.log(`[delete] OK: ${id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`[delete] Error: ${err.message}`);
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
+
+// PATCH /api/notes/:id — update note body; must be registered before the proxy
+app.patch('/api/notes/:id', async (req, res) => {
+  const { id } = req.params;
+  const body = req.body?.body;
+  if (typeof body !== 'string') {
+    return res.status(400).json({ error: 'body field is required' });
+  }
+  if (Buffer.byteLength(body, 'utf8') > 1_048_576) {
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  console.log(`[patch] PATCH /api/notes/${id} body_length=${body.length}`);
+  try {
+    const anvilRes = await fetch(
+      `http://${ANVIL_HOST}:${ANVIL_PORT}/api/notes/${encodeURIComponent(id)}`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }
+    );
+    if (anvilRes.status === 404) {
+      console.log(`[patch] NOT FOUND: ${id}`);
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    if (!anvilRes.ok) {
+      const text = await anvilRes.text();
+      console.error(`[patch] Anvil error ${anvilRes.status}: ${text}`);
+      return res.status(500).json({ error: 'Update failed' });
+    }
+    console.log(`[patch] OK: ${id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`[patch] Error: ${err.message}`);
+    res.status(500).json({ error: 'Update failed' });
+  }
+});
+
 // Proxy /api/* → Anvil (except /api/ai/ask which we handle ourselves)
 app.use('/api', (req, res, next) => {
   if (req.path === '/ai/ask') return next();

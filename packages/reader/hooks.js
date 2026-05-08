@@ -63,7 +63,7 @@
    * @param {string} id
    * @returns {{ data: NoteWithRelationships|null, loading: boolean, error: Error|null }}
    */
-  function useNote(id) {
+  function useNote(id, version) {
     return useAsync(() => {
       if (!id) return Promise.resolve(null);
       const cached = getCached('note:' + id);
@@ -77,7 +77,7 @@
         setCached('note:' + id, note);
         return note;
       });
-    }, [id]);
+    }, [id, version]);
   }
 
   /**

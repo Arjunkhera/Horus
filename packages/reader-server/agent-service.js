@@ -52,7 +52,7 @@ export function describeToolCall(event) {
   if (name === 'anvil_get_edges') return 'following connections…';
   if (name === 'anvil_get_related') return 'exploring relationships…';
   if (name === 'anvil_query_view') return 'querying notes…';
+  if (name === 'anvil_update_note') return 'updating note…';
   if (name === 'horus_search') return 'searching across Horus…';
-  if (name === 'anvil_query_view') return 'querying notes…';
   return 'thinking…';
 }
