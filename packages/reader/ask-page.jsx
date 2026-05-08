@@ -387,6 +387,8 @@
     });
     const [sideTab, setSideTab] = uS('chats');
     const [previewState, setPreviewState] = uS(null); // { noteId, n }
+    const [previewWidth, setPreviewWidth] = uS(230);
+    const dragRef = uR(null); // { startX, startWidth }
 
     uE(() => {
       function onOpenPreview(e) { setPreviewState(e.detail); }
@@ -419,6 +421,28 @@
       }
     }, []);
 
+    // Drag-to-resize: attach global listeners only while dragging
+    uE(() => {
+      function onMouseMove(e) {
+        if (!dragRef.current) return;
+        const dx = dragRef.current.startX - e.clientX; // dragging left = wider preview
+        const newWidth = Math.max(160, Math.min(600, dragRef.current.startWidth + dx));
+        setPreviewWidth(newWidth);
+      }
+      function onMouseUp() {
+        if (!dragRef.current) return;
+        dragRef.current = null;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+    }, []);
+
     function handleNewSession() {
       const sid = store().createSession();
       setActiveSessionId(sid);
@@ -432,8 +456,12 @@
       setActiveSessionId(sid);
     }
 
+    const gridCols = previewState
+      ? `var(--side-w) 1fr 4px ${previewWidth}px`
+      : 'var(--side-w) 1fr';
+
     return (
-      <div className={`ask-layout${previewState ? ' preview-open' : ''}`} style={{ height: '100%', display: 'grid', gridTemplateColumns: previewState ? 'var(--side-w) 1fr 230px' : 'var(--side-w) 1fr' }}>
+      <div className={`ask-layout${previewState ? ' preview-open' : ''}`} style={{ height: '100%', display: 'grid', gridTemplateColumns: gridCols }}>
         {/* Sidebar with tab switcher */}
         <aside className="side" style={{ borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
           <div className="side-tabs">
@@ -456,6 +484,19 @@
           onOpenPreview={setPreviewState}
           onSessionCreated={handleSessionCreated}
         />
+
+        {/* Resize handle — only visible when preview is open */}
+        {previewState && (
+          <div
+            className="resize-handle"
+            onMouseDown={e => {
+              e.preventDefault();
+              dragRef.current = { startX: e.clientX, startWidth: previewWidth };
+              document.body.style.cursor = 'col-resize';
+              document.body.style.userSelect = 'none';
+            }}
+          />
+        )}
 
         {/* Note preview pane */}
         {previewState && (
