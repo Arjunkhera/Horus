@@ -51,7 +51,7 @@
       if (action === 'pin') s.togglePin(id);
       else if (action === 'rename') { setRenaming(id); setMenuOpen(null); return; }
       else if (action === 'delete') {
-        if (confirm('Delete this chat?')) { s.deleteSession(id); if (activeSessionId === id) onSelectSession(null); }
+        s.deleteSession(id); if (activeSessionId === id) onSelectSession(null);
       }
       setSessions(s.listSessions());
       setMenuOpen(null);

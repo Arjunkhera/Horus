@@ -103,7 +103,7 @@ app.post('/api/ai/ask', async (req, res) => {
       const parsed = parseCitations(finalText, toolCallLog);
       res.write(sseEvent({ type: 'references', items: parsed.references }));
       res.write(sseEvent({ type: 'followups', items: parsed.followups }));
-      res.write(sseEvent({ type: 'done', agentId: agent.agentId }));
+      res.write(sseEvent({ type: 'done', agentId: agent.agentId, answerText: parsed.answerText }));
     }
   } catch (err) {
     const msg = err?.message || 'Agent temporarily unavailable.';

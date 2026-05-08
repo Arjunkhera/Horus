@@ -1,12 +1,15 @@
 export function parseCitations(text, toolCallLog) {
-  const referencesMatch = text.match(/^References:\n([\s\S]*?)(?:\n\nFollow-ups:|$)/m);
+  // AI may output refs inline ("References: [1]...") or multi-line ("References:\n[1]...")
+  const referencesMatch = text.match(/References:[ \t]*([\s\S]*?)(?=\n\nFollow-ups:|\nFollow-ups:|$)/i);
   const followupsMatch = text.match(/^Follow-ups:\n([\s\S]*)$/m);
 
   let references = [];
   if (referencesMatch) {
-    const lines = referencesMatch[1].trim().split('\n');
-    for (const line of lines) {
-      const m = line.match(/^\[(\d+)\]\s+([\w-]+(?:-[\w]+)*)\s+—\s+(.+?)\s+\((\w[\w-]*)\)$/);
+    const block = referencesMatch[1];
+    // Split on [n] markers to handle both inline and multi-line ref blocks
+    const segments = block.split(/(?=\[\d+\])/);
+    for (const seg of segments) {
+      const m = seg.trim().match(/^\[(\d+)\]\s+([\w-]+(?:-[\w]+)*)\s+—\s+(.+?)\s+\((\w[\w-]*)\)/);
       if (m) {
         references.push({ n: parseInt(m[1]), noteId: m[2], title: m[3], type: m[4] });
       }
@@ -40,9 +43,7 @@ export function parseCitations(text, toolCallLog) {
   }
 
   // Strip references and followups from answer text
-  let answerText = text;
-  if (referencesMatch) answerText = answerText.replace(/\n\nReferences:[\s\S]*$/, '');
-  answerText = answerText.trim();
+  let answerText = text.replace(/\n?References:[ \t]*[\s\S]*$/, '').trim();
 
   return { references, followups, answerText };
 }
@@ -58,8 +59,11 @@ function extractNoteIds(toolCall) {
 function extractNoteMetadata(toolCallLog) {
   const metaMap = {};
   for (const call of toolCallLog) {
-    const result = call?.result;
+    let result = call?.result;
     if (!result) continue;
+    if (typeof result === 'string') {
+      try { result = JSON.parse(result); } catch { continue; }
+    }
     // anvil_search returns { results: [{noteId, title, type, ...}] }
     if (Array.isArray(result.results)) {
       for (const item of result.results) {

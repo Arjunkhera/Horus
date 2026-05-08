@@ -92,7 +92,7 @@
   }
 
   // ── Chat Pane ──────────────────────────────────────────────────
-  function ChatPane({ sessionId, onOpenPreview, onSessionCreated }) {
+  function ChatPane({ sessionId, onOpenPreview, onSessionCreated, pendingQuestion, onPendingSubmitted }) {
     const [session, setSession] = uS(() => sessionId ? store().getSession(sessionId) : null);
     const [streamState, setStreamState] = uS('idle'); // idle | searching | streaming | done
     const [statusText, setStatusText] = uS('');
@@ -107,6 +107,14 @@
       if (sessionId) setSession(store().getSession(sessionId));
       else setSession(null);
     }, [sessionId]);
+
+    // Submit question that was pre-queued from the home ask bar.
+    // The session was already created with the user message; skip re-adding it.
+    uE(() => {
+      if (!pendingQuestion) return;
+      onPendingSubmitted?.();
+      submitQuestion(pendingQuestion, { alreadyAdded: true });
+    }, [pendingQuestion]);
 
     uE(() => {
       function onResponse(e) {
@@ -128,14 +136,14 @@
       autoScrollRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
     }
 
-    async function submitQuestion(question) {
+    async function submitQuestion(question, { alreadyAdded = false } = {}) {
       if (!question.trim() || streamState !== 'idle') return;
 
       let sid = sessionId;
       if (!sid) {
         sid = store().createSession(question);
         onSessionCreated && onSessionCreated(sid);
-      } else {
+      } else if (!alreadyAdded) {
         store().addUserMessage(sid, question);
       }
       setSession(store().getSession(sid));
@@ -187,7 +195,7 @@
                 followups = ev.items || [];
               } else if (ev.type === 'done') {
                 store().setAgentId(sid, ev.agentId);
-                store().addAssistantMessage(sid, fullText, refs, followups);
+                store().addAssistantMessage(sid, ev.answerText || fullText, refs, followups);
                 setSession(store().getSession(sid));
                 setStreamState('done');
                 setStreamText('');
@@ -397,6 +405,7 @@
       if (initialSessionId) return initialSessionId;
       return store().getLastActiveSessionId();
     });
+    const [pendingQuestion, setPendingQuestion] = uS(null);
     const [sideTab, setSideTab] = uS('chats');
     const [previewState, setPreviewState] = uS(null); // { noteId, n }
     const [previewWidth, setPreviewWidth] = uS(230);
@@ -429,7 +438,8 @@
       const pending = window.__pendingAskQuery;
       if (pending) {
         window.__pendingAskQuery = null;
-        setActiveSessionId(pending.sessionId);
+        if (pending.sessionId) setActiveSessionId(pending.sessionId);
+        if (pending.question) setPendingQuestion(pending.question);
       }
     }, []);
 
@@ -493,6 +503,8 @@
         <ChatPane
           key={activeSessionId}
           sessionId={activeSessionId}
+          pendingQuestion={pendingQuestion}
+          onPendingSubmitted={() => setPendingQuestion(null)}
           onOpenPreview={setPreviewState}
           onSessionCreated={handleSessionCreated}
         />
