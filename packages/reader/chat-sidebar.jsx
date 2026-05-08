@@ -8,12 +8,26 @@
     const [query, setQuery] = uS('');
     const [menuOpen, setMenuOpen] = uS(null); // sessionId with open menu
     const [renaming, setRenaming] = uS(null);
+    const [generatingSessions, setGeneratingSessions] = uS(() => new Set());
     const menuRef = uR(null);
 
     uE(() => {
       function refresh() { setSessions(store.listSessions()); }
       window.addEventListener('chat-sessions-updated', refresh);
       return () => window.removeEventListener('chat-sessions-updated', refresh);
+    }, []);
+
+    uE(() => {
+      function onGenerating(e) {
+        const { sessionId: sid, active } = e.detail;
+        setGeneratingSessions(prev => {
+          const next = new Set(prev);
+          if (active) next.add(sid); else next.delete(sid);
+          return next;
+        });
+      }
+      window.addEventListener('chat-session-generating', onGenerating);
+      return () => window.removeEventListener('chat-session-generating', onGenerating);
     }, []);
 
     uE(() => {
@@ -67,6 +81,7 @@
     function sessionRow(s) {
       const title = s.customTitle || s.title;
       const isActive = s.id === activeSessionId;
+      const isLive = generatingSessions.has(s.id);
       return (
         <div key={s.id} className={`chat-session-row${isActive ? ' active' : ''}`}
           onClick={() => onSelectSession(s.id)}
@@ -75,7 +90,7 @@
             ? <input autoFocus defaultValue={title} style={{ flex: 1, font: 'inherit', background: 'var(--bg-3)', border: '1px solid var(--nlp)', borderRadius: 2, padding: '0 4px', color: 'inherit' }}
                 onBlur={e => handleRename(s.id, e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleRename(s.id, e.target.value); if (e.key === 'Escape') setRenaming(null); }} />
-            : <span className="chat-session-title">✦ {title}</span>
+            : <span className="chat-session-title">{isLive && <span className="session-live-dot" />}✦ {title}</span>
           }
           {s.pinned && <span style={{ fontSize: 8, color: 'var(--amber)' }}>📌</span>}
           <button style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', opacity: 0, fontSize: 12, padding: '0 2px' }}

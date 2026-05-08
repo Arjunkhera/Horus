@@ -102,6 +102,9 @@
     const messagesRef = uR(null);
     const autoScrollRef = uR(true);
     const inputRef = uR(null);
+    const [elapsedSecs, setElapsedSecs] = uS(0);
+    const genStartRef = uR(null);
+    const isGenerating = streamState === 'searching' || streamState === 'streaming';
 
     uE(() => {
       if (sessionId) setSession(store().getSession(sessionId));
@@ -130,6 +133,40 @@
         messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
       }
     }, [streamText, streamState]);
+
+    // Elapsed timer — starts when generation begins, resets on idle
+    uE(() => {
+      if (streamState === 'idle') {
+        genStartRef.current = null;
+        setElapsedSecs(0);
+        return;
+      }
+      if (genStartRef.current === null) genStartRef.current = Date.now();
+      const id = setInterval(() => {
+        setElapsedSecs(Math.floor((Date.now() - genStartRef.current) / 1000));
+      }, 500);
+      return () => clearInterval(id);
+    }, [streamState]);
+
+    // Broadcast live indicator to session list; clean up on unmount
+    uE(() => {
+      if (!sessionId) return;
+      window.dispatchEvent(new CustomEvent('chat-session-generating', {
+        detail: { sessionId, active: isGenerating },
+      }));
+      return () => window.dispatchEvent(new CustomEvent('chat-session-generating', {
+        detail: { sessionId, active: false },
+      }));
+    }, [isGenerating, sessionId]);
+
+    // Auto-resume: if session mounted with an unanswered user message, submit it
+    uE(() => {
+      if (!sessionId) return;
+      const s = store().getSession(sessionId);
+      if (!s?.messages?.length) return;
+      const last = s.messages[s.messages.length - 1];
+      if (last.role === 'user') submitQuestion(last.content, { alreadyAdded: true });
+    }, []); // run once on mount
 
     function onScroll(e) {
       const el = e.target;
@@ -233,7 +270,6 @@
       }
     }
 
-    const isGenerating = streamState === 'searching' || streamState === 'streaming';
     const messages = session?.messages || [];
 
     // Last assistant message's refs and followups (for chips)
@@ -279,11 +315,18 @@
             <div className="msg-assistant">
               <div className="msg-assistant-label">✦ Horus</div>
               {streamState === 'searching' && (
-                <div className="msg-searching">
-                  <div className="pulse-dots">
-                    <div className="pulse-dot" /><div className="pulse-dot" /><div className="pulse-dot" />
+                <div className="msg-thinking">
+                  <div className="msg-searching">
+                    <div className="pulse-dots">
+                      <div className="pulse-dot"></div><div className="pulse-dot"></div><div className="pulse-dot"></div>
+                    </div>
+                    <span className="msg-status-text">{statusText}{elapsedSecs >= 5 ? ` · ${elapsedSecs}s` : ''}</span>
                   </div>
-                  <span className="msg-status-text">{statusText}</span>
+                  <div className="msg-skeleton">
+                    <div className="skeleton-line"></div>
+                    <div className="skeleton-line" style={{width: '75%'}}></div>
+                    <div className="skeleton-line" style={{width: '55%'}}></div>
+                  </div>
                 </div>
               )}
               {streamState === 'streaming' && (
