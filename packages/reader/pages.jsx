@@ -412,6 +412,18 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
   const [deleteOpen, setDeleteOpen] = uSp(false);
   const [deleteLoading, setDeleteLoading] = uSp(false);
   const [deleteError, setDeleteError] = uSp(null);
+  // EDIT-2: inline body editor state
+  const [editMode, setEditMode] = uSp(false);
+  const [editBody, setEditBody] = uSp('');
+  const [editSaving, setEditSaving] = uSp(false);
+  const [editError, setEditError] = uSp(null);
+  // EDIT-3: journal append editor state
+  const [appendMode, setAppendMode] = uSp(false);
+  const [appendBody, setAppendBody] = uSp('');
+  const [appendSaving, setAppendSaving] = uSp(false);
+  const [appendError, setAppendError] = uSp(null);
+  // Version counter to force useNote refetch after save/append
+  const [noteVersion, setNoteVersion] = uSp(0);
 
   async function handleDeleteConfirm() {
     setDeleteLoading(true);
@@ -435,9 +447,69 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
     }
   }
 
+  function openEditor(currentBody) {
+    setEditBody(currentBody || '');
+    setEditError(null);
+    setEditMode(true);
+  }
+
+  function cancelEditor() {
+    setEditMode(false);
+    setEditBody('');
+    setEditError(null);
+  }
+
+  async function handleSave() {
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await window.AnvilClient.updateNote(noteId, editBody);
+      // Cache invalidation: re-fetch, update store, clear TTL, fire re-render
+      const fresh = await window.AnvilClient.getNote(noteId);
+      if (fresh) {
+        const merged = { ...data.byId[noteId], ...fresh, id: fresh.noteId || fresh.id || noteId };
+        data.byId[noteId] = merged;
+        if (merged.title) data.byTitle[merged.title.toLowerCase()] = noteId;
+      }
+      if (HOOKS) HOOKS.invalidate('note:' + noteId);
+      setNoteVersion(v => v + 1);
+      setEditMode(false);
+      setEditBody('');
+    } catch (err) {
+      setEditError(err?.message || 'Save failed. Please try again.');
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function handleAppend() {
+    if (!appendBody.trim()) return;
+    setAppendSaving(true);
+    setAppendError(null);
+    const today = new Date().toISOString().slice(0, 10);
+    const entry = `## ${today}\n${appendBody}`;
+    try {
+      await window.AnvilClient.updateNote(noteId, entry);
+      const fresh = await window.AnvilClient.getNote(noteId);
+      if (fresh) {
+        const merged = { ...data.byId[noteId], ...fresh, id: fresh.noteId || fresh.id || noteId };
+        data.byId[noteId] = merged;
+        if (merged.title) data.byTitle[merged.title.toLowerCase()] = noteId;
+      }
+      if (HOOKS) HOOKS.invalidate('note:' + noteId);
+      setNoteVersion(v => v + 1);
+      setAppendMode(false);
+      setAppendBody('');
+    } catch (err) {
+      setAppendError(err?.message || 'Append failed. Please try again.');
+    } finally {
+      setAppendSaving(false);
+    }
+  }
+
   // Fetch full note content from Anvil (falls back to mock data when offline)
   const { data: liveNote, loading: noteLoading } = HOOKS
-    ? HOOKS.useNote(noteId)
+    ? HOOKS.useNote(noteId, noteVersion)
     : { data: null, loading: false };
 
   // Merge: live note body overwrites stub; fall back to mock data entirely
@@ -477,6 +549,14 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
     out = fallback.out;
     inn = fallback.in;
   }
+
+  // Warn on tab close while editor is active
+  uEp(() => {
+    if (!editMode) return;
+    function onBeforeUnload(e) { e.preventDefault(); e.returnValue = ''; }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [editMode]);
 
   if (!note && noteLoading) {
     return <div className="main-inner"><div className="empty loading">Loading…</div></div>;
@@ -603,6 +683,7 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
           </div>
           <h1 className="note-title">{note.title}</h1>
           <div className="note-title-actions">
+            {editMode && <span className="editing-badge">Editing</span>}
             <button className={`pin-btn${isPinned ? ' active' : ''}`} title={isPinned ? 'Unpin from sidebar' : 'Pin to sidebar'} onClick={() => togglePin(noteId)}>
               <window.Icon.Pin filled={isPinned} />
               <span>{isPinned ? 'Pinned' : 'Pin'}</span>
@@ -612,7 +693,10 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
                 <button className="overflow-btn" title="More actions" onClick={() => setMenuOpen(o => !o)}>⋯</button>
                 {menuOpen && (
                   <OverflowMenu
-                    items={[{ label: 'Delete', danger: true, onClick: () => setDeleteOpen(true) }]}
+                    items={[
+                      ...(note.type !== 'journal' ? [{ label: 'Edit', onClick: () => openEditor(note.body || '') }] : []),
+                      { label: 'Delete', danger: true, onClick: () => setDeleteOpen(true) },
+                    ]}
                     onClose={() => setMenuOpen(false)}
                   />
                 )}
@@ -654,9 +738,73 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
           </div>
         )}
 
-        <article className="md">
-          <window.MD.MarkdownBody body={note.body} onNavigate={(id) => onNavigate({ kind: 'note', id })} />
-        </article>
+        {editMode ? (
+          <div className="inline-editor">
+            <div className="inline-editor-hint">
+              ⚠ Wiki-links (<code>[[...]]</code>) should not be modified to preserve note relationships.
+            </div>
+            <textarea
+              className="inline-editor-textarea"
+              value={editBody}
+              onChange={e => {
+                setEditBody(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.max(300, e.target.scrollHeight) + 'px';
+              }}
+              ref={el => {
+                if (el) { el.style.height = 'auto'; el.style.height = Math.max(300, el.scrollHeight) + 'px'; }
+              }}
+            />
+            {editError && <div className="inline-editor-error">{editError}</div>}
+            <div className="inline-editor-actions">
+              <button className="chip" onClick={cancelEditor} disabled={editSaving}>Cancel</button>
+              <button className="chip active save-btn" onClick={handleSave} disabled={editSaving}>
+                {editSaving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <article className="md">
+            <window.MD.MarkdownBody
+              body={note.body}
+              onNavigate={(id) => {
+                if (editMode && !window.confirm('Discard unsaved changes?')) return;
+                onNavigate({ kind: 'note', id });
+              }}
+            />
+          </article>
+        )}
+
+        {note.type === 'journal' && !appendMode && (
+          <button className="journal-append-btn" onClick={() => { setAppendBody(''); setAppendError(null); setAppendMode(true); }}>
+            + Add Entry
+          </button>
+        )}
+
+        {note.type === 'journal' && appendMode && (
+          <div className="inline-editor append-editor">
+            <textarea
+              className="inline-editor-textarea"
+              placeholder="Add a new journal entry…"
+              value={appendBody}
+              onChange={e => {
+                setAppendBody(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.max(150, e.target.scrollHeight) + 'px';
+              }}
+              ref={el => {
+                if (el) { el.style.height = 'auto'; el.style.height = Math.max(150, el.scrollHeight) + 'px'; el.focus(); }
+              }}
+            />
+            {appendError && <div className="inline-editor-error">{appendError}</div>}
+            <div className="inline-editor-actions">
+              <button className="chip" onClick={() => { setAppendMode(false); setAppendBody(''); setAppendError(null); }} disabled={appendSaving}>Cancel</button>
+              <button className="chip active save-btn" onClick={handleAppend} disabled={appendSaving || !appendBody.trim()}>
+                {appendSaving ? 'Saving…' : 'Append entry'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Collapsible right rail */}

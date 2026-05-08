@@ -1615,6 +1615,90 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   margin: 4px 0;
 }
 
+/* ── Inline editor (EDIT-2/3) ───────────────────────────────────── */
+.editing-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-1);
+  background: oklch(0.55 0.18 150 / 0.15);
+  color: oklch(0.72 0.14 150);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.inline-editor {
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 0 0 24px;
+}
+.inline-editor-hint {
+  padding: 8px 12px;
+  border-radius: var(--radius-2);
+  background: oklch(0.65 0.14 80 / 0.10);
+  border: 1px solid oklch(0.65 0.14 80 / 0.25);
+  color: var(--fg-2);
+  font-size: 13px;
+}
+.inline-editor-hint code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-1);
+}
+.inline-editor-textarea {
+  width: 100%;
+  min-height: 300px;
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color .15s ease;
+}
+.inline-editor-textarea:focus { border-color: var(--accent); }
+.append-editor .inline-editor-textarea { min-height: 150px; font-family: var(--font-ui); }
+.inline-editor-error {
+  padding: 8px 12px;
+  border-radius: var(--radius-2);
+  background: oklch(0.65 0.18 15 / 0.10);
+  border: 1px solid oklch(0.65 0.18 15 / 0.25);
+  color: var(--red);
+  font-size: 13px;
+}
+.inline-editor-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.chip.save-btn {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.chip.save-btn:hover:not(:disabled) { opacity: 0.88; }
+.chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Journal append button (EDIT-3) ─────────────────────────────── */
+.journal-append-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%;
+  margin: 16px 0;
+  padding: 10px;
+  border: 1.5px dashed var(--line-2);
+  border-radius: var(--radius-2);
+  color: var(--fg-3);
+  font-size: 13px;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.journal-append-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: oklch(from var(--accent) l c h / 0.06);
+}
+
 /* ── Sidebar context menu ────────────────────────────── */
 .side-link-wrap { position: relative; }
 .side-link-wrap .side-ctx-btn {
