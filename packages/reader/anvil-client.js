@@ -65,6 +65,11 @@
       });
     },
 
+    /** Delete a note by ID. Returns { ok: true } on success, throws on error. */
+    deleteNote(id) {
+      return apiFetch('/api/notes/' + encodeURIComponent(id), { method: 'DELETE' });
+    },
+
     /**
      * Open an SSE connection to /api/events.
      * @param {{ onEvent: (e) => void, onReconnect: () => void }} handlers

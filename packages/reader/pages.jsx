@@ -42,6 +42,27 @@ function SyncFooter({ lastSyncedAt, onRefresh }) {
   );
 }
 
+// Generic overflow/context menu — items: [{ label, onClick, danger?, separator? }]
+function OverflowMenu({ items, onClose }) {
+  const ref = uRp();
+  uEp(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); }
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', onKey); };
+  }, [onClose]);
+  return (
+    <div className="overflow-menu" ref={ref}>
+      {items.map((item, i) =>
+        item.separator
+          ? <div key={i} className="overflow-menu-sep" />
+          : <button key={i} className={`overflow-menu-item${item.danger ? ' danger' : ''}`} onClick={() => { onClose(); item.onClick(); }}>{item.label}</button>
+      )}
+    </div>
+  );
+}
+
 // ── Type ordering ────────────────────────────────────────────────
 const TYPE_ORDER = ['task', 'story', 'note', 'journal', 'project', 'area', 'bookmark', 'conversation-state', 'person', 'service', 'meeting'];
 // Returns all types that have ≥1 note: known types first (TYPE_ORDER), then extras by count
@@ -56,6 +77,45 @@ function activeTypes(counts) {
 const SIDE_LIMIT = 8; // static cap for Phase 1
 function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pinned, togglePin, lastSyncedAt, onRefresh }) {
   const data = window.HORUS_DATA;
+  const [ctxMenu, setCtxMenu] = uSp(null); // { id, x, y }
+  const [deleteTarget, setDeleteTarget] = uSp(null);
+  const [deleteLoading, setDeleteLoading] = uSp(false);
+  const [deleteError, setDeleteError] = uSp(null);
+
+  uEp(() => {
+    if (!ctxMenu) return;
+    function handler() { setCtxMenu(null); }
+    function onKey(e) { if (e.key === 'Escape') setCtxMenu(null); }
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', onKey); };
+  }, [!!ctxMenu]);
+
+  async function handleSidebarDelete() {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await window.AnvilClient.deleteNote(deleteTarget.id);
+      window.HORUS_DATA.removeNoteById(deleteTarget.id);
+      if (window.HOOKS) {
+        window.HOOKS.invalidate('note:' + deleteTarget.id);
+        window.HOOKS.invalidate('edges:' + deleteTarget.id);
+      }
+      const wasViewing = currentRoute.kind === 'note' && currentRoute.id === deleteTarget.id;
+      setDeleteTarget(null);
+      setDeleteLoading(false);
+      if (wasViewing) onNavigate({ kind: 'home' });
+    } catch (err) {
+      setDeleteLoading(false);
+      if (err.status === 404) {
+        setDeleteError('This note has already been deleted.');
+        setTimeout(() => { setDeleteTarget(null); setDeleteError(null); }, 2000);
+      } else {
+        setDeleteError('Delete failed. Please try again.');
+      }
+    }
+  }
 
   if (collapsed) {
     return (
@@ -76,16 +136,39 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
     const n = data.byId[id];
     if (!n) return null;
     const active = currentRoute.kind === 'note' && currentRoute.id === id;
+    const isConvState = n.type === 'conversation-state';
+
+    function openCtxMenu(e) {
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      setCtxMenu({ id, x: rect.left, y: rect.bottom + 4 });
+    }
+
     return (
       <div key={id} className={`side-link-wrap${active ? ' active' : ''}`}>
         <button className="side-link" onClick={() => onNavigate({ kind: 'note', id })}>
           <span className={`type-dot ${n.type}`} />
           <span className="label">{n.title}</span>
         </button>
-        {opts.unpin && (
-          <button className="side-unpin" title="Unpin" onClick={(e) => { e.stopPropagation(); togglePin(id); }}>
-            <window.Icon.Pin filled={true} />
-          </button>
+        <button className="side-ctx-btn" title="More actions" onClick={openCtxMenu}>⋯</button>
+        {ctxMenu && ctxMenu.id === id && (
+          <div
+            className="side-ctx-menu"
+            style={{ top: ctxMenu.y, left: Math.min(ctxMenu.x, window.innerWidth - 160) }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <button className="side-ctx-menu-item" onClick={() => { setCtxMenu(null); togglePin(id); }}>
+              {opts.isPinned ? 'Unpin' : 'Pin'}
+            </button>
+            {!isConvState && (
+              <>
+                <div className="side-ctx-menu-sep" />
+                <button className="side-ctx-menu-item danger" onClick={() => { setCtxMenu(null); setDeleteTarget(n); }}>
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
     );
@@ -100,7 +183,7 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
       <SideSection id="pinned" title="Pinned" count={pinnedResolved.length || null}>
         {pinnedResolved.length === 0
           ? <div className="side-empty">No pins yet — open a note and click the pin icon</div>
-          : pinnedResolved.map(id => noteRow(id, { unpin: true }))}
+          : pinnedResolved.map(id => noteRow(id, { isPinned: true }))}
       </SideSection>
 
       <SideSection id="recents" title="Recents" count={recentsCapped.length || null}>
@@ -136,6 +219,16 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
       </SideSection>
 
       <SyncFooter lastSyncedAt={lastSyncedAt} onRefresh={onRefresh} />
+      {deleteTarget && (
+        <window.ConfirmDeleteModal
+          note={deleteTarget}
+          edgeCount={null}
+          onConfirm={handleSidebarDelete}
+          onCancel={() => { if (!deleteLoading) { setDeleteTarget(null); setDeleteError(null); } }}
+          isLoading={deleteLoading}
+          errorMsg={deleteError}
+        />
+      )}
     </aside>
   );
 }
@@ -315,6 +408,32 @@ function HomePage({ onNavigate }) {
 function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned, togglePin }) {
   const data = window.HORUS_DATA;
   const HOOKS = window.HOOKS;
+  const [menuOpen, setMenuOpen] = uSp(false);
+  const [deleteOpen, setDeleteOpen] = uSp(false);
+  const [deleteLoading, setDeleteLoading] = uSp(false);
+  const [deleteError, setDeleteError] = uSp(null);
+
+  async function handleDeleteConfirm() {
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await window.AnvilClient.deleteNote(noteId);
+      data.removeNoteById(noteId);
+      if (HOOKS) {
+        HOOKS.invalidate('note:' + noteId);
+        HOOKS.invalidate('edges:' + noteId);
+      }
+      onNavigate({ kind: 'home' });
+    } catch (err) {
+      setDeleteLoading(false);
+      if (err.status === 404) {
+        setDeleteError('This note has already been deleted.');
+        setTimeout(() => { setDeleteOpen(false); setDeleteError(null); }, 2000);
+      } else {
+        setDeleteError('Delete failed. Please try again.');
+      }
+    }
+  }
 
   // Fetch full note content from Anvil (falls back to mock data when offline)
   const { data: liveNote, loading: noteLoading } = HOOKS
@@ -488,6 +607,17 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
               <window.Icon.Pin filled={isPinned} />
               <span>{isPinned ? 'Pinned' : 'Pin'}</span>
             </button>
+            {note.type !== 'conversation-state' && (
+              <div className="overflow-menu-wrap">
+                <button className="overflow-btn" title="More actions" onClick={() => setMenuOpen(o => !o)}>⋯</button>
+                {menuOpen && (
+                  <OverflowMenu
+                    items={[{ label: 'Delete', danger: true, onClick: () => setDeleteOpen(true) }]}
+                    onClose={() => setMenuOpen(false)}
+                  />
+                )}
+              </div>
+            )}
           </div>
           {(note.tags || []).length > 0 && (
             <div className="note-tags">
@@ -583,6 +713,16 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
           </div>
         )}
       </aside>
+      {deleteOpen && note && (
+        <window.ConfirmDeleteModal
+          note={note}
+          edgeCount={totalEdges}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => { if (!deleteLoading) { setDeleteOpen(false); setDeleteError(null); } }}
+          isLoading={deleteLoading}
+          errorMsg={deleteError}
+        />
+      )}
     </div>
   );
 }
