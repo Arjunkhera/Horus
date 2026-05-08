@@ -1373,6 +1373,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   color: var(--ink);
 }
 .msg-assistant { display: flex; flex-direction: column; gap: 6px; }
+.msg-thinking { display: flex; flex-direction: column; gap: 6px; }
 .msg-assistant-label {
   font: 500 8px/1 var(--font-mono);
   color: var(--nlp);
@@ -1409,6 +1410,25 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   animation: blink 1s step-end infinite;
 }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* Response skeleton — shown during searching state before tokens arrive */
+.msg-skeleton { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; max-width: 340px; }
+.skeleton-line {
+  height: 9px; border-radius: 4px; width: 100%;
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* Live indicator dot in session list */
+.session-live-dot {
+  display: inline-block;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--nlp);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+  margin-right: 3px; vertical-align: middle; flex-shrink: 0;
+}
 
 /* Inline citation superscripts */
 .cite-ref {
