@@ -257,8 +257,8 @@
               <div key={i} className="msg-assistant">
                 <div className="msg-assistant-label">✦ Horus</div>
                 <div className="msg-assistant-body">
-                  {window.MD?.renderMarkdown
-                    ? <div dangerouslySetInnerHTML={{ __html: window.MD.renderMarkdown(msg.content) }} />
+                  {window.MD?.MarkdownBody
+                    ? React.createElement(window.MD.MarkdownBody, { body: msg.content, onNavigate: () => {} })
                     : <CitationText text={msg.content} references={msg.references}
                         onCiteClick={handleRefClick} activeRefN={activeRefN} />}
                 </div>
@@ -281,7 +281,7 @@
               {streamState === 'streaming' && (
                 <div className="msg-assistant-body">
                   {window.MD?.renderMarkdown
-                    ? <><div dangerouslySetInnerHTML={{ __html: window.MD.renderMarkdown(streamText) }} /><span className="stream-cursor" /></>
+                    ? <>{window.MD.renderMarkdown(streamText)}<span className="stream-cursor" /></>
                     : <>{streamText}<span className="stream-cursor" /></>}
                 </div>
               )}
@@ -373,8 +373,8 @@
         </div>
 
         <div className="preview-body">
-          {note?.body && (window.MD?.renderMarkdown
-            ? <div dangerouslySetInnerHTML={{ __html: window.MD.renderMarkdown(note.body) }} />
+          {note?.body && (window.MD?.MarkdownBody
+            ? React.createElement(window.MD.MarkdownBody, { body: note.body, onNavigate: () => {} })
             : <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{note.body}</pre>)}
         </div>
 
