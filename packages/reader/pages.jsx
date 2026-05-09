@@ -412,11 +412,14 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
   const [deleteOpen, setDeleteOpen] = uSp(false);
   const [deleteLoading, setDeleteLoading] = uSp(false);
   const [deleteError, setDeleteError] = uSp(null);
-  // EDIT-2: inline body editor state
+  // EDIT-5: Obsidian-style inline editor state
   const [editMode, setEditMode] = uSp(false);
   const [editBody, setEditBody] = uSp('');
-  const [editSaving, setEditSaving] = uSp(false);
-  const [editError, setEditError] = uSp(null);
+  const [lastSavedBody, setLastSavedBody] = uSp('');
+  const [saveStatus, setSaveStatus] = uSp('idle'); // 'idle'|'saving'|'saved'|'error'
+  const autoSaveRef = React.useRef(null);
+  const editBodyRef = React.useRef('');
+  const lastSavedBodyRef = React.useRef('');
   // EDIT-3: journal append editor state
   const [appendMode, setAppendMode] = uSp(false);
   const [appendBody, setAppendBody] = uSp('');
@@ -448,23 +451,19 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
   }
 
   function openEditor(currentBody) {
-    setEditBody(currentBody || '');
-    setEditError(null);
+    const body = currentBody || '';
+    editBodyRef.current = body;
+    lastSavedBodyRef.current = body;
+    setEditBody(body);
+    setLastSavedBody(body);
+    setSaveStatus('idle');
     setEditMode(true);
   }
 
-  function cancelEditor() {
-    setEditMode(false);
-    setEditBody('');
-    setEditError(null);
-  }
-
-  async function handleSave() {
-    setEditSaving(true);
-    setEditError(null);
+  async function handleSave(bodyToSave) {
+    setSaveStatus('saving');
     try {
-      await window.AnvilClient.updateNote(noteId, editBody);
-      // Cache invalidation: re-fetch, update store, clear TTL, fire re-render
+      await window.AnvilClient.updateNote(noteId, bodyToSave);
       const fresh = await window.AnvilClient.getNote(noteId);
       if (fresh) {
         const merged = { ...data.byId[noteId], ...fresh, id: fresh.noteId || fresh.id || noteId };
@@ -473,13 +472,29 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
       }
       if (HOOKS) HOOKS.invalidate('note:' + noteId);
       setNoteVersion(v => v + 1);
-      setEditMode(false);
-      setEditBody('');
-    } catch (err) {
-      setEditError(err?.message || 'Save failed. Please try again.');
-    } finally {
-      setEditSaving(false);
+      lastSavedBodyRef.current = bodyToSave;
+      setLastSavedBody(bodyToSave);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2000);
+      return true;
+    } catch {
+      setSaveStatus('error');
+      return false;
     }
+  }
+
+  async function closeEditor() {
+    if (autoSaveRef.current) {
+      clearTimeout(autoSaveRef.current);
+      autoSaveRef.current = null;
+    }
+    if (editBodyRef.current !== lastSavedBodyRef.current) {
+      const saved = await handleSave(editBodyRef.current);
+      if (!saved) return;
+    }
+    setEditMode(false);
+    setEditBody('');
+    setSaveStatus('idle');
   }
 
   async function handleAppend() {
@@ -550,13 +565,26 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
     inn = fallback.in;
   }
 
-  // Warn on tab close while editor is active
+  // Warn on tab close only when there are unsaved changes
   uEp(() => {
     if (!editMode) return;
-    function onBeforeUnload(e) { e.preventDefault(); e.returnValue = ''; }
+    function onBeforeUnload(e) {
+      if (editBodyRef.current === lastSavedBodyRef.current) return;
+      e.preventDefault();
+      e.returnValue = '';
+    }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [editMode]);
+
+  // Auto-save: 1500ms debounce after last keystroke
+  uEp(() => {
+    if (!editMode || editBody === lastSavedBodyRef.current) return;
+    const body = editBody;
+    const timer = setTimeout(() => handleSave(body), 1500);
+    autoSaveRef.current = timer;
+    return () => clearTimeout(timer);
+  }, [editBody, editMode]);
 
   if (!note && noteLoading) {
     return <div className="main-inner"><div className="empty loading">Loading…</div></div>;
@@ -688,13 +716,18 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
               <window.Icon.Pin filled={isPinned} />
               <span>{isPinned ? 'Pinned' : 'Pin'}</span>
             </button>
+            {note.type !== 'conversation-state' && note.type !== 'journal' && !editMode && (
+              <button className="pin-btn edit-pencil-btn" title="Edit note" onClick={() => openEditor(note.body || '')}>
+                <window.Icon.Pencil />
+                <span>Edit</span>
+              </button>
+            )}
             {note.type !== 'conversation-state' && (
               <div className="overflow-menu-wrap">
                 <button className="overflow-btn" title="More actions" onClick={() => setMenuOpen(o => !o)}>⋯</button>
                 {menuOpen && (
                   <OverflowMenu
                     items={[
-                      ...(note.type !== 'journal' ? [{ label: 'Edit', onClick: () => openEditor(note.body || '') }] : []),
                       { label: 'Delete', danger: true, onClick: () => setDeleteOpen(true) },
                     ]}
                     onClose={() => setMenuOpen(false)}
@@ -747,28 +780,38 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
               className="inline-editor-textarea"
               value={editBody}
               onChange={e => {
-                setEditBody(e.target.value);
+                const v = e.target.value;
+                editBodyRef.current = v;
+                setEditBody(v);
                 e.target.style.height = 'auto';
                 e.target.style.height = Math.max(300, e.target.scrollHeight) + 'px';
               }}
+              onKeyDown={e => { if (e.key === 'Escape') closeEditor(); }}
               ref={el => {
-                if (el) { el.style.height = 'auto'; el.style.height = Math.max(300, el.scrollHeight) + 'px'; }
+                if (el) { el.style.height = 'auto'; el.style.height = Math.max(300, el.scrollHeight) + 'px'; el.focus(); }
               }}
             />
-            {editError && <div className="inline-editor-error">{editError}</div>}
             <div className="inline-editor-actions">
-              <button className="chip" onClick={cancelEditor} disabled={editSaving}>Cancel</button>
-              <button className="chip active save-btn" onClick={handleSave} disabled={editSaving}>
-                {editSaving ? 'Saving…' : 'Save changes'}
-              </button>
+              <span className={`save-status${saveStatus !== 'idle' ? ' ' + saveStatus : ''}`}>
+                {saveStatus === 'idle' && editBody !== lastSavedBody ? 'Unsaved' : ''}
+                {saveStatus === 'saving' && 'Saving…'}
+                {saveStatus === 'saved' && 'Saved ✓'}
+                {saveStatus === 'error' && (
+                  <span>⚠ Save failed · <button className="retry-btn" onClick={() => handleSave(editBodyRef.current)}>Retry</button></span>
+                )}
+              </span>
+              <button className="chip active" onClick={closeEditor} disabled={saveStatus === 'saving'}>Done</button>
             </div>
           </div>
         ) : (
-          <article className="md">
+          <article
+            className={`md${note.type !== 'journal' && note.type !== 'conversation-state' ? ' editable' : ''}`}
+            onClick={() => { if (note.type !== 'journal' && note.type !== 'conversation-state') openEditor(note.body || ''); }}
+          >
             <window.MD.MarkdownBody
               body={note.body}
               onNavigate={(id) => {
-                if (editMode && !window.confirm('Discard unsaved changes?')) return;
+                if (editMode && editBodyRef.current !== lastSavedBodyRef.current && !window.confirm('You have unsaved changes. Leave anyway?')) return;
                 onNavigate({ kind: 'note', id });
               }}
             />
