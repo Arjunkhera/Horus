@@ -63,6 +63,25 @@ function OverflowMenu({ items, onClose }) {
   );
 }
 
+// Config-driven icon row — actions: [{ icon, label, onClick, disabled?, active?, danger? }]
+function PageActions({ actions }) {
+  return (
+    <div className="page-actions">
+      {actions.map(({ icon, label, onClick, disabled, active, danger }) => (
+        <button
+          key={label}
+          className={['action-icon', disabled && 'disabled', active && 'active', danger && 'danger'].filter(Boolean).join(' ')}
+          onClick={disabled ? undefined : onClick}
+          title={label}
+          aria-disabled={disabled || false}
+        >
+          {icon}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Type ordering ────────────────────────────────────────────────
 const TYPE_ORDER = ['task', 'story', 'note', 'journal', 'project', 'area', 'bookmark', 'conversation-state', 'person', 'service', 'meeting'];
 // Returns all types that have ≥1 note: known types first (TYPE_ORDER), then extras by count
@@ -408,7 +427,6 @@ function HomePage({ onNavigate }) {
 function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned, togglePin }) {
   const data = window.HORUS_DATA;
   const HOOKS = window.HOOKS;
-  const [menuOpen, setMenuOpen] = uSp(false);
   const [deleteOpen, setDeleteOpen] = uSp(false);
   const [deleteLoading, setDeleteLoading] = uSp(false);
   const [deleteError, setDeleteError] = uSp(null);
@@ -417,9 +435,9 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
   const [editBody, setEditBody] = uSp('');
   const [lastSavedBody, setLastSavedBody] = uSp('');
   const [saveStatus, setSaveStatus] = uSp('idle'); // 'idle'|'saving'|'saved'|'error'
-  const autoSaveRef = React.useRef(null);
-  const editBodyRef = React.useRef('');
-  const lastSavedBodyRef = React.useRef('');
+  const autoSaveRef = uRp(null);
+  const editBodyRef = uRp('');
+  const lastSavedBodyRef = uRp('');
   // EDIT-3: journal append editor state
   const [appendMode, setAppendMode] = uSp(false);
   const [appendBody, setAppendBody] = uSp('');
@@ -710,32 +728,28 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
             {note.fields?.subtype && <span className="chip">{note.fields.subtype}</span>}
           </div>
           <h1 className="note-title">{note.title}</h1>
-          <div className="note-title-actions">
-            {editMode && <span className="editing-badge">Editing</span>}
-            <button className={`pin-btn${isPinned ? ' active' : ''}`} title={isPinned ? 'Unpin from sidebar' : 'Pin to sidebar'} onClick={() => togglePin(noteId)}>
-              <window.Icon.Pin filled={isPinned} />
-              <span>{isPinned ? 'Pinned' : 'Pin'}</span>
-            </button>
-            {note.type !== 'conversation-state' && note.type !== 'journal' && !editMode && (
-              <button className="pin-btn edit-pencil-btn" title="Edit note" onClick={() => openEditor(note.body || '')}>
-                <window.Icon.Pencil />
-                <span>Edit</span>
-              </button>
-            )}
-            {note.type !== 'conversation-state' && (
-              <div className="overflow-menu-wrap">
-                <button className="overflow-btn" title="More actions" onClick={() => setMenuOpen(o => !o)}>⋯</button>
-                {menuOpen && (
-                  <OverflowMenu
-                    items={[
-                      { label: 'Delete', danger: true, onClick: () => setDeleteOpen(true) },
-                    ]}
-                    onClose={() => setMenuOpen(false)}
-                  />
-                )}
-              </div>
-            )}
-          </div>
+          {editMode && <span className="editing-badge">Editing</span>}
+          <PageActions actions={[
+            {
+              icon: <window.Icon.Pin filled={isPinned} />,
+              label: isPinned ? 'Unpin from sidebar' : 'Pin to sidebar',
+              onClick: () => togglePin(noteId),
+              active: isPinned,
+            },
+            {
+              icon: <window.Icon.Pencil />,
+              label: editMode ? 'Currently editing' : note.type === 'journal' ? 'Journals are append-only' : note.type === 'conversation-state' ? 'System notes cannot be edited' : 'Edit',
+              onClick: () => openEditor(note.body || ''),
+              disabled: editMode || note.type === 'journal' || note.type === 'conversation-state',
+            },
+            {
+              icon: <window.Icon.Trash />,
+              label: note.type === 'conversation-state' ? 'System notes cannot be deleted' : 'Delete',
+              onClick: () => setDeleteOpen(true),
+              disabled: note.type === 'conversation-state',
+              danger: true,
+            },
+          ]} />
           {(note.tags || []).length > 0 && (
             <div className="note-tags">
               {note.tags.map(t => (
