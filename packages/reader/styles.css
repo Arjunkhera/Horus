@@ -1617,6 +1617,12 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 }
 
 /* ── Inline editor (EDIT-2/3) ───────────────────────────────────── */
+/* Obsidian-style: editable body signals click-to-edit */
+article.md.editable { cursor: text; }
+
+/* Pencil edit button in note title actions */
+.edit-pencil-btn svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 1.75; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
 .editing-badge {
   display: inline-flex; align-items: center;
   padding: 2px 8px;
@@ -1672,8 +1678,29 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   font-size: 13px;
 }
 .inline-editor-actions {
-  display: flex; gap: 8px; justify-content: flex-end;
+  display: flex; gap: 8px; justify-content: flex-end; align-items: center;
 }
+
+/* Auto-save status indicator */
+.save-status {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+}
+.save-status.saving { color: var(--fg-3); }
+.save-status.saved { color: oklch(0.65 0.16 150); animation: editorSavedFade 1s ease-in-out 2s forwards; }
+.save-status.error { color: var(--red); }
+.retry-btn {
+  background: none; border: none; padding: 0;
+  color: inherit; text-decoration: underline; cursor: pointer; font-size: inherit;
+}
+@keyframes editorSavedFade { from { opacity: 1; } to { opacity: 0; } }
+
 .chip.save-btn {
   background: var(--accent);
   color: #fff;
