@@ -738,9 +738,10 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
             },
             {
               icon: <window.Icon.Pencil />,
-              label: editMode ? 'Currently editing' : note.type === 'journal' ? 'Journals are append-only' : note.type === 'conversation-state' ? 'System notes cannot be edited' : 'Edit',
-              onClick: () => openEditor(note.body || ''),
-              disabled: editMode || note.type === 'journal' || note.type === 'conversation-state',
+              label: editMode ? 'Save & exit' : note.type === 'journal' ? 'Journals are append-only' : note.type === 'conversation-state' ? 'System notes cannot be edited' : 'Edit',
+              onClick: editMode ? () => closeEditor() : () => openEditor(note.body || ''),
+              active: editMode,
+              disabled: !editMode && (note.type === 'journal' || note.type === 'conversation-state'),
             },
             {
               icon: <window.Icon.Trash />,
@@ -814,7 +815,6 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
                   <span>⚠ Save failed · <button className="retry-btn" onClick={() => handleSave(editBodyRef.current)}>Retry</button></span>
                 )}
               </span>
-              <button className="chip active" onClick={closeEditor} disabled={saveStatus === 'saving'}>Done</button>
             </div>
           </div>
         ) : (
