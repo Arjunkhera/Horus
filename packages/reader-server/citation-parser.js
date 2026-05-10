@@ -26,8 +26,11 @@ export function parseCitations(text, toolCallLog) {
       for (const id of ids) {
         if (!seen.has(id)) {
           seen.add(id);
-          const meta = noteMetaMap[id] || {};
-          references.push({ n: n++, noteId: id, title: meta.title || 'Note', type: meta.type || 'note' });
+          const meta = noteMetaMap[id];
+          // Only include IDs we have actual metadata for — skip edge/session IDs
+          if (meta?.title) {
+            references.push({ n: n++, noteId: id, title: meta.title, type: meta.type || 'note' });
+          }
         }
       }
     }
@@ -64,7 +67,13 @@ function extractNoteMetadata(toolCallLog) {
     if (typeof result === 'string') {
       try { result = JSON.parse(result); } catch { continue; }
     }
-    // anvil_search returns { results: [{noteId, title, type, ...}] }
+    // Unwrap MCP content envelope: {content: [{type:"text", text:"..."}]}
+    if (Array.isArray(result.content)) {
+      const textBlock = result.content.find(c => c.type === 'text');
+      if (!textBlock?.text) continue;
+      try { result = JSON.parse(textBlock.text); } catch { continue; }
+    }
+    // anvil_search / horus_search returns { results: [{noteId, title, type, ...}] }
     if (Array.isArray(result.results)) {
       for (const item of result.results) {
         if (item.noteId && item.title) {
