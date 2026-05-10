@@ -1196,7 +1196,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .side-tab {
   flex: 1;
   padding: 6px 8px;
-  font: 500 9px/1 var(--font-mono);
+  font: 500 11px/1 var(--font-mono);
   text-align: center;
   cursor: pointer;
   background: transparent;
@@ -1230,7 +1230,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .chat-search-input {
   width: 100%;
   padding: 4px 8px;
-  font: 400 10px/1.4 var(--font-mono);
+  font: 400 12px/1.4 var(--font-mono);
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 3px;
@@ -1242,7 +1242,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   width: calc(100% - 16px);
   margin: 4px 8px;
   padding: 5px 8px;
-  font: 400 9px/1 var(--font-mono);
+  font: 400 12px/1 var(--font-mono);
   background: transparent;
   border: 1.5px dashed var(--line-soft);
   border-radius: 3px;
@@ -1259,14 +1259,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   cursor: pointer;
   border-radius: 3px;
   margin: 1px 4px;
-  font: 400 10px/1.3 var(--font-mono);
+  font: 400 13px/1.3 var(--font-mono);
   color: var(--ink-2);
   position: relative;
 }
 .chat-session-row:hover { background: var(--bg-hover); }
 .chat-session-row.active { background: var(--nlp-soft); color: var(--nlp); }
 .chat-session-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-date-group { padding: 4px 12px 2px; font: 500 8px/1 var(--font-mono); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.chat-date-group { padding: 4px 12px 2px; font: 500 10px/1 var(--font-mono); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
 
 /* Ask bar on home page */
 .ask-bar-wrap {
