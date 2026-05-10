@@ -159,9 +159,12 @@
       }));
     }, [isGenerating, sessionId]);
 
-    // Auto-resume: if session mounted with an unanswered user message, submit it
+    // Auto-resume: if session mounted with an unanswered user message, submit it.
+    // Skip when pendingQuestion is set — that effect already handles the submission
+    // and firing both causes a double-request (regression from NLP-5/NLP-7).
     uE(() => {
       if (!sessionId) return;
+      if (pendingQuestion) return; // pendingQuestion effect handles this
       const s = store().getSession(sessionId);
       if (!s?.messages?.length) return;
       const last = s.messages[s.messages.length - 1];
