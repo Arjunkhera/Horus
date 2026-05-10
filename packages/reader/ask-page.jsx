@@ -72,7 +72,7 @@
               onClick={() => onRefClick(ref)}>
               <span className="ref-n">[{ref.n}]</span>
               <span className="ref-type-dot" style={typeDotStyle(ref.type)} />
-              <span className="ref-title">{ref.title}</span>
+              <span className="ref-title">{window.HORUS_DATA?.byId[ref.noteId]?.title || ref.title}</span>
               <span className="ref-age">{ageStr(window.HORUS_DATA?.byId[ref.noteId]?.modified || ref.modified)}</span>
             </div>
           ))
@@ -81,7 +81,7 @@
               {references.map(ref => (
                 <span key={ref.n} onClick={() => onRefClick(ref)}
                   style={{ padding: '1px 6px', border: '1px solid var(--line-soft)', borderRadius: 99, font: '400 7.5px/1 var(--font-mono)', cursor: 'pointer', color: 'var(--ink-3)' }}>
-                  [{ref.n}] {ref.title}<span style={{ marginLeft: 3, opacity: 0.5 }}>{ref.type}</span>
+                  [{ref.n}] {window.HORUS_DATA?.byId[ref.noteId]?.title || ref.title}<span style={{ marginLeft: 3, opacity: 0.5 }}>{ref.type}</span>
                 </span>
               ))}
             </div>
