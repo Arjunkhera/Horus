@@ -135,7 +135,7 @@
   const menuItemStyle = {
     display: 'block', width: '100%', padding: '6px 10px',
     background: 'transparent', border: 'none', cursor: 'pointer',
-    font: '400 10px/1 var(--font-mono)', color: 'var(--ink)', textAlign: 'left',
+    font: '400 13px/1.3 var(--font-mono)', color: 'var(--ink)', textAlign: 'left',
   };
 
   window.ChatSidebar = ChatSidebar;
