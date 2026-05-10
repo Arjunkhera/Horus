@@ -1483,7 +1483,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   background: transparent;
   border: none;
   outline: none;
-  font: 400 14px/1.4 'Kalam', var(--font-body);
+  font: 400 14px/1.4 var(--font-ui);
   color: var(--ink);
   resize: none;
 }

@@ -360,7 +360,7 @@
             </span>
             <span style={{ marginLeft: 'auto', font: '500 8px/1 var(--font-mono)', color: 'var(--nlp)' }}>[{refN}]</span>
           </div>
-          {note && <div style={{ font: '600 13px/1.4 Kalam, var(--font-body)', color: 'var(--ink)', marginTop: 4 }}>{note.title}</div>}
+          {note && <div style={{ font: '600 13px/1.4 var(--font-ui)', color: 'var(--ink)', marginTop: 4 }}>{note.title}</div>}
           {note?.tags?.length > 0 && (
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 4 }}>
               {note.tags.map(t => (
