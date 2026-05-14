@@ -157,7 +157,7 @@ export class BuiltinAuthStrategy implements AuthStrategy {
       return 'permit';
     }
 
-    if (action === 'publish') {
+    if (action === 'publish' || action === 'verify') {
       if (user?.role === 'admin') return 'permit';
       return 'deny';
     }

@@ -111,4 +111,16 @@ export interface StorageBackend {
    * from metadata.yaml if available, or left undefined otherwise).
    */
   listAll(): Promise<ArtifactIndexMeta[]>;
+
+  /**
+   * Set the verified flag for an artifact-id (not per-version).
+   * All current and future versions of this artifact-id inherit the flag.
+   */
+  setVerified(type: ArtifactType, id: string, verified: boolean): Promise<void>;
+
+  /**
+   * Check whether an artifact-id has been verified.
+   * Returns false if the artifact-id has no verification record.
+   */
+  isVerified(type: ArtifactType, id: string): Promise<boolean>;
 }

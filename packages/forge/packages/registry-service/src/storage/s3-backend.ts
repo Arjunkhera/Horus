@@ -241,6 +241,54 @@ export class S3StorageBackend implements StorageBackend {
     return bundle;
   }
 
+  /**
+   * Build the S3 key for the artifact-id-level verification record.
+   * Stored at: {prefix}verified/{type}/{id}.json
+   */
+  private verifiedKey(type: ArtifactType, id: string): string {
+    return `${this.prefix}verified/${typeSegment(type)}/${id}.json`;
+  }
+
+  async setVerified(type: ArtifactType, id: string, verified: boolean): Promise<void> {
+    const key = this.verifiedKey(type, id);
+    const payload = JSON.stringify({ verified, verifiedAt: new Date().toISOString() });
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: Buffer.from(payload, 'utf8'),
+        ContentType: 'application/json; charset=utf-8',
+      }),
+    );
+  }
+
+  async isVerified(type: ArtifactType, id: string): Promise<boolean> {
+    const key = this.verifiedKey(type, id);
+    try {
+      const resp = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      if (!resp.Body) return false;
+      const chunks: Uint8Array[] = [];
+      const stream = resp.Body as AsyncIterable<Uint8Array>;
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+      const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { verified?: boolean };
+      return parsed.verified === true;
+    } catch (err: unknown) {
+      const code = (err as { name?: string; $metadata?: { httpStatusCode?: number } });
+      if (
+        code.name === 'NoSuchKey' ||
+        code.name === 'NotFound' ||
+        code.$metadata?.httpStatusCode === 404
+      ) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
   async listVersions(type: ArtifactType, id: string): Promise<string[]> {
     const prefix = `${this.prefix}${typeSegment(type)}/${id}/`;
     const resp = await this.client.send(

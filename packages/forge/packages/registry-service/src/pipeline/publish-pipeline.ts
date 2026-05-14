@@ -330,6 +330,17 @@ export class PublishPipeline {
         verified?: boolean;
       };
 
+      // Inherit artifact-id-level verified flag: if the artifact-id has been
+      // previously verified, new versions automatically inherit verified: true.
+      let inheritedVerified = richMeta.verified ?? false;
+      if (!inheritedVerified) {
+        try {
+          inheritedVerified = await this.storage.isVerified(type, input.id);
+        } catch {
+          // Best-effort — don't fail publish if verification check fails
+        }
+      }
+
       const doc: ArtifactDocument = {
         id: `${type}:${input.id}:${input.version}`,
         type,
@@ -338,7 +349,7 @@ export class PublishPipeline {
         name: richMeta.name ?? input.id,
         description: richMeta.description ?? '',
         tags: richMeta.tags ?? [],
-        verified: richMeta.verified ?? false,
+        verified: inheritedVerified,
         publishedAt: Math.floor(new Date(publishedAt).getTime() / 1000),
       };
 
