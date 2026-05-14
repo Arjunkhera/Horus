@@ -820,7 +820,6 @@ function NotePage({ noteId, onNavigate, refsCollapsed, setRefsCollapsed, pinned,
         ) : (
           <article
             className={`md${note.type !== 'journal' && note.type !== 'conversation-state' ? ' editable' : ''}`}
-            onClick={() => { if (note.type !== 'journal' && note.type !== 'conversation-state') openEditor(note.body || ''); }}
           >
             <window.MD.MarkdownBody
               body={note.body}
