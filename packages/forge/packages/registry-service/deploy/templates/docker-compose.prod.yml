@@ -1,0 +1,89 @@
+version: "3.9"
+
+# Production docker-compose for Forge Registry on EC2.
+#
+# Services:
+#   - forge-registry  — the registry HTTP API (GHCR image)
+#   - typesense        — search backend
+#
+# S3 credentials are supplied via the EC2 instance profile (IAM role);
+# the service does NOT need explicit AWS_ACCESS_KEY_ID / SECRET.
+# See: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html
+#
+# The FORGE_REGISTRY_TYPESENSE_API_KEY env var is read from the system
+# environment (set by the systemd service or the user-data script).
+
+services:
+  # ── Forge Registry ───────────────────────────────────────────────────────
+  forge-registry:
+    image: ghcr.io/arjunkhera/forge-registry:latest
+    container_name: forge-registry
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8744:8744"   # bind to loopback only — nginx proxies inbound
+    environment:
+      FORGE_REGISTRY_CONFIG: "/etc/forge-registry/config.yaml"
+      FORGE_REGISTRY_HOST: "0.0.0.0"
+      FORGE_REGISTRY_PORT: "8744"
+      FORGE_REGISTRY_LOG_LEVEL: "info"
+      FORGE_REGISTRY_DB_PATH: "/data/forge-registry.db"
+      # S3 — no explicit credentials; SDK picks up the instance profile.
+      FORGE_REGISTRY_S3_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
+      # Typesense
+      FORGE_REGISTRY_TYPESENSE_HOST: "typesense"
+      FORGE_REGISTRY_TYPESENSE_PORT: "8108"
+      FORGE_REGISTRY_TYPESENSE_PROTOCOL: "http"
+    volumes:
+      - /etc/forge-registry:/etc/forge-registry:ro
+      - registry-data:/data
+    depends_on:
+      typesense:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8744/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - forge-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ── Typesense ─────────────────────────────────────────────────────────────
+  typesense:
+    image: typesense/typesense:0.25.2
+    container_name: forge-typesense
+    restart: unless-stopped
+    # Typesense is NOT exposed to the host; only reachable within forge-net.
+    environment:
+      TYPESENSE_DATA_DIR: "/typesense-data"
+      TYPESENSE_ENABLE_CORS: "false"
+      # API key injected from the host environment.
+    env_file:
+      - /etc/forge-registry/typesense.env
+    volumes:
+      - typesense-data:/typesense-data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8108/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - forge-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  registry-data:
+  typesense-data:
+
+networks:
+  forge-net:
+    driver: bridge
