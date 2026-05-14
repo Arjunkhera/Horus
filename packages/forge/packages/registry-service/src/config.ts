@@ -61,6 +61,20 @@ const ServerConfigSchema = z.object({
   coreVersion: z.string().default('0.1.0'),
 });
 
+const TypesenseConfigSchema = z.object({
+  /** Typesense host (e.g., "localhost" or "typesense.example.com") */
+  host: z.string().min(1),
+  /** Typesense port (default: 8108) */
+  port: z.number().int().min(1).max(65535).default(8108),
+  /** Protocol: "http" or "https" */
+  protocol: z.enum(['http', 'https']).default('http'),
+  /**
+   * Typesense API key — loaded from env, never stored in YAML.
+   * Must be provided via FORGE_REGISTRY_TYPESENSE_API_KEY.
+   */
+  apiKey: z.string().min(1),
+});
+
 export const ServiceConfigSchema = z.object({
   server: ServerConfigSchema.default({}),
   storage: StorageConfigSchema,
@@ -69,9 +83,13 @@ export const ServiceConfigSchema = z.object({
   dbPath: z.string().default('/tmp/forge-registry.db'),
   /** Minimum log level: fatal | error | warn | info | debug | trace */
   logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  /** Optional Typesense config — search is disabled when absent */
+  typesense: TypesenseConfigSchema.optional(),
 });
 
 export type ServiceConfig = z.infer<typeof ServiceConfigSchema>;
+export type RegistryConfig = ServiceConfig;
+export type TypesenseConfig = z.infer<typeof TypesenseConfigSchema>;
 export type AdminUser = z.infer<typeof AdminUserSchema>;
 export type BuiltinAuthConfig = z.infer<typeof BuiltinAuthConfigSchema>;
 export type S3StorageConfig = z.infer<typeof S3StorageConfigSchema>;
@@ -142,6 +160,24 @@ export function loadConfig(): ServiceConfig {
 
   if (process.env['FORGE_REGISTRY_DB_PATH']) combined['dbPath'] = process.env['FORGE_REGISTRY_DB_PATH'];
   if (process.env['FORGE_REGISTRY_LOG_LEVEL']) combined['logLevel'] = process.env['FORGE_REGISTRY_LOG_LEVEL'];
+
+  // Typesense config — all from env, host required to enable
+  if (process.env['FORGE_REGISTRY_TYPESENSE_HOST']) {
+    const tsConfig: Record<string, unknown> = {
+      ...((raw['typesense'] as Record<string, unknown>) ?? {}),
+      host: process.env['FORGE_REGISTRY_TYPESENSE_HOST'],
+    };
+    if (process.env['FORGE_REGISTRY_TYPESENSE_PORT']) {
+      tsConfig['port'] = parseInt(process.env['FORGE_REGISTRY_TYPESENSE_PORT'], 10);
+    }
+    if (process.env['FORGE_REGISTRY_TYPESENSE_PROTOCOL']) {
+      tsConfig['protocol'] = process.env['FORGE_REGISTRY_TYPESENSE_PROTOCOL'];
+    }
+    if (process.env['FORGE_REGISTRY_TYPESENSE_API_KEY']) {
+      tsConfig['apiKey'] = process.env['FORGE_REGISTRY_TYPESENSE_API_KEY'];
+    }
+    combined['typesense'] = tsConfig;
+  }
 
   const result = ServiceConfigSchema.safeParse(combined);
   if (!result.success) {

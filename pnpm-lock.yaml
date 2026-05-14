@@ -194,6 +194,9 @@ importers:
       sql.js:
         specifier: ^1.14.1
         version: 1.14.1
+      typesense:
+        specifier: ^1.8.2
+        version: 1.8.2(@babel/runtime@7.29.2)
       yaml:
         specifier: ^2.4.0
         version: 2.8.2
@@ -2986,6 +2989,12 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  typesense@1.8.2:
+    resolution: {integrity: sha512-aBpePjA99Qvo+OP2pJwMpvga4Jrm1Y2oV5NsrWXBxlqUDNEUCPZBIksPv2Hq0jxQxHhLLyJVbjXjByXsvpCDVA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@babel/runtime': ^7.23.2
 
   typesense@2.1.0:
     resolution: {integrity: sha512-a/IRTL+dRXlpRDU4UodyGj8hl5xBz3nKihVRd/KfSFAfFPGcpdX6lxIgwdXy3O6VLNNiEsN8YwIsPHQPVT0vNw==}
@@ -6160,6 +6169,14 @@ snapshots:
       mime-types: 3.0.2
 
   typescript@5.9.3: {}
+
+  typesense@1.8.2(@babel/runtime@7.29.2):
+    dependencies:
+      '@babel/runtime': 7.29.2
+      axios: 1.13.6
+      loglevel: 1.9.2
+    transitivePeerDependencies:
+      - debug
 
   typesense@2.1.0(@babel/runtime@7.29.2):
     dependencies:

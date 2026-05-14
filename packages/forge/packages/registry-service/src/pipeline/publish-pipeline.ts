@@ -30,6 +30,7 @@ import type { StorageBackend, BundleFiles } from '../storage/types.js';
 import type { AuditLog } from '../audit/audit-log.js';
 import type { AuthStrategy } from '../auth/types.js';
 import type { ServiceUser } from '../types.js';
+import type { RegistrySearchClient, ArtifactDocument } from '../search/registry-search.js';
 
 // ---------------------------------------------------------------------------
 // Supported types registry (mirrors @forge/core META_SCHEMAS)
@@ -116,6 +117,7 @@ export class PublishPipeline {
     private readonly auditLog: AuditLog,
     private readonly auth: AuthStrategy,
     private readonly serviceVersion: string,
+    private readonly search?: RegistrySearchClient,
   ) {}
 
   async run(input: PublishInput): Promise<PublishOutput> {
@@ -268,6 +270,35 @@ export class PublishPipeline {
       targetVersion: input.version,
       timestamp: publishedAt,
     });
+
+    // ── Step 9.5: Search indexing (best-effort) ───────────────────────────────
+    if (this.search) {
+      const richMeta = meta as {
+        id: string;
+        version: string;
+        name?: string;
+        description?: string;
+        tags?: string[];
+        verified?: boolean;
+      };
+
+      const doc: ArtifactDocument = {
+        id: `${type}:${input.id}:${input.version}`,
+        type,
+        artifact_id: input.id,
+        version: input.version,
+        name: richMeta.name ?? input.id,
+        description: richMeta.description ?? '',
+        tags: richMeta.tags ?? [],
+        verified: richMeta.verified ?? false,
+        publishedAt: Math.floor(new Date(publishedAt).getTime() / 1000),
+      };
+
+      // Fire-and-forget with best-effort error suppression
+      void this.search.indexArtifact(doc).catch(() => {
+        // Typesense unavailable — publish still succeeds
+      });
+    }
 
     // ── Step 10: Return result ────────────────────────────────────────────────
     return {

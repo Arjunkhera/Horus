@@ -24,6 +24,26 @@ export interface StoredVersionMeta {
 }
 
 /**
+ * Rich metadata about a stored artifact version, extended with search fields.
+ * Used for the cold-rebuild path.
+ */
+export interface ArtifactIndexMeta {
+  type: ArtifactType;
+  id: string;
+  version: string;
+  /** Display name — from metadata.yaml */
+  name?: string;
+  /** Description — from metadata.yaml */
+  description?: string;
+  /** Tags — from metadata.yaml */
+  tags?: string[];
+  /** Whether the artifact has been verified */
+  verified?: boolean;
+  /** Epoch ms when stored */
+  publishedAt: number;
+}
+
+/**
  * A complete bundle ready to be written atomically.
  * Keys are filenames (e.g., "metadata.yaml", "SKILL.md", "manifest.yaml").
  * Values are raw file contents as Buffer or string.
@@ -82,4 +102,13 @@ export interface StorageBackend {
    * List all stored versions for a given artifact, sorted descending.
    */
   listVersions(type: ArtifactType, id: string): Promise<string[]>;
+
+  /**
+   * Return lightweight metadata for every stored artifact across all types.
+   * Used for cold-rebuilding the search index on startup.
+   *
+   * Implementations may return best-effort data (e.g., name/description parsed
+   * from metadata.yaml if available, or left undefined otherwise).
+   */
+  listAll(): Promise<ArtifactIndexMeta[]>;
 }

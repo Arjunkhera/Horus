@@ -7,6 +7,7 @@ import { S3StorageBackend } from './storage/s3-backend.js';
 import { BuiltinAuthStrategy } from './auth/builtin.js';
 import { AuditLog } from './audit/audit-log.js';
 import { PublishPipeline } from './pipeline/publish-pipeline.js';
+import { RegistrySearchClient } from './search/registry-search.js';
 import { createApp } from './app.js';
 
 async function main(): Promise<void> {
@@ -32,18 +33,27 @@ async function main(): Promise<void> {
     bootstrapLogger as never, // pino is compatible with FastifyBaseLogger
   );
 
-  // 6. Create publish pipeline
+  // 6. Create search client (optional — disabled when Typesense not configured)
+  const search = RegistrySearchClient.create(config);
+  if (search) {
+    bootstrapLogger.info('Typesense search is enabled');
+  } else {
+    bootstrapLogger.info('Typesense search is disabled (FORGE_REGISTRY_TYPESENSE_HOST not set)');
+  }
+
+  // 7. Create publish pipeline
   const pipeline = new PublishPipeline(
     storage,
     auditLog,
     auth,
     config.server.coreVersion,
+    search ?? undefined,
   );
 
-  // 7. Build Fastify app
-  const app = createApp({ config, storage, auth, auditLog, pipeline });
+  // 8. Build Fastify app
+  const app = createApp({ config, storage, auth, auditLog, pipeline, search: search ?? undefined });
 
-  // 8. Verify storage is reachable before accepting traffic
+  // 9. Verify storage is reachable before accepting traffic
   try {
     await storage.ping();
     app.log.info('Storage backend is reachable');
@@ -52,7 +62,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 9. Start listening
+  // 10. Cold rebuild search index if empty
+  if (search) {
+    void search
+      .rebuild(storage, {
+        info: (msg) => app.log.info(msg),
+        warn: (obj, msg) => app.log.warn(obj, msg),
+      })
+      .catch(() => {
+        // rebuild is best-effort; startup continues regardless
+      });
+  }
+
+  // 11. Start listening
   const { host, port } = config.server;
   await app.listen({ host, port });
   app.log.info({ host, port }, `Forge Registry Service listening`);

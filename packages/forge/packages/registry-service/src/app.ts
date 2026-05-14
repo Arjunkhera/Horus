@@ -11,11 +11,13 @@ import type { StorageBackend } from './storage/types.js';
 import type { AuthStrategy } from './auth/types.js';
 import type { AuditLog } from './audit/audit-log.js';
 import type { PublishPipeline } from './pipeline/publish-pipeline.js';
+import type { RegistrySearchClient } from './search/registry-search.js';
 import { registerAuthMiddleware } from './auth/middleware.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerPublishRoute } from './routes/publish.js';
 import { registerReadRoutes } from './routes/read.js';
 import { registerTypeRoutes } from './routes/types.js';
+import { registerSearchRoute } from './routes/search.js';
 
 export interface AppDependencies {
   config: ServiceConfig;
@@ -23,6 +25,8 @@ export interface AppDependencies {
   auth: AuthStrategy;
   auditLog: AuditLog;
   pipeline: PublishPipeline;
+  /** Optional — search route is only registered when this is provided */
+  search?: RegistrySearchClient;
 }
 
 export function createApp(deps: AppDependencies): FastifyInstance {
@@ -51,6 +55,9 @@ export function createApp(deps: AppDependencies): FastifyInstance {
   registerPublishRoute(app, deps.pipeline);
   registerReadRoutes(app, deps.storage, deps.auditLog, deps.auth);
   registerTypeRoutes(app);
+  if (deps.search) {
+    registerSearchRoute(app, deps.search);
+  }
 
   // Global error handler
   app.setErrorHandler((err, _request, reply) => {

@@ -19,7 +19,7 @@ import {
 } from '@aws-sdk/client-s3';
 import * as semver from 'semver';
 import type { ArtifactType } from '@forge/core';
-import type { StorageBackend, StoredVersionMeta, BundleFiles, StoredBundle } from './types.js';
+import type { StorageBackend, StoredVersionMeta, BundleFiles, StoredBundle, ArtifactIndexMeta } from './types.js';
 import type { S3StorageConfig } from '../config.js';
 
 /**
@@ -261,5 +261,80 @@ export class S3StorageBackend implements StorageBackend {
     }
 
     return versions.sort((a, b) => semver.rcompare(a, b));
+  }
+
+  /**
+   * List metadata for every stored artifact version across all supported types.
+   *
+   * Strategy:
+   *   1. For each known type, list all artifact IDs using delimiter-based listing.
+   *   2. For each artifact ID, list all versions.
+   *   3. For each version, fetch getMeta() + attempt to read metadata.yaml for
+   *      name/description/tags/verified fields.
+   *
+   * This is an expensive operation and is only called during cold rebuild.
+   */
+  async listAll(): Promise<ArtifactIndexMeta[]> {
+    const { parse: parseYaml } = await import('yaml');
+    const TYPES: ArtifactType[] = ['skill', 'agent', 'plugin', 'persona', 'workspace-config'];
+    const results: ArtifactIndexMeta[] = [];
+
+    for (const type of TYPES) {
+      // List all artifact IDs for this type
+      const typePrefix = `${this.prefix}${typeSegment(type)}/`;
+      const listResp = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: typePrefix,
+          Delimiter: '/',
+        }),
+      );
+
+      for (const cp of listResp.CommonPrefixes ?? []) {
+        if (!cp.Prefix) continue;
+        const artifactId = cp.Prefix.slice(typePrefix.length).replace(/\/$/, '');
+        if (!artifactId) continue;
+
+        const versions = await this.listVersions(type, artifactId);
+        for (const version of versions) {
+          const meta = await this.getMeta(type, artifactId, version);
+          if (!meta) continue;
+
+          const entry: ArtifactIndexMeta = {
+            type,
+            id: artifactId,
+            version,
+            publishedAt: meta.publishedAt,
+          };
+
+          // Best-effort: read metadata.yaml for rich fields
+          try {
+            const metaKey = this.key(type, artifactId, version, 'metadata.yaml');
+            const getResp = await this.client.send(
+              new GetObjectCommand({ Bucket: this.bucket, Key: metaKey }),
+            );
+            if (getResp.Body) {
+              const chunks: Uint8Array[] = [];
+              const stream = getResp.Body as AsyncIterable<Uint8Array>;
+              for await (const chunk of stream) {
+                chunks.push(chunk);
+              }
+              const content = Buffer.concat(chunks).toString('utf8');
+              const parsed = parseYaml(content) as Record<string, unknown>;
+              if (typeof parsed['name'] === 'string') entry.name = parsed['name'];
+              if (typeof parsed['description'] === 'string') entry.description = parsed['description'];
+              if (Array.isArray(parsed['tags'])) entry.tags = parsed['tags'] as string[];
+              if (typeof parsed['verified'] === 'boolean') entry.verified = parsed['verified'];
+            }
+          } catch {
+            // Best-effort — missing metadata.yaml is fine, we just won't have rich fields
+          }
+
+          results.push(entry);
+        }
+      }
+    }
+
+    return results;
   }
 }
