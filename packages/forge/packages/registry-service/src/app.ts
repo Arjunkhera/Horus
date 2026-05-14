@@ -15,6 +15,7 @@ import { registerAuthMiddleware } from './auth/middleware.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerPublishRoute } from './routes/publish.js';
 import { registerReadRoutes } from './routes/read.js';
+import { registerTypeRoutes } from './routes/types.js';
 
 export interface AppDependencies {
   config: ServiceConfig;
@@ -49,6 +50,7 @@ export function createApp(deps: AppDependencies): FastifyInstance {
   registerHealthRoutes(app, deps.storage);
   registerPublishRoute(app, deps.pipeline);
   registerReadRoutes(app, deps.storage, deps.auditLog, deps.auth);
+  registerTypeRoutes(app);
 
   // Global error handler
   app.setErrorHandler((err, _request, reply) => {

@@ -23,7 +23,8 @@
     "@fastify/sensible": "^5.6.0",
     "semver": "^7.7.4",
     "yaml": "^2.4.0",
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
