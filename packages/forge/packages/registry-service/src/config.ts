@@ -26,36 +26,37 @@ const BuiltinAuthConfigSchema = z.object({
 
 const WebhookAuthConfigSchema = z.object({
   strategy: z.literal('webhook'),
-  /**
-   * URL of the external webhook that resolves identity and authorization.
-   * Must be a valid absolute URL.
-   */
-  webhookUrl: z.string().url(),
-  /**
-   * Optional shared secret for HMAC-SHA256 signature verification on webhook responses.
-   * Loaded from FORGE_REGISTRY_WEBHOOK_SECRET env var; never stored in YAML.
-   */
-  secret: z.string().optional(),
-});
-
-const TrustedHeadersAuthConfigSchema = z.object({
-  strategy: z.literal('trusted-headers'),
-  /**
-   * HTTP header whose value is treated as the authenticated user ID.
-   * Default: X-Forwarded-User
-   */
-  userIdHeader: z.string().default('X-Forwarded-User'),
-  /**
-   * Optional HTTP header whose value is treated as the user role.
-   * Default: X-Forwarded-Role
-   */
-  roleHeader: z.string().default('X-Forwarded-Role'),
+  webhook: z.object({
+    /** URL of the external authorization webhook */
+    url: z.string().url(),
+    /** Timeout in milliseconds before applying fail_mode (default: 500) */
+    timeout_ms: z.number().int().min(1).default(500),
+    /**
+     * What to do when the webhook times out or returns a non-2xx response.
+     * "deny" (default, safe) or "permit" (operator opt-in with a startup warning).
+     */
+    fail_mode: z.enum(['deny', 'permit']).default('deny'),
+    /**
+     * Which service actions trigger the webhook.
+     * "writes" (default): only publish/write actions go to webhook; reads are public.
+     * "all": reads also go through the webhook.
+     */
+    enforce_on: z.enum(['writes', 'all']).default('writes'),
+    /**
+     * List of request headers forwarded to the webhook.
+     * Use '*' to forward all headers (logs a security warning at startup).
+     */
+    header_allowlist: z.union([z.array(z.string()), z.literal('*')]).default([
+      'authorization',
+      'x-forwarded-for',
+      'x-real-ip',
+    ]),
+  }),
 });
 
 const AuthConfigSchema = z.discriminatedUnion('strategy', [
   BuiltinAuthConfigSchema,
   WebhookAuthConfigSchema,
-  TrustedHeadersAuthConfigSchema,
 ]);
 
 const S3StorageConfigSchema = z.object({
@@ -123,8 +124,6 @@ export type TypesenseConfig = z.infer<typeof TypesenseConfigSchema>;
 export type AdminUser = z.infer<typeof AdminUserSchema>;
 export type BuiltinAuthConfig = z.infer<typeof BuiltinAuthConfigSchema>;
 export type WebhookAuthConfig = z.infer<typeof WebhookAuthConfigSchema>;
-export type TrustedHeadersAuthConfig = z.infer<typeof TrustedHeadersAuthConfigSchema>;
-export type AuthConfig = z.infer<typeof AuthConfigSchema>;
 export type S3StorageConfig = z.infer<typeof S3StorageConfigSchema>;
 
 // ---------------------------------------------------------------------------
