@@ -1,0 +1,31 @@
+# This registry has been migrated
+
+This git repository (`Arjunkhera/Forge-Registry`) is **archived and read-only**.
+All Forge artifacts have been migrated to the new HTTP registry service.
+
+## New registry
+
+| Property | Value |
+|----------|-------|
+| URL | https://registry.example.com |
+| Migration date | YYYY-MM-DD |
+| Migrated by | <!-- your name / GitHub handle --> |
+
+## Using the new registry
+
+Update your `forge.yaml`:
+
+```yaml
+registry:
+  url: https://registry.example.com
+```
+
+## Historical content
+
+All artifact versions that existed in this git registry have been copied to the
+new HTTP service. Artifact coordinates (`type:id@version`) are unchanged, so
+any pinned references continue to resolve correctly.
+
+## Questions?
+
+Contact the platform team at platform@example.com.
