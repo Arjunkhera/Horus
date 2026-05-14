@@ -28,6 +28,8 @@ export interface AppDependencies {
   pipeline: PublishPipeline;
   /** Optional — search route is only registered when this is provided */
   search?: RegistrySearchClient;
+  /** Name of the active auth strategy — threaded into every audit entry */
+  strategyName?: string;
 }
 
 export function createApp(deps: AppDependencies): FastifyInstance {
@@ -54,7 +56,7 @@ export function createApp(deps: AppDependencies): FastifyInstance {
   // Routes
   registerHealthRoutes(app, deps.storage);
   registerPublishRoute(app, deps.pipeline);
-  registerReadRoutes(app, deps.storage, deps.auditLog, deps.auth);
+  registerReadRoutes(app, deps.storage, deps.auditLog, deps.auth, deps.strategyName ?? deps.config.auth.strategy);
   registerTypeRoutes(app);
   if (deps.search) {
     registerSearchRoute(app, deps.search);

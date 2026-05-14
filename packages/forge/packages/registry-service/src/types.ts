@@ -24,7 +24,7 @@ export interface ServiceUser {
 /**
  * Actions that can be authorized by the auth strategy.
  */
-export type ServiceAction = 'publish' | 'read';
+export type ServiceAction = 'publish' | 'read' | 'verify' | 'unverify';
 
 /**
  * Resource descriptor passed to authorization checks.

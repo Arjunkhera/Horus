@@ -135,6 +135,8 @@ export class PublishPipeline {
     private readonly auth: AuthStrategy,
     private readonly serviceVersion: string,
     private readonly search?: RegistrySearchClient,
+    /** Name of the active auth strategy — threaded into every audit entry */
+    private readonly strategyName: string = 'builtin',
   ) {}
 
   async run(input: PublishInput): Promise<PublishOutput> {
@@ -306,8 +308,11 @@ export class PublishPipeline {
 
     // ── Step 9: Audit log ─────────────────────────────────────────────────────
     await this.auditLog.append({
+      strategy: this.strategyName,
       actor: actorId,
       action: 'publish',
+      resource: `${type}:${input.id}@${input.version}`,
+      decision: 'permit',
       targetType: type,
       targetId: input.id,
       targetVersion: input.version,

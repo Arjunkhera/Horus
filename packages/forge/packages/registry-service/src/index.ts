@@ -4,7 +4,7 @@
 
 import { loadConfig } from './config.js';
 import { S3StorageBackend } from './storage/s3-backend.js';
-import { BuiltinAuthStrategy } from './auth/builtin.js';
+import { createAuthStrategy } from './auth/strategy-factory.js';
 import { AuditLog } from './audit/audit-log.js';
 import { PublishPipeline } from './pipeline/publish-pipeline.js';
 import { RegistrySearchClient } from './search/registry-search.js';
@@ -27,9 +27,11 @@ async function main(): Promise<void> {
   const bootstrapLogger = pino({ level: config.logLevel });
 
   // 5. Create auth strategy (bootstraps admin keys on first start)
-  const auth = new BuiltinAuthStrategy(
+  // createAuthStrategy uses the config.auth.strategy discriminated union to
+  // select and instantiate the correct strategy; fails-fast on unknown values.
+  const auth = createAuthStrategy(
+    config.auth,
     config.dbPath,
-    config.auth.admins,
     bootstrapLogger as never, // pino is compatible with FastifyBaseLogger
   );
 
@@ -48,6 +50,7 @@ async function main(): Promise<void> {
     auth,
     config.server.coreVersion,
     search ?? undefined,
+    config.auth.strategy,
   );
 
   // 8. Build Fastify app
@@ -84,9 +87,8 @@ async function main(): Promise<void> {
     app.log.info({ signal }, 'Received shutdown signal');
     await app.close();
     auditLog.close();
-    if (auth instanceof BuiltinAuthStrategy) {
-      auth.close();
-    }
+    // Strategies that hold resources (e.g. sqlite handles) implement close()
+    auth.close?.();
     process.exit(0);
   };
 

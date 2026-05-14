@@ -21,6 +21,7 @@ export function registerReadRoutes(
   storage: StorageBackend,
   auditLog: AuditLog,
   auth: AuthStrategy,
+  strategyName = 'builtin',
 ): void {
   // ── HEAD /artifacts/:type/:id/:version ─────────────────────────────────
   app.head<{ Params: ArtifactParams }>(
@@ -91,8 +92,11 @@ export function registerReadRoutes(
       // Audit read
       const actorId = request.serviceUser?.userId ?? 'anonymous';
       await auditLog.append({
+        strategy: strategyName,
         actor: actorId,
         action: 'read',
+        resource: `${type}:${id}@${version}`,
+        decision: 'permit',
         targetType: type,
         targetId: id,
         targetVersion: version,

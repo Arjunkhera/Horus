@@ -24,8 +24,38 @@ const BuiltinAuthConfigSchema = z.object({
   admins: z.array(AdminUserSchema).min(1),
 });
 
+const WebhookAuthConfigSchema = z.object({
+  strategy: z.literal('webhook'),
+  /**
+   * URL of the external webhook that resolves identity and authorization.
+   * Must be a valid absolute URL.
+   */
+  webhookUrl: z.string().url(),
+  /**
+   * Optional shared secret for HMAC-SHA256 signature verification on webhook responses.
+   * Loaded from FORGE_REGISTRY_WEBHOOK_SECRET env var; never stored in YAML.
+   */
+  secret: z.string().optional(),
+});
+
+const TrustedHeadersAuthConfigSchema = z.object({
+  strategy: z.literal('trusted-headers'),
+  /**
+   * HTTP header whose value is treated as the authenticated user ID.
+   * Default: X-Forwarded-User
+   */
+  userIdHeader: z.string().default('X-Forwarded-User'),
+  /**
+   * Optional HTTP header whose value is treated as the user role.
+   * Default: X-Forwarded-Role
+   */
+  roleHeader: z.string().default('X-Forwarded-Role'),
+});
+
 const AuthConfigSchema = z.discriminatedUnion('strategy', [
   BuiltinAuthConfigSchema,
+  WebhookAuthConfigSchema,
+  TrustedHeadersAuthConfigSchema,
 ]);
 
 const S3StorageConfigSchema = z.object({
@@ -92,6 +122,9 @@ export type RegistryConfig = ServiceConfig;
 export type TypesenseConfig = z.infer<typeof TypesenseConfigSchema>;
 export type AdminUser = z.infer<typeof AdminUserSchema>;
 export type BuiltinAuthConfig = z.infer<typeof BuiltinAuthConfigSchema>;
+export type WebhookAuthConfig = z.infer<typeof WebhookAuthConfigSchema>;
+export type TrustedHeadersAuthConfig = z.infer<typeof TrustedHeadersAuthConfigSchema>;
+export type AuthConfig = z.infer<typeof AuthConfigSchema>;
 export type S3StorageConfig = z.infer<typeof S3StorageConfigSchema>;
 
 // ---------------------------------------------------------------------------

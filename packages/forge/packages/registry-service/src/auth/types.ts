@@ -12,6 +12,11 @@ export type AuthDecision = 'permit' | 'deny';
 
 /**
  * Pluggable authentication + authorization interface.
+ *
+ * Implementing a new strategy requires only this interface.
+ * Adding a 4th strategy requires zero changes to the core service —
+ * only config.ts (new discriminated union arm) and strategy-factory.ts
+ * (new switch case) need updating.
  */
 export interface AuthStrategy {
   /**
@@ -29,4 +34,10 @@ export interface AuthStrategy {
     action: ServiceAction,
     resource: ServiceResource,
   ): AuthDecision;
+
+  /**
+   * Optional cleanup hook called during graceful shutdown.
+   * Strategies that hold open file handles or connections should implement this.
+   */
+  close?(): void;
 }

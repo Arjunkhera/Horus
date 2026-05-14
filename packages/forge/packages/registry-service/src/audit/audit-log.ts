@@ -11,12 +11,16 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import initSqlJs from 'sql.js';
 import type { Database, SqlJsStatic } from 'sql.js';
 
-export type AuditAction = 'publish' | 'read';
+export type AuditAction = 'publish' | 'read' | 'verify' | 'unverify';
 
 export interface AuditEntry {
   id?: number;
+  /** Name of the auth strategy that resolved this identity (e.g. 'builtin', 'webhook', 'trusted-headers') */
+  strategy: string;
   actor: string;
   action: AuditAction;
+  resource: string;
+  decision: 'permit' | 'deny';
   targetType: string;
   targetId: string;
   targetVersion: string;
@@ -42,8 +46,11 @@ async function openDb(dbPath: string): Promise<{ SQL: SqlJsStatic; db: Database 
   db.run(`
     CREATE TABLE IF NOT EXISTS audit_log (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      strategy     TEXT    NOT NULL,
       actor        TEXT    NOT NULL,
       action       TEXT    NOT NULL,
+      resource     TEXT    NOT NULL,
+      decision     TEXT    NOT NULL,
       target_type  TEXT    NOT NULL,
       target_id    TEXT    NOT NULL,
       target_ver   TEXT    NOT NULL,
@@ -53,6 +60,8 @@ async function openDb(dbPath: string): Promise<{ SQL: SqlJsStatic; db: Database 
     CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor);
     CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
     CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_strategy ON audit_log(strategy);
+    CREATE INDEX IF NOT EXISTS idx_audit_decision ON audit_log(decision);
   `);
 
   // Flush to disk immediately
@@ -84,15 +93,20 @@ export class AuditLog {
 
   /**
    * Append a new audit entry.
+   * One row per privileged action; fields match the AC:
+   *   strategy, userId (actor), action, resource, decision, timestamp
    */
   async append(entry: Omit<AuditEntry, 'id'>): Promise<void> {
     await this.ensureInit();
     this.db.run(
-      `INSERT INTO audit_log (actor, action, target_type, target_id, target_ver, timestamp, meta)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO audit_log (strategy, actor, action, resource, decision, target_type, target_id, target_ver, timestamp, meta)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        entry.strategy,
         entry.actor,
         entry.action,
+        entry.resource,
+        entry.decision,
         entry.targetType,
         entry.targetId,
         entry.targetVersion,
@@ -111,9 +125,9 @@ export class AuditLog {
     await this.ensureInit();
 
     const sql = actor
-      ? `SELECT id, actor, action, target_type, target_id, target_ver, timestamp, meta
+      ? `SELECT id, strategy, actor, action, resource, decision, target_type, target_id, target_ver, timestamp, meta
          FROM audit_log WHERE actor = ? ORDER BY id DESC LIMIT ?`
-      : `SELECT id, actor, action, target_type, target_id, target_ver, timestamp, meta
+      : `SELECT id, strategy, actor, action, resource, decision, target_type, target_id, target_ver, timestamp, meta
          FROM audit_log ORDER BY id DESC LIMIT ?`;
 
     const params = actor ? [actor, limit] : [limit];
@@ -126,8 +140,11 @@ export class AuditLog {
       cols.forEach((col, i) => { obj[col] = row[i]; });
       return {
         id: obj['id'] as number,
+        strategy: obj['strategy'] as string,
         actor: obj['actor'] as string,
         action: obj['action'] as AuditAction,
+        resource: obj['resource'] as string,
+        decision: obj['decision'] as 'permit' | 'deny',
         targetType: obj['target_type'] as string,
         targetId: obj['target_id'] as string,
         targetVersion: obj['target_ver'] as string,
