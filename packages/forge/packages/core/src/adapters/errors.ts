@@ -190,3 +190,53 @@ export class PublishValidationError extends ForgeError {
     this.name = 'PublishValidationError';
   }
 }
+
+/**
+ * Structured field-level issue from pre-upload Zod validation.
+ */
+export interface ValidationIssue {
+  path: string;
+  message: string;
+}
+
+/**
+ * Thrown by HttpAdapter when client-side pre-upload Zod validation fails.
+ * Surfaces the same field-level issue structure as the server would return,
+ * without making an HTTP round-trip.
+ */
+export class PreUploadValidationError extends ForgeError {
+  public readonly issues: ValidationIssue[];
+
+  constructor(type: string, issues: ValidationIssue[]) {
+    const summary = issues.map((i) => `${i.path}: ${i.message}`).join('; ');
+    super(
+      'PRE_UPLOAD_VALIDATION_ERROR',
+      `Invalid ${type} metadata: ${summary}`,
+      `Fix the validation errors in your artifact metadata before publishing`,
+    );
+    this.name = 'PreUploadValidationError';
+    this.issues = issues;
+  }
+}
+
+/**
+ * Thrown by HttpAdapter when the registry rejects a publish with a 409 or 426
+ * status indicating an incompatible forge/core version.
+ *
+ * The `minimumCoreVersion` field tells the caller what version to upgrade to.
+ */
+export class ForgeCoreVersionMismatchError extends ForgeError {
+  public readonly minimumCoreVersion: string;
+  public readonly currentCoreVersion: string;
+
+  constructor(minimumCoreVersion: string, currentCoreVersion: string) {
+    super(
+      'FORGE_CORE_VERSION_MISMATCH',
+      `Your forge/core is too old for this registry. Upgrade to >= ${minimumCoreVersion}.`,
+      `Run your package manager to upgrade @forge/core to at least version ${minimumCoreVersion}`,
+    );
+    this.name = 'ForgeCoreVersionMismatchError';
+    this.minimumCoreVersion = minimumCoreVersion;
+    this.currentCoreVersion = currentCoreVersion;
+  }
+}
