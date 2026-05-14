@@ -22,9 +22,16 @@ version: '0.1.0'
 target: claude-code
 
 registries:
-  - type: filesystem
+  # Personal local registry service (writable, highest priority)
+  # Run: forge registry start --port 4873
+  - type: http
     name: local
-    path: ./registry
+    url: http://localhost:4873
+    writable: true
+  # Public global registry (read-only fallback)
+  - type: http
+    name: global
+    url: https://registry.horus.dev/v1
 
 artifacts:
   skills: {}

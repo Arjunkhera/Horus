@@ -21,3 +21,4 @@ export {
 export { FilesystemAdapter } from './filesystem-adapter.js';
 export { CompositeAdapter } from './composite-adapter.js';
 export { GitAdapter, type GitAdapterConfig } from './git-adapter.js';
+export { HttpAdapter, type HttpAdapterConfig } from './http-adapter.js';

@@ -17,6 +17,7 @@ import { upsertManagedSection, removeManagedSection } from './compiler/claude-md
 import { FilesystemAdapter } from './adapters/filesystem-adapter.js';
 import { CompositeAdapter } from './adapters/composite-adapter.js';
 import { GitAdapter } from './adapters/git-adapter.js';
+import { HttpAdapter } from './adapters/http-adapter.js';
 import type { DataAdapter } from './adapters/types.js';
 import type {
   ArtifactRef,
@@ -1225,35 +1226,26 @@ export class ForgeCore {
 
   /**
    * Instantiate the correct DataAdapter for a registry config entry.
+   *
+   * V1 supports only `type: http` registries. Passing any other type
+   * throws a ForgeError with a clear message (R16).
    */
   private buildAdapter(reg: RegistryConfig): DataAdapter {
-    switch (reg.type) {
-      case 'filesystem': {
-        const registryPath = path.isAbsolute(reg.path)
-          ? reg.path
-          : path.join(this.workspaceRoot, reg.path);
-        return new FilesystemAdapter(registryPath);
-      }
-      case 'git': {
-        return new GitAdapter({
-          url: reg.url,
-          ref: reg.ref ?? reg.branch ?? 'main',
-          registryPath: reg.path,
-        });
-      }
-      case 'http':
-        throw new ForgeError(
-          'UNSUPPORTED',
-          `HTTP registries are not yet implemented (registry: '${reg.name}')`,
-          'Use a filesystem or git registry instead.',
-        );
-      default:
-        throw new ForgeError(
-          'INVALID_CONFIG',
-          `Unknown registry type in config`,
-          'Supported types: filesystem, git',
-        );
+    if (reg.type !== 'http') {
+      throw new ForgeError(
+        'UNSUPPORTED_REGISTRY_TYPE',
+        `V1 supports only type: http registries (registry: '${reg.name}', got type: '${reg.type}')`,
+        'Update forge.yaml to use type: http registries only.',
+      );
     }
+
+    // Resolve bearer token: explicit token field takes precedence over tokenEnv
+    let token = reg.token;
+    if (!token && reg.tokenEnv) {
+      token = process.env[reg.tokenEnv];
+    }
+
+    return new HttpAdapter({ baseUrl: reg.url, token });
   }
 
   private parseRef(refStr: string): ArtifactRef {
