@@ -266,6 +266,7 @@ export function buildComposeEnv(
     VAULT_ROUTER_PORT:        String(ports.vault_router),
     [vaultPortEnvVar]:        String(ports.vault_svc),
     TYPESENSE_PORT:           String(ports.typesense),
+    READER_PORT:              String(ports.ui),
     UI_PORT:                  String(ports.ui),
     // TEST_PORT_* vars for overlay reference (harmless duplicates after above fix)
     TEST_PORT_ANVIL:        String(ports.anvil),
@@ -284,19 +285,31 @@ export async function composeUp(
   ports: SlotPorts,
   slotDataPath: string,
   defaultVaultName = 'default',
+  imageOverrides?: Record<string, string>,
 ): Promise<void> {
   const env = buildComposeEnv(runtime, ports, slotDataPath, defaultVaultName);
-  const result = await execa(
-    runtime.name,
-    [
-      'compose',
-      '-p', projectName,
-      '-f', join(HORUS_DIR, 'docker-compose.yml'),
-      '-f', join(HORUS_DIR, 'docker-compose.test.yml'),
-      'up', '-d',
-    ],
-    { cwd: HORUS_DIR, env, reject: false },
-  );
+
+  const composeArgs = [
+    'compose',
+    '-p', projectName,
+    '-f', join(HORUS_DIR, 'docker-compose.yml'),
+    '-f', join(HORUS_DIR, 'docker-compose.test.yml'),
+  ];
+
+  if (imageOverrides && Object.keys(imageOverrides).length > 0) {
+    const overrideYaml = {
+      services: Object.fromEntries(
+        Object.entries(imageOverrides).map(([svc, img]) => [svc, { image: img }]),
+      ),
+    };
+    const overridePath = join(slotDataPath, 'docker-compose.image-overrides.json');
+    writeFileSync(overridePath, JSON.stringify(overrideYaml, null, 2));
+    composeArgs.push('-f', overridePath);
+  }
+
+  composeArgs.push('up', '-d');
+
+  const result = await execa(runtime.name, composeArgs, { cwd: HORUS_DIR, env, reject: false });
   if (result.exitCode !== 0) {
     throw new Error(
       `Failed to start shadow stack (project ${projectName}):\n${result.stderr}`,
@@ -321,7 +334,7 @@ export async function composeDown(
 
 // ── Health polling ───────────────────────────────────────────────────────────
 
-const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense'] as const;
+const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense', 'reader-server'] as const;
 
 async function checkContainerHealthByProject(
   runtime: Runtime,

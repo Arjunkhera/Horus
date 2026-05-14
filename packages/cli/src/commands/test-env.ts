@@ -4,6 +4,7 @@ import ora from 'ora';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
+import { writeFileSync } from 'node:fs';
 import { loadConfig } from '../lib/config.js';
 import { detectRuntime } from '../lib/runtime.js';
 import {
@@ -37,6 +38,7 @@ testEnvCommand
   .command('acquire')
   .description('Start a shadow stack on alternate ports with isolated data')
   .option('--timeout <seconds>', 'Max wait for health checks (default: 120)', '120')
+  .option('--image <overrides...>', 'Override service images (format: service=image:tag)')
   .action(async (opts) => {
     const config = loadConfig();
     const dataDir = config.data_dir;
@@ -99,10 +101,23 @@ testEnvCommand
       dataPath: slotDataPath,
     });
 
+    // Parse --image overrides
+    const imageOverrides: Record<string, string> = {};
+    if (opts.image) {
+      for (const entry of opts.image as string[]) {
+        const eqIdx = entry.indexOf('=');
+        if (eqIdx < 1) {
+          console.error(chalk.red(`Invalid --image format: "${entry}". Expected: service=image:tag`));
+          process.exit(1);
+        }
+        imageOverrides[entry.slice(0, eqIdx)] = entry.slice(eqIdx + 1);
+      }
+    }
+
     // Start shadow stack
     const upSpinner = ora(`Starting shadow stack (project ${chalk.cyan(project)})...`).start();
     try {
-      await composeUp(runtime, project, ports, slotDataPath, defaultVaultName);
+      await composeUp(runtime, project, ports, slotDataPath, defaultVaultName, imageOverrides);
       upSpinner.succeed(`Shadow stack started`);
     } catch (error) {
       upSpinner.fail('Failed to start shadow stack');
@@ -123,6 +138,17 @@ testEnvCommand
         healthSpinner.text = `Waiting for services... ${parts}`;
       });
       healthSpinner.succeed('All services healthy');
+
+      // Write MCP settings file so an agent session can connect to the shadow stack
+      const mcpSettings = {
+        mcpServers: {
+          'anvil-dev': { type: 'http', url: `http://localhost:${ports.anvil}` },
+          'vault-dev': { type: 'http', url: `http://localhost:${ports.vault_mcp}` },
+          'forge-dev': { type: 'http', url: `http://localhost:${ports.forge}` },
+        },
+      };
+      const settingsPath = join(slotDataPath, 'claude-settings.json');
+      writeFileSync(settingsPath, JSON.stringify(mcpSettings, null, 2));
     } catch (error) {
       healthSpinner.fail('Health check failed');
       await composeDown(runtime, project, ports, slotDataPath, defaultVaultName);
@@ -155,6 +181,11 @@ testEnvCommand
     console.log(`  export TEST_FORGE_URL=http://localhost:${ports.forge}`);
     console.log(`  export TEST_VAULT_MCP_URL=http://localhost:${ports.vault_mcp}`);
     console.log(`  export TEST_DATA_PATH=${slotDataPath}`);
+    console.log('');
+    const settingsPath = join(slotDataPath, 'claude-settings.json');
+    console.log(chalk.bold('Agent dev mode:'));
+    console.log(`  MCP config: ${chalk.dim(settingsPath)}`);
+    console.log(`  Launch:     ${chalk.cyan(`claude --mcp-config ${settingsPath}`)}`);
     console.log('');
     console.log(chalk.dim(`Run ${chalk.bold(`horus test-env seed --slot ${slot}`)} to populate with fixtures.`));
     console.log(chalk.dim(`Run ${chalk.bold(`horus test-env release --slot ${slot}`)} when done.`));
