@@ -81,8 +81,26 @@ const S3StorageConfigSchema = z.object({
   forcePathStyle: z.boolean().default(false),
 });
 
+const GitStorageConfigSchema = z.object({
+  backend: z.literal('git'),
+  /** Remote git repository URL to clone and push artifacts into. */
+  url: z.string().min(1),
+  /**
+   * Absolute path to the SSH deploy key file inside the container.
+   * Injected via FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH env var.
+   * Not stored in YAML — mount the key as a Docker secret or volume.
+   */
+  deployKeyPath: z.string().optional(),
+  /**
+   * Absolute path where the registry service will clone the remote repo
+   * inside the container (default: /data/registry/git-store).
+   */
+  localPath: z.string().default('/data/registry/git-store'),
+});
+
 const StorageConfigSchema = z.discriminatedUnion('backend', [
   S3StorageConfigSchema,
+  GitStorageConfigSchema,
 ]);
 
 const ServerConfigSchema = z.object({
@@ -126,6 +144,7 @@ export type BuiltinAuthConfig = z.infer<typeof BuiltinAuthConfigSchema>;
 export type TrustedHeadersAuthConfig = z.infer<typeof TrustedHeadersAuthConfigSchema>;
 export type TrustedHeadersJwtConfig = z.infer<typeof TrustedHeadersJwtConfigSchema>;
 export type S3StorageConfig = z.infer<typeof S3StorageConfigSchema>;
+export type GitStorageConfig = z.infer<typeof GitStorageConfigSchema>;
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -162,33 +181,64 @@ export function loadConfig(): ServiceConfig {
   if (process.env['FORGE_REGISTRY_PORT']) server['port'] = parseInt(process.env['FORGE_REGISTRY_PORT'], 10);
   if (process.env['FORGE_REGISTRY_CORE_VERSION']) server['coreVersion'] = process.env['FORGE_REGISTRY_CORE_VERSION'];
 
-  // S3 credentials — only from env, strip from any raw yaml value
-  const storage = (raw['storage'] as Record<string, unknown> | undefined) ?? {};
-  if (storage['accessKeyId']) delete storage['accessKeyId'];
-  if (storage['secretAccessKey']) delete storage['secretAccessKey'];
+  // Determine which storage backend is active ─────────────────────────────
+  const rawStorage = (raw['storage'] as Record<string, unknown> | undefined) ?? {};
+  const storageBackend =
+    (process.env['FORGE_REGISTRY_STORAGE_BACKEND'] as string | undefined) ??
+    (rawStorage['backend'] as string | undefined) ??
+    's3';
 
-  // Inject credentials from env
-  const s3Config: Record<string, unknown> = { ...storage };
-  if (process.env['FORGE_REGISTRY_S3_BUCKET']) s3Config['bucket'] = process.env['FORGE_REGISTRY_S3_BUCKET'];
-  if (process.env['FORGE_REGISTRY_S3_REGION']) s3Config['region'] = process.env['FORGE_REGISTRY_S3_REGION'];
-  if (process.env['FORGE_REGISTRY_S3_PREFIX']) s3Config['prefix'] = process.env['FORGE_REGISTRY_S3_PREFIX'];
-  if (process.env['FORGE_REGISTRY_S3_ENDPOINT']) s3Config['endpoint'] = process.env['FORGE_REGISTRY_S3_ENDPOINT'];
-  if (process.env['FORGE_REGISTRY_S3_FORCE_PATH_STYLE']) {
-    s3Config['forcePathStyle'] = process.env['FORGE_REGISTRY_S3_FORCE_PATH_STYLE'] === 'true';
-  }
+  let resolvedStorage: Record<string, unknown>;
 
-  // Inject credentials last so file values can never override
-  if (process.env['FORGE_REGISTRY_S3_ACCESS_KEY_ID']) {
-    s3Config['accessKeyId'] = process.env['FORGE_REGISTRY_S3_ACCESS_KEY_ID'];
-  }
-  if (process.env['FORGE_REGISTRY_S3_SECRET_ACCESS_KEY']) {
-    s3Config['secretAccessKey'] = process.env['FORGE_REGISTRY_S3_SECRET_ACCESS_KEY'];
+  if (storageBackend === 'git') {
+    // Git backend — credentials (deploy key path) only from env
+    const gitConfig: Record<string, unknown> = {
+      backend: 'git',
+      ...((rawStorage['backend'] === 'git' ? rawStorage : {}) as Record<string, unknown>),
+    };
+    // Strip any deploy key that may have leaked into the yaml
+    delete gitConfig['deployKeyPath'];
+
+    if (process.env['FORGE_REGISTRY_GIT_URL']) {
+      gitConfig['url'] = process.env['FORGE_REGISTRY_GIT_URL'];
+    }
+    if (process.env['FORGE_REGISTRY_GIT_LOCAL_PATH']) {
+      gitConfig['localPath'] = process.env['FORGE_REGISTRY_GIT_LOCAL_PATH'];
+    }
+    // Deploy key path — only from env so credentials stay in the container
+    if (process.env['FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH']) {
+      gitConfig['deployKeyPath'] = process.env['FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH'];
+    }
+    resolvedStorage = gitConfig;
+  } else {
+    // S3 backend (default)
+    // Strip credentials from any raw yaml value — only from env
+    const s3Raw = rawStorage['backend'] === 's3' ? { ...rawStorage } : {};
+    delete (s3Raw as Record<string, unknown>)['accessKeyId'];
+    delete (s3Raw as Record<string, unknown>)['secretAccessKey'];
+
+    const s3Config: Record<string, unknown> = { backend: 's3', ...s3Raw };
+    if (process.env['FORGE_REGISTRY_S3_BUCKET']) s3Config['bucket'] = process.env['FORGE_REGISTRY_S3_BUCKET'];
+    if (process.env['FORGE_REGISTRY_S3_REGION']) s3Config['region'] = process.env['FORGE_REGISTRY_S3_REGION'];
+    if (process.env['FORGE_REGISTRY_S3_PREFIX']) s3Config['prefix'] = process.env['FORGE_REGISTRY_S3_PREFIX'];
+    if (process.env['FORGE_REGISTRY_S3_ENDPOINT']) s3Config['endpoint'] = process.env['FORGE_REGISTRY_S3_ENDPOINT'];
+    if (process.env['FORGE_REGISTRY_S3_FORCE_PATH_STYLE']) {
+      s3Config['forcePathStyle'] = process.env['FORGE_REGISTRY_S3_FORCE_PATH_STYLE'] === 'true';
+    }
+    // Inject credentials last so file values can never override
+    if (process.env['FORGE_REGISTRY_S3_ACCESS_KEY_ID']) {
+      s3Config['accessKeyId'] = process.env['FORGE_REGISTRY_S3_ACCESS_KEY_ID'];
+    }
+    if (process.env['FORGE_REGISTRY_S3_SECRET_ACCESS_KEY']) {
+      s3Config['secretAccessKey'] = process.env['FORGE_REGISTRY_S3_SECRET_ACCESS_KEY'];
+    }
+    resolvedStorage = s3Config;
   }
 
   const combined: Record<string, unknown> = {
     ...raw,
     server,
-    storage: s3Config,
+    storage: resolvedStorage,
   };
 
   if (process.env['FORGE_REGISTRY_DB_PATH']) combined['dbPath'] = process.env['FORGE_REGISTRY_DB_PATH'];

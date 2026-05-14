@@ -3,8 +3,8 @@
  */
 
 import { loadConfig } from './config.js';
-import { S3StorageBackend } from './storage/s3-backend.js';
-import { createAuthStrategy } from './auth/strategy-factory.js';
+import { createStorageBackend } from './storage/factory.js';
+import { BuiltinAuthStrategy } from './auth/builtin.js';
 import { AuditLog } from './audit/audit-log.js';
 import { PublishPipeline } from './pipeline/publish-pipeline.js';
 import { RegistrySearchClient } from './search/registry-search.js';
@@ -14,8 +14,8 @@ async function main(): Promise<void> {
   // 1. Load and validate config (fails-closed on bad config / missing credentials)
   const config = loadConfig();
 
-  // 2. Create storage backend
-  const storage = new S3StorageBackend(config.storage);
+  // 2. Create storage backend (S3 or Git, determined by config)
+  const storage = createStorageBackend(config);
 
   // 3. Create audit log (sqlite)
   const auditLog = new AuditLog(config.dbPath);
@@ -27,11 +27,9 @@ async function main(): Promise<void> {
   const bootstrapLogger = pino({ level: config.logLevel });
 
   // 5. Create auth strategy (bootstraps admin keys on first start)
-  // createAuthStrategy uses the config.auth.strategy discriminated union to
-  // select and instantiate the correct strategy; fails-fast on unknown values.
-  const auth = createAuthStrategy(
-    config.auth,
+  const auth = new BuiltinAuthStrategy(
     config.dbPath,
+    config.auth.admins,
     bootstrapLogger as never, // pino is compatible with FastifyBaseLogger
   );
 
@@ -50,7 +48,6 @@ async function main(): Promise<void> {
     auth,
     config.server.coreVersion,
     search ?? undefined,
-    config.auth.strategy,
   );
 
   // 8. Build Fastify app
@@ -87,8 +84,9 @@ async function main(): Promise<void> {
     app.log.info({ signal }, 'Received shutdown signal');
     await app.close();
     auditLog.close();
-    // Strategies that hold resources (e.g. sqlite handles) implement close()
-    auth.close?.();
+    if (auth instanceof BuiltinAuthStrategy) {
+      auth.close();
+    }
     process.exit(0);
   };
 

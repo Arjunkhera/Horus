@@ -304,7 +304,20 @@ export class PublishPipeline {
     const bundleFiles: BundleFiles = new Map(input.files);
     bundleFiles.set('manifest.yaml', manifestYaml);
 
-    await this.storage.writeBundle(type, input.id, input.version, bundleFiles);
+    try {
+      await this.storage.writeBundle(type, input.id, input.version, bundleFiles);
+    } catch (err) {
+      // Map storage-level concurrent-write rejection (ECONFLICT) to 409
+      const nodeErr = err as NodeJS.ErrnoException;
+      if (nodeErr.code === 'ECONFLICT') {
+        throw new PipelineError(
+          409,
+          'PUBLISH_CONFLICT',
+          `A publish is already in progress — please retry after the current publish completes`,
+        );
+      }
+      throw err;
+    }
 
     // ── Step 9: Audit log ─────────────────────────────────────────────────────
     await this.auditLog.append({

@@ -51,6 +51,8 @@ LABEL org.opencontainers.image.title="Forge Registry Service" \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \
       ca-certificates \
+      git \
+      openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -ms /bin/bash forge

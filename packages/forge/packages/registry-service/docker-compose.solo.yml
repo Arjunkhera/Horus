@@ -1,0 +1,110 @@
+version: "3.9"
+
+# Solo-developer compose for Forge Registry Service.
+#
+# Uses a personal git repository as the storage backend instead of S3 —
+# no cloud credentials required. Artifacts are committed and pushed to
+# FORGE_REGISTRY_GIT_URL on every publish.
+#
+# Prerequisites:
+#   1. Set FORGE_REGISTRY_GIT_URL in workspace.env (or export it).
+#   2. Optionally mount an SSH deploy key and set FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH.
+#   3. Generate an admin API key: openssl rand -hex 32
+#      Then set FORGE_REGISTRY_ADMIN_KEY in workspace.env.
+#
+# Usage:
+#   source workspace.env
+#   docker compose -f docker-compose.solo.yml up --build
+#
+# The registry is reachable at http://localhost:8744
+# Typesense is at http://localhost:8108 (solo-only internal key)
+
+services:
+  # ─── Forge Registry ─────────────────────────────────────────────────────────
+  forge-registry:
+    build:
+      # Build context must be the monorepo root so @forge/core can be resolved.
+      # Run this compose from the registry-service directory:
+      #   docker compose -f docker-compose.solo.yml up --build
+      context: ../../../../..
+      dockerfile: packages/forge/packages/registry-service/Dockerfile
+    image: ghcr.io/arjunkhera/forge-registry:solo
+    container_name: forge-registry
+    restart: unless-stopped
+    ports:
+      - "8744:8744"
+    environment:
+      FORGE_REGISTRY_HOST: "0.0.0.0"
+      FORGE_REGISTRY_PORT: "8744"
+      FORGE_REGISTRY_LOG_LEVEL: "${FORGE_REGISTRY_LOG_LEVEL:-info}"
+      FORGE_REGISTRY_DB_PATH: "/data/registry/forge-registry.db"
+
+      # ── Storage backend: git ────────────────────────────────────────────────
+      # Switch to the git backend (no S3 credentials needed)
+      FORGE_REGISTRY_STORAGE_BACKEND: "git"
+      # Git repo URL — set in workspace.env (SSH or HTTPS)
+      FORGE_REGISTRY_GIT_URL: "${FORGE_REGISTRY_GIT_URL}"
+      # Where the registry clones the repo inside the container
+      FORGE_REGISTRY_GIT_LOCAL_PATH: "/data/registry/git-store"
+      # Optional: absolute path to the mounted SSH deploy key inside the container
+      # Set FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH=/run/secrets/deploy_key in workspace.env
+      # and mount the key via the `secrets` section below (uncomment as needed).
+      FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH: "${FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH:-}"
+
+      # ── Auth: builtin with a single local admin key ─────────────────────────
+      # auth.strategy is set to builtin by default in config.
+      # The FORGE_REGISTRY_CONFIG env var points to the config file below.
+      FORGE_REGISTRY_CONFIG: "/etc/forge-registry/config.yaml"
+
+      # ── Typesense ───────────────────────────────────────────────────────────
+      FORGE_REGISTRY_TYPESENSE_HOST: "typesense"
+      FORGE_REGISTRY_TYPESENSE_PORT: "8108"
+      FORGE_REGISTRY_TYPESENSE_API_KEY: "solo-local-key"
+    volumes:
+      - registry-data:/data/registry
+      # Solo config file (provides auth.strategy: builtin + admin user)
+      - ./config/solo.yaml:/etc/forge-registry/config.yaml:ro
+      # Deploy key mount — uncomment and set FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH
+      # to the path below if using an SSH deploy key:
+      # - ${FORGE_REGISTRY_DEPLOY_KEY_FILE}:/run/secrets/deploy_key:ro
+    depends_on:
+      typesense:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - forge-solo-net
+
+  # ─── Typesense ──────────────────────────────────────────────────────────────
+  typesense:
+    image: typesense/typesense:0.25.2
+    container_name: forge-typesense-solo
+    restart: unless-stopped
+    ports:
+      - "8108:8108"
+    environment:
+      TYPESENSE_DATA_DIR: "/typesense-data"
+      TYPESENSE_API_KEY: "solo-local-key"
+      TYPESENSE_ENABLE_CORS: "true"
+    volumes:
+      - typesense-data:/typesense-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - forge-solo-net
+
+volumes:
+  registry-data:
+  typesense-data:
+
+networks:
+  forge-solo-net:
+    driver: bridge
