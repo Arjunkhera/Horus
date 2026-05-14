@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+tests
+*.test.ts
+*.spec.ts
+vitest.config.ts
+vitest.config.js
+*.tsbuildinfo
+coverage
+*.log
+.env
+.env.*

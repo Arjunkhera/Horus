@@ -1,0 +1,128 @@
+version: "3.9"
+
+# Local development compose for Forge Registry Service.
+#
+# Starts:
+#   - forge-registry  — the registry HTTP service (built from local source)
+#   - typesense        — search backend
+#   - minio            — S3-compatible object storage (stands in for AWS S3)
+#   - minio-init       — one-shot bucket bootstrapper
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# The registry service is reachable at http://localhost:8744
+# MinIO console is at http://localhost:9001 (user: minioadmin / minioadmin)
+# Typesense is at http://localhost:8108
+
+services:
+  # ─── Forge Registry ─────────────────────────────────────────────────────────
+  forge-registry:
+    build:
+      # Build context is the monorepo root so @forge/core can be resolved.
+      context: ../../../../..
+      dockerfile: packages/forge/packages/registry-service/Dockerfile
+    image: ghcr.io/arjunkhera/forge-registry:dev
+    container_name: forge-registry
+    restart: unless-stopped
+    ports:
+      - "8744:8744"
+    environment:
+      FORGE_REGISTRY_HOST: "0.0.0.0"
+      FORGE_REGISTRY_PORT: "8744"
+      FORGE_REGISTRY_LOG_LEVEL: "debug"
+      FORGE_REGISTRY_DB_PATH: "/data/registry/forge-registry.db"
+
+      # S3 / MinIO
+      FORGE_REGISTRY_S3_BUCKET: "forge-registry"
+      FORGE_REGISTRY_S3_REGION: "us-east-1"
+      FORGE_REGISTRY_S3_ENDPOINT: "http://minio:9000"
+      FORGE_REGISTRY_S3_FORCE_PATH_STYLE: "true"
+      FORGE_REGISTRY_S3_ACCESS_KEY_ID: "minioadmin"
+      FORGE_REGISTRY_S3_SECRET_ACCESS_KEY: "minioadmin"
+
+      # Point to a local YAML config if needed (optional)
+      # FORGE_REGISTRY_CONFIG: "/etc/forge-registry/config.yaml"
+    volumes:
+      - registry-data:/data/registry
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks:
+      - forge-net
+
+  # ─── Typesense ──────────────────────────────────────────────────────────────
+  typesense:
+    image: typesense/typesense:0.25.2
+    container_name: forge-typesense
+    restart: unless-stopped
+    ports:
+      - "8108:8108"
+    environment:
+      TYPESENSE_DATA_DIR: "/typesense-data"
+      TYPESENSE_API_KEY: "xyz-local-dev-key"
+      TYPESENSE_ENABLE_CORS: "true"
+    volumes:
+      - typesense-data:/typesense-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    networks:
+      - forge-net
+
+  # ─── MinIO (S3-compatible local storage) ────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: forge-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console (minioadmin / minioadmin)
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    networks:
+      - forge-net
+
+  # ─── MinIO bucket bootstrapper (runs once) ──────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: forge-minio-init
+    entrypoint: >
+      /bin/sh -c "
+        until mc alias set local http://minio:9000 minioadmin minioadmin; do
+          echo 'Waiting for MinIO...' && sleep 2;
+        done;
+        mc mb --ignore-existing local/forge-registry;
+        echo 'Bucket ready.';
+      "
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - forge-net
+
+volumes:
+  registry-data:
+  typesense-data:
+  minio-data:
+
+networks:
+  forge-net:
+    driver: bridge

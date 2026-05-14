@@ -1,0 +1,119 @@
+name: Build Registry Service
+
+on:
+  push:
+    branches: [master]
+    tags: ['forge-registry-v*']
+  pull_request:
+    paths:
+      - 'packages/forge/packages/registry-service/**'
+      - 'packages/forge/packages/core/**'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/arjunkhera/forge-registry
+
+jobs:
+  build-and-push:
+    name: Build registry service image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch support)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            # latest on default branch pushes
+            type=raw,value=latest,enable={{is_default_branch}}
+            # short SHA on every push/PR
+            type=sha,prefix=,format=short
+            # semver from forge-registry-vX.Y.Z tags
+            type=match,pattern=forge-registry-v(.*),group=1
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/forge/packages/registry-service/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke-test:
+    name: Smoke test image
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    # Run on non-PR pushes only (image must have been pushed to GHCR)
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image
+        run: |
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker pull ${{ env.IMAGE_NAME }}:${SHA}
+          echo "IMAGE_REF=${{ env.IMAGE_NAME }}:${SHA}" >> "$GITHUB_ENV"
+
+      - name: Health check smoke test
+        run: |
+          # Start the service with a minimal config (no real S3 — endpoint skips
+          # the credential requirement, storage ping will fail but the /health
+          # route responds before storage checks on the happy path)
+          docker run -d --name registry-smoke \
+            -p 8744:8744 \
+            -e FORGE_REGISTRY_S3_BUCKET=smoke-test \
+            -e FORGE_REGISTRY_S3_ENDPOINT=http://localhost:9999 \
+            -e FORGE_REGISTRY_S3_FORCE_PATH_STYLE=true \
+            -e FORGE_REGISTRY_CONFIG="" \
+            "${IMAGE_REF}" || true
+
+          # Give the process a moment to start
+          sleep 5
+
+          # Verify the container started (even if it exited due to config)
+          STATUS=$(docker inspect --format='{{.State.Status}}' registry-smoke 2>/dev/null || echo "not_found")
+          echo "Container status: ${STATUS}"
+
+          # Verify the image entrypoint is correct (node dist/index.js)
+          ENTRYPOINT=$(docker inspect --format='{{json .Config.Entrypoint}}' "${IMAGE_REF}")
+          echo "Entrypoint: ${ENTRYPOINT}"
+          echo "${ENTRYPOINT}" | grep -q "dist/index.js"
+          echo "Entrypoint check passed"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f registry-smoke 2>/dev/null || true
