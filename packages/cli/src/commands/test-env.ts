@@ -26,6 +26,7 @@ import {
   projectName,
   preSeedNotesDir,
   preSeedVaultDirs,
+  preSeedRegistryDir,
 } from '../lib/test-env.js';
 
 // ── horus test-env ───────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ testEnvCommand
     try {
       await preSeedNotesDir(dataDir, slotDataPath);
       await preSeedVaultDirs(dataDir, slotDataPath, vaultNames);
+      await preSeedRegistryDir(dataDir, slotDataPath);
       seedSpinner.succeed('Git repos ready');
     } catch (error) {
       seedSpinner.fail(`Pre-seed failed: ${(error as Error).message}`);

@@ -1,12 +1,14 @@
 import {
   existsSync,
   mkdirSync,
+  chmodSync,
   readFileSync,
   writeFileSync,
   rmSync,
   readdirSync,
   cpSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
@@ -214,13 +216,24 @@ export function createSlotDirs(slotDataPath: string, vaultNames: string[] = ['de
     'neo4j-logs',
   ];
   for (const dir of dirs) {
-    mkdirSync(join(slotDataPath, dir), { recursive: true });
+    const full = join(slotDataPath, dir);
+    mkdirSync(full, { recursive: true });
+    // Allow any container UID to write into these dirs
+    chmodSync(full, 0o777);
   }
 }
 
 export function removeSlotDirs(slotDataPath: string): void {
-  if (existsSync(slotDataPath)) {
+  if (!existsSync(slotDataPath)) return;
+  try {
     rmSync(slotDataPath, { recursive: true, force: true });
+  } catch {
+    // Containers write files as non-ubuntu UIDs (e.g. neo4j UID 7474); fall back to sudo
+    try {
+      execFileSync('sudo', ['rm', '-rf', slotDataPath]);
+    } catch {
+      // Best-effort — leave stale dir if sudo also fails
+    }
   }
 }
 
@@ -276,6 +289,31 @@ export async function preSeedVaultDirs(dataDir: string, slotDataPath: string, va
         'commit', '--allow-empty', '-m', 'init',
       ]);
     }
+  }
+}
+
+/**
+ * Pre-seed the forge registry dir with a git repo so Forge starts without needing
+ * FORGE_REGISTRY_REPO_URL.
+ */
+export async function preSeedRegistryDir(dataDir: string, slotDataPath: string): Promise<void> {
+  const srcRegistryPath = join(dataDir, 'registry');
+  const destRegistryPath = join(slotDataPath, 'registry');
+
+  if (existsSync(join(srcRegistryPath, '.git'))) {
+    if (existsSync(destRegistryPath)) {
+      rmSync(destRegistryPath, { recursive: true });
+    }
+    await execa('git', ['clone', '--local', srcRegistryPath, destRegistryPath]);
+    chmodSync(destRegistryPath, 0o777);
+  } else {
+    await execa('git', ['-C', destRegistryPath, 'init']);
+    await execa('git', [
+      '-C', destRegistryPath,
+      '-c', 'user.email=horus@local',
+      '-c', 'user.name=Horus',
+      'commit', '--allow-empty', '-m', 'init',
+    ]);
   }
 }
 
