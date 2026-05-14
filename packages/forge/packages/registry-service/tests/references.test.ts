@@ -109,6 +109,9 @@ function makeStorage(
     writeBundle: vi.fn().mockResolvedValue(undefined),
     readBundle: readBundleFn,
     listVersions: vi.fn().mockResolvedValue([]),
+    listAll: vi.fn().mockResolvedValue([]),
+    isVerified: vi.fn().mockResolvedValue(false),
+    isVersionRevoked: vi.fn().mockResolvedValue(false),
   };
 }
 
@@ -486,7 +489,7 @@ describe('GET /artifacts/:type/:id/:version/deps', () => {
     expect(response.json().error).toBe('UNKNOWN_TYPE');
   });
 
-  it('each dep node has verified: false', async () => {
+  it('each dep node has verified: false when storage returns unverified', async () => {
     const agentYaml = makeAgentMetaYaml({
       references: [{ type: 'skill', id: 'my-skill', version: '1.0.0' }],
     });
@@ -509,5 +512,79 @@ describe('GET /artifacts/:type/:id/:version/deps', () => {
     const body = response.json();
     expect(body.verified).toBe(false);
     expect(body.deps[0].verified).toBe(false);
+  });
+
+  it('sets verified: true on nodes when isVerified returns true', async () => {
+    const skillYaml = makeSkillMetaYaml();
+    const bundles = new Map([['skill:my-skill@1.0.0', skillYaml]]);
+    const existing = new Set(['skill:my-skill@1.0.0']);
+
+    // Build storage with isVerified returning true for all artifacts
+    const storage = makeStorage(existing, bundles);
+    (storage.isVerified as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+
+    const app = buildDepsApp(storage);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/artifacts/skill/my-skill/1.0.0/deps',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.verified).toBe(true);
+  });
+
+  it('sets verified: false when version is revoked even if artifact-level isVerified is true', async () => {
+    const skillYaml = makeSkillMetaYaml();
+    const bundles = new Map([['skill:my-skill@1.0.0', skillYaml]]);
+    const existing = new Set(['skill:my-skill@1.0.0']);
+
+    // Artifact-level verified = true, but this specific version is revoked
+    const storage = makeStorage(existing, bundles);
+    (storage.isVerified as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (storage.isVersionRevoked as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+
+    const app = buildDepsApp(storage);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/artifacts/skill/my-skill/1.0.0/deps',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    // Per-version revocation overrides artifact-id level verification
+    expect(body.verified).toBe(false);
+  });
+
+  it('install proceeds and returns dep verification summary (no-block policy)', async () => {
+    // Verify the endpoint still returns 200 even with unverified deps —
+    // the caller (installer) receives the tree and decides what to show.
+    const agentYaml = makeAgentMetaYaml({
+      references: [{ type: 'skill', id: 'my-skill', version: '1.0.0' }],
+    });
+    const skillYaml = makeSkillMetaYaml();
+    const bundles = new Map([
+      ['agent:my-agent@1.0.0', agentYaml],
+      ['skill:my-skill@1.0.0', skillYaml],
+    ]);
+    const existing = new Set(['agent:my-agent@1.0.0', 'skill:my-skill@1.0.0']);
+
+    // Only the agent is verified; the dep skill is not
+    const storage = makeStorage(existing, bundles);
+    (storage.isVerified as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_type: string, id: string) => id === 'my-agent',
+    );
+
+    const app = buildDepsApp(storage);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/artifacts/agent/my-agent/1.0.0/deps',
+    });
+
+    // Endpoint succeeds (no block on unverified deps)
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.verified).toBe(true);           // agent is verified
+    expect(body.deps[0].verified).toBe(false);  // skill dep is unverified
   });
 });

@@ -52,6 +52,8 @@ export const WorkspaceConfigMetaSchema = z.object({
   git_workflow: GitWorkflowConfigSchema.default({}),
   claude_permissions: ClaudePermissionsSchema.optional(),
   references: z.array(ArtifactReferenceSchema).default([]).optional(),
+  /** Whether this artifact has been verified by the registry operator */
+  verified: z.boolean().optional(),
 });
 
 export type WorkspaceConfigMeta = z.infer<typeof WorkspaceConfigMetaSchema>;

@@ -17,6 +17,65 @@ import { parse as parseYaml } from 'yaml';
 
 const startTime = Date.now();
 
+// ─── Dep verification helpers ──────────────────────────────────────────────
+
+interface DepVerificationSummary {
+  total: number;
+  verified: number;
+  unverified: number;
+  summaryLine: string;
+}
+
+/**
+ * Walk a ResolvedArtifact tree and count how many deps are verified vs unverified.
+ * Uses the `verified` field from artifact metadata (populated from metadata.yaml).
+ * The root artifact is included in the count.
+ */
+function countVerifiedDeps(
+  artifact: import('@forge/core').ResolvedArtifact,
+  seen: Set<string> = new Set(),
+): { verified: number; unverified: number } {
+  const key = `${artifact.ref.type}:${artifact.ref.id}@${artifact.ref.version}`;
+  if (seen.has(key)) {
+    return { verified: 0, unverified: 0 };
+  }
+  seen.add(key);
+
+  const isVerified = (artifact.bundle.meta as Record<string, unknown>)['verified'] === true;
+  let verified = isVerified ? 1 : 0;
+  let unverified = isVerified ? 0 : 1;
+
+  for (const dep of artifact.dependencies) {
+    const childCounts = countVerifiedDeps(dep, seen);
+    verified += childCounts.verified;
+    unverified += childCounts.unverified;
+  }
+
+  return { verified, unverified };
+}
+
+function buildDepVerificationSummary(
+  artifacts: import('@forge/core').ResolvedArtifact[],
+): DepVerificationSummary {
+  let totalVerified = 0;
+  let totalUnverified = 0;
+  const seen = new Set<string>();
+
+  for (const artifact of artifacts) {
+    const counts = countVerifiedDeps(artifact, seen);
+    totalVerified += counts.verified;
+    totalUnverified += counts.unverified;
+  }
+
+  const total = totalVerified + totalUnverified;
+  return {
+    total,
+    verified: totalVerified,
+    unverified: totalUnverified,
+    summaryLine: `Resolved ${total} dep${total !== 1 ? 's' : ''}: ${totalVerified} verified, ${totalUnverified} unverified`,
+  };
+}
+
 /**
  * Content file names for each artifact type.
  * Must stay in sync with CONTENT_FILES in filesystem-adapter.ts.
@@ -483,6 +542,12 @@ function buildServer(workspaceRoot: string): Server {
           const workspacePath = path.join('/data/workspaces', workspaceId);
           const forgeForWorkspace = new ForgeCore(workspacePath);
           const report = await forgeForWorkspace.install({ target: target as any, dryRun });
+
+          // Build dep verification summary from the resolved artifacts
+          const depSummary = report.resolvedArtifacts
+            ? buildDepVerificationSummary(report.resolvedArtifacts)
+            : null;
+
           return {
             content: [{
               type: 'text',
@@ -493,6 +558,7 @@ function buildServer(workspaceRoot: string): Server {
                 conflicts: report.conflicts.length,
                 duration: `${report.duration}ms`,
                 dryRun: dryRun ?? false,
+                ...(depSummary ? { depVerification: depSummary } : {}),
               }, null, 2),
             }],
           };
@@ -501,6 +567,10 @@ function buildServer(workspaceRoot: string): Server {
         case 'forge_resolve': {
           const { ref } = args as { ref: string };
           const resolved = await forge.resolve(ref);
+
+          // Build dep verification summary (includes the root artifact itself)
+          const depSummary = buildDepVerificationSummary([resolved]);
+
           return {
             content: [{
               type: 'text',
@@ -510,7 +580,9 @@ function buildServer(workspaceRoot: string): Server {
                 version: resolved.bundle.meta.version,
                 name: resolved.bundle.meta.name,
                 description: resolved.bundle.meta.description,
+                verified: (resolved.bundle.meta as Record<string, unknown>)['verified'] === true,
                 dependencies: resolved.dependencies.map(d => `${d.ref.type}:${d.ref.id}`),
+                depVerification: depSummary,
               }, null, 2),
             }],
           };

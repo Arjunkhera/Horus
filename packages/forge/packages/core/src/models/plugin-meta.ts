@@ -28,6 +28,8 @@ export const PluginMetaSchema = z.object({
   homepage: z.string().url().optional(),
   repository: z.string().optional(),
   references: z.array(ArtifactReferenceSchema).default([]).optional(),
+  /** Whether this artifact has been verified by the registry operator */
+  verified: z.boolean().optional(),
 });
 
 export type PluginMeta = z.infer<typeof PluginMetaSchema>;

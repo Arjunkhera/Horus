@@ -79,6 +79,8 @@ export interface InstallReport {
   filesWritten: string[];
   conflicts: ConflictRecord[];
   duration: number;
+  /** Resolved artifacts including dep trees — populated for verification summary display */
+  resolvedArtifacts?: ResolvedArtifact[];
 }
 
 /**

@@ -57,16 +57,6 @@ export type BundleFiles = Map<string, Buffer | string>;
 export type StoredBundle = Map<string, Buffer>;
 
 /**
- * Stored per-version unverify override record.
- */
-export interface VersionUnverifyOverride {
-  verified: false;
-  revokedBy: string;
-  revokedAt: string; // ISO 8601
-  reason?: string;
-}
-
-/**
  * Server-side versioned storage backend.
  */
 export interface StorageBackend {
@@ -123,36 +113,17 @@ export interface StorageBackend {
   listAll(): Promise<ArtifactIndexMeta[]>;
 
   /**
-<<<<<<< HEAD
-   * Set the verified flag for an artifact-id (not per-version).
-   * All current and future versions of this artifact-id inherit the flag.
-   */
-  setVerified(type: ArtifactType, id: string, verified: boolean): Promise<void>;
-
-  /**
-   * Check whether an artifact-id has been verified.
-   * Returns false if the artifact-id has no verification record.
+   * Check whether an artifact (by type + id) is verified at the artifact-id level.
+   * Reads the `verified` field from the latest version's metadata.yaml.
+   * Returns false if the artifact is not found, has no metadata, or is not verified.
    */
   isVerified(type: ArtifactType, id: string): Promise<boolean>;
-=======
-   * Mark a specific artifact version as unverified (revoked).
-   * Idempotent: calling multiple times has no adverse effect.
-   *
-   * Stored as a per-version override that takes precedence over the
-   * artifact-id-level verified flag.
-   */
-  setVersionUnverified(
-    type: ArtifactType,
-    id: string,
-    version: string,
-    revokedBy: string,
-    reason?: string,
-  ): Promise<void>;
 
   /**
-   * Check whether a specific version has a per-version unverify override.
-   * Returns true if the version has been explicitly revoked.
+   * Check whether a specific version of an artifact has been revoked.
+   * Per-version revocations set verified=false on the specific version node,
+   * regardless of artifact-id level verification.
+   * Returns false (not revoked) if no per-version override exists.
    */
-  isVersionUnverified(type: ArtifactType, id: string, version: string): Promise<boolean>;
->>>>>>> f461db5 (feat(registry-service): add per-version verification revocation [1d.2])
+  isVersionRevoked(type: ArtifactType, id: string, version: string): Promise<boolean>;
 }

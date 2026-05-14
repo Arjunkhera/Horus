@@ -302,6 +302,7 @@ export class ForgeCore {
       filesWritten: [],
       conflicts: [],
       duration: 0,
+      resolvedArtifacts: resolved,
     };
 
     if (!options.dryRun) {

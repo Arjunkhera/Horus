@@ -75,6 +75,39 @@ async function getReferences(
 }
 
 /**
+ * Determine the verified flag for a specific artifact version node.
+ *
+ * Merge logic:
+ *   - Start with artifact-id level verification (from latest version's metadata.yaml)
+ *   - If a per-version revocation file exists, override to false
+ *   - Default to false if storage methods are unavailable or an error occurs
+ */
+async function resolveVerified(
+  storage: StorageBackend,
+  type: ArtifactType,
+  id: string,
+  version: string,
+): Promise<boolean> {
+  try {
+    // Check per-version revocation first (takes precedence)
+    if (storage.isVersionRevoked) {
+      const revoked = await storage.isVersionRevoked(type, id, version);
+      if (revoked) return false;
+    }
+
+    // Fall back to artifact-id level verification
+    if (storage.isVerified) {
+      return storage.isVerified(type, id);
+    }
+
+    return false;
+  } catch {
+    // Treat any error as unverified (safe default)
+    return false;
+  }
+}
+
+/**
  * Recursively walk references, building the dep tree.
  * `visiting` is the current DFS path (for cycle detection).
  * `visited` is a cache of already-built subtrees (for deduplication).
@@ -116,11 +149,14 @@ async function buildDepTree(
 
   visiting.delete(key);
 
+  // Resolve verification state for this node
+  const verified = await resolveVerified(storage, type, id, version);
+
   const node: DepNode = {
     type,
     id,
     version,
-    verified: false,
+    verified,
     deps: depChildren,
   };
 
