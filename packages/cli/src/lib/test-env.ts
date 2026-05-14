@@ -1,12 +1,14 @@
 import {
   existsSync,
   mkdirSync,
+  chmodSync,
   readFileSync,
   writeFileSync,
   rmSync,
   readdirSync,
   cpSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
@@ -38,6 +40,8 @@ export interface SlotPorts {
   forge: number;
   typesense: number;
   ui: number;
+  neo4j_http: number;
+  neo4j_bolt: number;
 }
 
 export interface SlotStatus {
@@ -85,6 +89,8 @@ const PORT_OFFSETS = {
   vault_mcp: 100,
   forge: 150,
   ui: 160,
+  neo4j_http: 174,
+  neo4j_bolt: 187,
 } as const;
 
 export function loadTestEnvConfig(dataDir: string): TestEnvConfig {
@@ -118,6 +124,8 @@ export function calcPorts(slot: number, basePort: number): SlotPorts {
     vault_mcp:    base + PORT_OFFSETS.vault_mcp,
     forge:        base + PORT_OFFSETS.forge,
     ui:           base + PORT_OFFSETS.ui,
+    neo4j_http:   base + PORT_OFFSETS.neo4j_http,
+    neo4j_bolt:   base + PORT_OFFSETS.neo4j_bolt,
   };
 }
 
@@ -198,19 +206,34 @@ export function createSlotDirs(slotDataPath: string, vaultNames: string[] = ['de
   const dirs = [
     'notes',
     ...vaultNames.map(name => join('vaults', name)),
+    'config',
     'registry',
     'workspaces',
     'sessions',
+    'repos',
     'typesense-data',
+    'neo4j-data',
+    'neo4j-logs',
   ];
   for (const dir of dirs) {
-    mkdirSync(join(slotDataPath, dir), { recursive: true });
+    const full = join(slotDataPath, dir);
+    mkdirSync(full, { recursive: true });
+    // Allow any container UID to write into these dirs
+    chmodSync(full, 0o777);
   }
 }
 
 export function removeSlotDirs(slotDataPath: string): void {
-  if (existsSync(slotDataPath)) {
+  if (!existsSync(slotDataPath)) return;
+  try {
     rmSync(slotDataPath, { recursive: true, force: true });
+  } catch {
+    // Containers write files as non-ubuntu UIDs (e.g. neo4j UID 7474); fall back to sudo
+    try {
+      execFileSync('sudo', ['rm', '-rf', slotDataPath]);
+    } catch {
+      // Best-effort — leave stale dir if sudo also fails
+    }
   }
 }
 
@@ -230,12 +253,63 @@ export async function preSeedNotesDir(dataDir: string, slotDataPath: string): Pr
     if (existsSync(destNotesPath)) {
       rmSync(destNotesPath, { recursive: true });
     }
-    await execa('git', ['clone', '--local', srcNotesPath, destNotesPath]);
+    await execa('git', ['clone', '--no-hardlinks', srcNotesPath, destNotesPath]);
   } else {
     // Fallback: init a minimal git repo so Anvil doesn't try to HTTPS-clone
     await execa('git', ['-C', destNotesPath, 'init']);
     await execa('git', [
       '-C', destNotesPath,
+      '-c', 'user.email=horus@local',
+      '-c', 'user.name=Horus',
+      'commit', '--allow-empty', '-m', 'init',
+    ]);
+  }
+}
+
+/**
+ * Pre-seed vault data dirs so each vault service starts with a valid git repo
+ * instead of attempting an HTTPS clone on startup.
+ */
+export async function preSeedVaultDirs(dataDir: string, slotDataPath: string, vaultNames: string[]): Promise<void> {
+  for (const name of vaultNames) {
+    const srcVaultPath = join(dataDir, 'vaults', name);
+    const destVaultPath = join(slotDataPath, 'vaults', name);
+
+    if (existsSync(join(srcVaultPath, '.git'))) {
+      if (existsSync(destVaultPath)) {
+        rmSync(destVaultPath, { recursive: true });
+      }
+      await execa('git', ['clone', '--no-hardlinks', srcVaultPath, destVaultPath]);
+    } else {
+      await execa('git', ['-C', destVaultPath, 'init']);
+      await execa('git', [
+        '-C', destVaultPath,
+        '-c', 'user.email=horus@local',
+        '-c', 'user.name=Horus',
+        'commit', '--allow-empty', '-m', 'init',
+      ]);
+    }
+  }
+}
+
+/**
+ * Pre-seed the forge registry dir with a git repo so Forge starts without needing
+ * FORGE_REGISTRY_REPO_URL.
+ */
+export async function preSeedRegistryDir(dataDir: string, slotDataPath: string): Promise<void> {
+  const srcRegistryPath = join(dataDir, 'registry');
+  const destRegistryPath = join(slotDataPath, 'registry');
+
+  if (existsSync(join(srcRegistryPath, '.git'))) {
+    if (existsSync(destRegistryPath)) {
+      rmSync(destRegistryPath, { recursive: true });
+    }
+    await execa('git', ['clone', '--no-hardlinks', srcRegistryPath, destRegistryPath]);
+    chmodSync(destRegistryPath, 0o777);
+  } else {
+    await execa('git', ['-C', destRegistryPath, 'init']);
+    await execa('git', [
+      '-C', destRegistryPath,
       '-c', 'user.email=horus@local',
       '-c', 'user.name=Horus',
       'commit', '--allow-empty', '-m', 'init',
@@ -275,6 +349,10 @@ export function buildComposeEnv(
     TEST_PORT_VAULT_MCP:    String(ports.vault_mcp),
     TEST_PORT_FORGE:        String(ports.forge),
     TEST_PORT_UI:           String(ports.ui),
+    NEO4J_HTTP_PORT:        String(ports.neo4j_http),
+    NEO4J_BOLT_PORT:        String(ports.neo4j_bolt),
+    TEST_PORT_NEO4J_HTTP:   String(ports.neo4j_http),
+    TEST_PORT_NEO4J_BOLT:   String(ports.neo4j_bolt),
   };
 }
 
@@ -284,19 +362,31 @@ export async function composeUp(
   ports: SlotPorts,
   slotDataPath: string,
   defaultVaultName = 'default',
+  imageOverrides?: Record<string, string>,
 ): Promise<void> {
   const env = buildComposeEnv(runtime, ports, slotDataPath, defaultVaultName);
-  const result = await execa(
-    runtime.name,
-    [
-      'compose',
-      '-p', projectName,
-      '-f', join(HORUS_DIR, 'docker-compose.yml'),
-      '-f', join(HORUS_DIR, 'docker-compose.test.yml'),
-      'up', '-d',
-    ],
-    { cwd: HORUS_DIR, env, reject: false },
-  );
+
+  const composeArgs = [
+    'compose',
+    '-p', projectName,
+    '-f', join(HORUS_DIR, 'docker-compose.yml'),
+    '-f', join(HORUS_DIR, 'docker-compose.test.yml'),
+  ];
+
+  if (imageOverrides && Object.keys(imageOverrides).length > 0) {
+    const overrideYaml = {
+      services: Object.fromEntries(
+        Object.entries(imageOverrides).map(([svc, img]) => [svc, { image: img }]),
+      ),
+    };
+    const overridePath = join(slotDataPath, 'docker-compose.image-overrides.json');
+    writeFileSync(overridePath, JSON.stringify(overrideYaml, null, 2));
+    composeArgs.push('-f', overridePath);
+  }
+
+  composeArgs.push('up', '-d', '--force-recreate');
+
+  const result = await execa(runtime.name, composeArgs, { cwd: HORUS_DIR, env, reject: false });
   if (result.exitCode !== 0) {
     throw new Error(
       `Failed to start shadow stack (project ${projectName}):\n${result.stderr}`,
@@ -321,7 +411,7 @@ export async function composeDown(
 
 // ── Health polling ───────────────────────────────────────────────────────────
 
-const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense'] as const;
+const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense', 'neo4j'] as const;
 
 async function checkContainerHealthByProject(
   runtime: Runtime,

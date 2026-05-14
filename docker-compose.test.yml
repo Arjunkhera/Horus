@@ -51,6 +51,6 @@ services:
     volumes:
       - "${TEST_DATA_PATH:-/tmp/horus-test}/typesense-data:/data"
 
-  horus-ui:
+  reader-server:
     ports:
       - "${TEST_PORT_UI:-9260}:8400"
