@@ -19,7 +19,7 @@ import {
 } from '@aws-sdk/client-s3';
 import * as semver from 'semver';
 import type { ArtifactType } from '@forge/core';
-import type { StorageBackend, StoredVersionMeta, BundleFiles, StoredBundle, ArtifactIndexMeta } from './types.js';
+import type { StorageBackend, StoredVersionMeta, BundleFiles, StoredBundle, ArtifactIndexMeta, VersionUnverifyOverride } from './types.js';
 import type { S3StorageConfig } from '../config.js';
 
 /**
@@ -78,6 +78,14 @@ export class S3StorageBackend implements StorageBackend {
    */
   private versionPrefix(type: ArtifactType, id: string, version: string): string {
     return `${this.prefix}${typeSegment(type)}/${id}/${version}/`;
+  }
+
+  /**
+   * Build the S3 key for a per-version unverify override.
+   * Layout: {prefix}verified-overrides/{type}s/{id}/{version}.json
+   */
+  private overrideKey(type: ArtifactType, id: string, version: string): string {
+    return `${this.prefix}verified-overrides/${typeSegment(type)}/${id}/${version}.json`;
   }
 
   async ping(): Promise<boolean> {
@@ -384,5 +392,50 @@ export class S3StorageBackend implements StorageBackend {
     }
 
     return results;
+  }
+
+  async setVersionUnverified(
+    type: ArtifactType,
+    id: string,
+    version: string,
+    revokedBy: string,
+    reason?: string,
+  ): Promise<void> {
+    const override: VersionUnverifyOverride = {
+      verified: false,
+      revokedBy,
+      revokedAt: new Date().toISOString(),
+      ...(reason !== undefined ? { reason } : {}),
+    };
+
+    const key = this.overrideKey(type, id, version);
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: JSON.stringify(override),
+        ContentType: 'application/json; charset=utf-8',
+      }),
+    );
+  }
+
+  async isVersionUnverified(type: ArtifactType, id: string, version: string): Promise<boolean> {
+    const key = this.overrideKey(type, id, version);
+    try {
+      await this.client.send(
+        new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      return true;
+    } catch (err: unknown) {
+      const code = (err as { name?: string; $metadata?: { httpStatusCode?: number } });
+      if (
+        code.name === 'NotFound' ||
+        code.name === 'NoSuchKey' ||
+        code.$metadata?.httpStatusCode === 404
+      ) {
+        return false;
+      }
+      throw err;
+    }
   }
 }

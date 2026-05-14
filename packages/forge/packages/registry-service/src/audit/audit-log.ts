@@ -11,7 +11,11 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import initSqlJs from 'sql.js';
 import type { Database, SqlJsStatic } from 'sql.js';
 
+<<<<<<< HEAD
 export type AuditAction = 'publish' | 'read' | 'verify' | 'unverify';
+=======
+export type AuditAction = 'publish' | 'read' | 'unverify';
+>>>>>>> f461db5 (feat(registry-service): add per-version verification revocation [1d.2])
 
 export interface AuditEntry {
   id?: number;

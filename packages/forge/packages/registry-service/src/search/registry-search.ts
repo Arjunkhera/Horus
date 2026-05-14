@@ -70,27 +70,30 @@ interface TypesenseClientConfig {
   connectionTimeoutSeconds?: number;
 }
 
+interface TypesenseDocumentsHandle {
+  upsert: (doc: Record<string, unknown>) => Promise<unknown>;
+  search: (params: Record<string, unknown>) => Promise<TypesenseSearchResponse>;
+}
+
+interface TypesenseDocumentHandle {
+  update: (patch: Record<string, unknown>) => Promise<unknown>;
+}
+
+interface TypesenseCollectionHandle {
+  documents: () => TypesenseDocumentsHandle;
+  document: (id: string) => TypesenseDocumentHandle;
+  retrieve: () => Promise<{ num_documents: number }>;
+  delete: () => Promise<unknown>;
+}
+
+interface TypesenseCollectionsHandle {
+  (name: string): TypesenseCollectionHandle;
+  create: (schema: Record<string, unknown>) => Promise<unknown>;
+  retrieveAll: () => Promise<Array<{ name: string }>>;
+}
+
 interface TypesenseClient {
-  collections: (name: string) => {
-    documents: () => {
-      upsert: (doc: Record<string, unknown>) => Promise<unknown>;
-      search: (params: Record<string, unknown>) => Promise<TypesenseSearchResponse>;
-    };
-    retrieve: () => Promise<{ num_documents: number }>;
-    delete: () => Promise<unknown>;
-  };
-  collections: {
-    (name: string): {
-      documents: () => {
-        upsert: (doc: Record<string, unknown>) => Promise<unknown>;
-        search: (params: Record<string, unknown>) => Promise<TypesenseSearchResponse>;
-      };
-      retrieve: () => Promise<{ num_documents: number }>;
-      delete: () => Promise<unknown>;
-    };
-    create: (schema: Record<string, unknown>) => Promise<unknown>;
-    retrieveAll: () => Promise<Array<{ name: string }>>;
-  };
+  collections: TypesenseCollectionsHandle;
 }
 
 interface TypesenseSearchResponse {
@@ -170,6 +173,32 @@ export class RegistrySearchClient {
     } catch (err) {
       if (logger) {
         logger.warn({ err, artifactId: doc.artifact_id }, 'Search indexing failed (non-fatal)');
+      }
+    }
+  }
+
+  // ── Partial update ──────────────────────────────────────────────────────────
+
+  /**
+   * Patch the `verified` field on an existing Typesense document.
+   * Uses the document-level PATCH API so other fields are preserved.
+   * Best-effort: if Typesense is unavailable or the document doesn't exist yet,
+   * logs a warning and returns.
+   */
+  async setDocumentVerified(
+    type: string,
+    artifactId: string,
+    version: string,
+    verified: boolean,
+    logger?: { warn: (obj: unknown, msg: string) => void },
+  ): Promise<void> {
+    try {
+      await this.ensureCollection();
+      const docId = `${type}:${artifactId}:${version}`;
+      await this.ts.collections(COLLECTION).document(docId).update({ verified });
+    } catch (err) {
+      if (logger) {
+        logger.warn({ err, type, artifactId, version }, 'Search verified-field patch failed (non-fatal)');
       }
     }
   }
@@ -272,6 +301,16 @@ export class RegistrySearchClient {
       let indexed = 0;
 
       for (const meta of allMeta) {
+        // Per-version override: if this version has been explicitly unverified,
+        // that takes precedence over the artifact-id-level verified flag.
+        let verified = meta.verified ?? false;
+        try {
+          const isUnverified = await storage.isVersionUnverified(meta.type, meta.id, meta.version);
+          if (isUnverified) verified = false;
+        } catch {
+          // Best-effort — missing override means no revocation
+        }
+
         const doc: ArtifactDocument = {
           id: `${meta.type}:${meta.id}:${meta.version}`,
           type: meta.type,
@@ -280,7 +319,7 @@ export class RegistrySearchClient {
           name: meta.name ?? meta.id,
           description: meta.description ?? '',
           tags: meta.tags ?? [],
-          verified: meta.verified ?? false,
+          verified,
           publishedAt: Math.floor(meta.publishedAt / 1000),
         };
 

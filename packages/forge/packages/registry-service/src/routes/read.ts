@@ -123,11 +123,16 @@ export function registerReadRoutes(
         files[filename] = buf.toString('base64');
       }
 
+      // Per-version verification override: if this version was explicitly revoked,
+      // surface verified: false regardless of the artifact-id-level flag.
+      const versionUnverified = await storage.isVersionUnverified(type as ArtifactType, id, version);
+
       return reply.status(200).send({
         type,
         id,
         version,
         files,
+        ...(versionUnverified ? { verified: false } : {}),
       });
     },
   );
