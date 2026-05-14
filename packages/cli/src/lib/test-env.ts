@@ -204,10 +204,14 @@ export function createSlotDirs(slotDataPath: string, vaultNames: string[] = ['de
   const dirs = [
     'notes',
     ...vaultNames.map(name => join('vaults', name)),
+    'config',
     'registry',
     'workspaces',
     'sessions',
+    'repos',
     'typesense-data',
+    'neo4j-data',
+    'neo4j-logs',
   ];
   for (const dir of dirs) {
     mkdirSync(join(slotDataPath, dir), { recursive: true });
