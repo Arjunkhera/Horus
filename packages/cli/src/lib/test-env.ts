@@ -343,7 +343,7 @@ export async function composeDown(
 
 // ── Health polling ───────────────────────────────────────────────────────────
 
-const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense', 'reader', 'neo4j'] as const;
+const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense', 'neo4j'] as const;
 
 async function checkContainerHealthByProject(
   runtime: Runtime,
