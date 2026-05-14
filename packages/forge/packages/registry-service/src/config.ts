@@ -24,39 +24,39 @@ const BuiltinAuthConfigSchema = z.object({
   admins: z.array(AdminUserSchema).min(1),
 });
 
-const WebhookAuthConfigSchema = z.object({
-  strategy: z.literal('webhook'),
-  webhook: z.object({
-    /** URL of the external authorization webhook */
-    url: z.string().url(),
-    /** Timeout in milliseconds before applying fail_mode (default: 500) */
-    timeout_ms: z.number().int().min(1).default(500),
-    /**
-     * What to do when the webhook times out or returns a non-2xx response.
-     * "deny" (default, safe) or "permit" (operator opt-in with a startup warning).
-     */
-    fail_mode: z.enum(['deny', 'permit']).default('deny'),
-    /**
-     * Which service actions trigger the webhook.
-     * "writes" (default): only publish/write actions go to webhook; reads are public.
-     * "all": reads also go through the webhook.
-     */
-    enforce_on: z.enum(['writes', 'all']).default('writes'),
-    /**
-     * List of request headers forwarded to the webhook.
-     * Use '*' to forward all headers (logs a security warning at startup).
-     */
-    header_allowlist: z.union([z.array(z.string()), z.literal('*')]).default([
-      'authorization',
-      'x-forwarded-for',
-      'x-real-ip',
-    ]),
+/**
+ * JWT validation sub-config for TrustedHeadersAuthStrategy.
+ *
+ * When `enabled` is true the strategy verifies a signed JWT carried in the
+ * request before trusting any header claim.  `header` names the header that
+ * contains the JWT (defaults to the `user_id` header when absent).
+ */
+const TrustedHeadersJwtConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** PEM-encoded public key used to verify JWT signatures. */
+  publicKey: z.string().min(1).optional(),
+  /**
+   * Header that carries the JWT.  Defaults to the `headers.user_id` value
+   * when omitted so the proxy can put the JWT in the same header as the
+   * user-id claim (e.g. a signed `X-User-Id` JWT).
+   */
+  header: z.string().min(1).optional(),
+});
+
+const TrustedHeadersAuthConfigSchema = z.object({
+  strategy: z.literal('trusted-headers'),
+  headers: z.object({
+    /** Header name that carries the caller's user ID (e.g. "X-User-Id"). */
+    user_id: z.string().min(1),
+    /** Header name that carries the caller's role (e.g. "X-Role"). */
+    role: z.string().min(1),
   }),
+  jwt: TrustedHeadersJwtConfigSchema.optional(),
 });
 
 const AuthConfigSchema = z.discriminatedUnion('strategy', [
   BuiltinAuthConfigSchema,
-  WebhookAuthConfigSchema,
+  TrustedHeadersAuthConfigSchema,
 ]);
 
 const S3StorageConfigSchema = z.object({
@@ -123,7 +123,8 @@ export type RegistryConfig = ServiceConfig;
 export type TypesenseConfig = z.infer<typeof TypesenseConfigSchema>;
 export type AdminUser = z.infer<typeof AdminUserSchema>;
 export type BuiltinAuthConfig = z.infer<typeof BuiltinAuthConfigSchema>;
-export type WebhookAuthConfig = z.infer<typeof WebhookAuthConfigSchema>;
+export type TrustedHeadersAuthConfig = z.infer<typeof TrustedHeadersAuthConfigSchema>;
+export type TrustedHeadersJwtConfig = z.infer<typeof TrustedHeadersJwtConfigSchema>;
 export type S3StorageConfig = z.infer<typeof S3StorageConfigSchema>;
 
 // ---------------------------------------------------------------------------
