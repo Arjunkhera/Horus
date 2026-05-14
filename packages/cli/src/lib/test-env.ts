@@ -346,7 +346,7 @@ export async function composeUp(
     composeArgs.push('-f', overridePath);
   }
 
-  composeArgs.push('up', '-d');
+  composeArgs.push('up', '-d', '--force-recreate');
 
   const result = await execa(runtime.name, composeArgs, { cwd: HORUS_DIR, env, reject: false });
   if (result.exitCode !== 0) {
