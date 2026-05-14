@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SemVerSchema, SemVerRangeSchema } from './skill-meta.js';
+import { SemVerSchema, SemVerRangeSchema, ArtifactReferenceSchema } from './skill-meta.js';
 
 /**
  * Schema for agent.yaml — describes a Forge agent artifact.
@@ -27,6 +27,7 @@ export const AgentMetaSchema = z.object({
   dependencies: z.record(z.string(), SemVerRangeSchema).default({}),
   homepage: z.string().url().optional(),
   repository: z.string().optional(),
+  references: z.array(ArtifactReferenceSchema).default([]).optional(),
 });
 
 export type AgentMeta = z.infer<typeof AgentMetaSchema>;

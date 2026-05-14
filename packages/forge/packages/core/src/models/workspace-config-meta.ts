@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SemVerSchema } from './skill-meta.js';
+import { SemVerSchema, ArtifactReferenceSchema } from './skill-meta.js';
 import { ClaudePermissionsSchema } from './global-config.js';
 
 const McpServerConfigSchema = z.object({
@@ -51,6 +51,7 @@ export const WorkspaceConfigMetaSchema = z.object({
   settings: WorkspaceSettingsConfigSchema.default({}),
   git_workflow: GitWorkflowConfigSchema.default({}),
   claude_permissions: ClaudePermissionsSchema.optional(),
+  references: z.array(ArtifactReferenceSchema).default([]).optional(),
 });
 
 export type WorkspaceConfigMeta = z.infer<typeof WorkspaceConfigMetaSchema>;

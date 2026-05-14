@@ -18,6 +18,7 @@ import { registerPublishRoute } from './routes/publish.js';
 import { registerReadRoutes } from './routes/read.js';
 import { registerTypeRoutes } from './routes/types.js';
 import { registerSearchRoute } from './routes/search.js';
+import { registerDepsRoute } from './routes/deps.js';
 
 export interface AppDependencies {
   config: ServiceConfig;
@@ -58,6 +59,7 @@ export function createApp(deps: AppDependencies): FastifyInstance {
   if (deps.search) {
     registerSearchRoute(app, deps.search);
   }
+  registerDepsRoute(app, deps.storage);
 
   // Global error handler
   app.setErrorHandler((err, _request, reply) => {

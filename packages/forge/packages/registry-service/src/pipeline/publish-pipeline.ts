@@ -24,6 +24,7 @@ import {
   PluginMetaSchema,
   PersonaMetaSchema,
   WorkspaceConfigMetaSchema,
+  type ArtifactReference,
 } from '@forge/core';
 import type { ZodSchema } from 'zod';
 import type { StorageBackend, BundleFiles } from '../storage/types.js';
@@ -43,6 +44,22 @@ export const SUPPORTED_TYPES: ArtifactType[] = [
   'persona',
   'workspace-config',
 ];
+
+// ---------------------------------------------------------------------------
+// Cross-artifact reference rules
+// ---------------------------------------------------------------------------
+
+/**
+ * Which artifact types each artifact type is allowed to reference.
+ * Empty array means the type cannot reference any other artifacts.
+ */
+export const ALLOWED_REFERENCE_TARGETS: Record<ArtifactType, ArtifactType[]> = {
+  skill: [],
+  agent: ['skill'],
+  plugin: ['skill'],
+  persona: [],
+  'workspace-config': ['plugin', 'skill'],
+};
 
 const META_SCHEMAS: Record<ArtifactType, ZodSchema> = {
   skill: SkillMetaSchema,
@@ -200,7 +217,7 @@ export class PublishPipeline {
       });
     }
 
-    const meta = parseResult.data as { id: string; version: string };
+    const meta = parseResult.data as { id: string; version: string; references?: ArtifactReference[] };
 
     // Ensure URL params match metadata
     if (meta.id !== input.id) {
@@ -223,6 +240,32 @@ export class PublishPipeline {
         'INVALID_SEMVER',
         `Version '${input.version}' is not a valid semver string`,
       );
+    }
+
+    // ── Step 4b: Validate references ─────────────────────────────────────────
+    if (meta.references && meta.references.length > 0) {
+      const allowedTargets = ALLOWED_REFERENCE_TARGETS[type];
+      for (const ref of meta.references) {
+        // Check that the reference type is allowed for this artifact type
+        if (!allowedTargets.includes(ref.type as ArtifactType)) {
+          throw new PipelineError(
+            400,
+            'DISALLOWED_REFERENCE_TYPE',
+            `Artifact type '${type}' cannot reference '${ref.type}'`,
+            { supportedTargets: allowedTargets },
+          );
+        }
+        // Check that the referenced artifact exists in storage
+        const refExists = await this.storage.exists(ref.type as ArtifactType, ref.id, ref.version);
+        if (!refExists) {
+          throw new PipelineError(
+            400,
+            'REFERENCE_NOT_FOUND',
+            `Referenced artifact '${ref.type}:${ref.id}@${ref.version}' does not exist`,
+            { missingRef: { type: ref.type, id: ref.id, version: ref.version } },
+          );
+        }
+      }
     }
 
     // ── Step 5: Immutability check ───────────────────────────────────────────
