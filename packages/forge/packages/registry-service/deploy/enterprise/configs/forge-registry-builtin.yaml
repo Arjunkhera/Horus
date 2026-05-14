@@ -1,0 +1,63 @@
+# ─── Forge Registry — Auth Strategy: builtin ──────────────────────────────────
+#
+# Auth model:
+#   The registry generates a random 64-hex-char API key for each admin at
+#   first startup. Keys are logged ONCE in plaintext, then stored as bcrypt
+#   hashes in the SQLite database at FORGE_REGISTRY_DB_PATH.
+#
+#   Subsequent restarts: keys are NOT regenerated. If a key is lost, rotate
+#   it using the key rotation procedure in docs/deploy-enterprise.md.
+#
+# Authorization:
+#   - Reads  (GET /artifacts/*, GET /types): public, no auth required.
+#   - Writes (POST /artifacts/*):            admin key required (Bearer token).
+#
+# Credentials:
+#   All secrets are provided via environment variables. Never put credentials
+#   in this file — the config loader will strip them anyway.
+#
+# Usage:
+#   Mount this file as /etc/forge-registry/config.yaml inside the container
+#   and set FORGE_REGISTRY_CONFIG=/etc/forge-registry/config.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+
+server:
+  host: "0.0.0.0"
+  port: 8744
+  # Semver of the forge-core library this instance is compatible with.
+  # Publish requests with a mismatched X-Forge-Core-Version header are rejected.
+  coreVersion: "0.1.0"
+
+# Object storage — credentials come from env vars, NOT this file.
+# See FORGE_REGISTRY_S3_* in docs/deploy-enterprise.md.
+storage:
+  backend: s3
+  bucket: "your-bucket-name"           # OVERRIDE: or set FORGE_REGISTRY_S3_BUCKET
+  region: "us-east-1"                  # OVERRIDE: or set FORGE_REGISTRY_S3_REGION
+  prefix: ""                           # Optional key prefix, e.g. "registry/"
+
+auth:
+  strategy: builtin
+  admins:
+    # At minimum one admin is required.
+    # id   — a stable, human-readable identifier. Used in the audit log.
+    # name — display name logged at key generation time.
+    - id: "arjun"
+      name: "Arjun Khera"
+    # Add more admins here. Each gets their own independent API key.
+    # - id: "customer-admin"
+    #   name: "Customer Admin"
+
+# Path to the SQLite database inside the container.
+# Must be on a persistent volume — see the registry-data volume in compose.
+dbPath: "/data/registry/forge-registry.db"
+
+# Log level: fatal | error | warn | info | debug | trace
+logLevel: "info"
+
+# Optional: remove this block entirely to disable search.
+# typesense:
+#   host: "typesense"
+#   port: 8108
+#   protocol: "http"
+#   apiKey is provided via FORGE_REGISTRY_TYPESENSE_API_KEY

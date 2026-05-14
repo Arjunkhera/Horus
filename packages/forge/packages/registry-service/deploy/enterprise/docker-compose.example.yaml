@@ -1,0 +1,186 @@
+# ─── Forge Registry — Enterprise Standalone Deployment ────────────────────────
+#
+# This file is the reference compose for a customer-managed, self-hosted
+# deployment of Forge Registry. It intentionally does NOT depend on the Horus
+# internal compose stack.
+#
+# Services:
+#   forge-registry  — the registry HTTP service (pulled from GHCR)
+#   typesense        — full-text search backend (optional but recommended)
+#   YOUR-PROXY       — customer edge proxy placeholder (nginx / Caddy / Envoy)
+#
+# Storage:
+#   Object storage is provided by the customer (AWS S3, GCS, MinIO, etc.).
+#   There is NO bundled MinIO here — use a real bucket in production.
+#
+# TLS:
+#   TLS must be terminated upstream of forge-registry.
+#   The registry service itself speaks plain HTTP on port 8744.
+#
+# No federation:
+#   This instance is fully isolated. There is no auto-sync to the public
+#   Horus global registry.
+#
+# Quick start:
+#   1. Copy this file and the configs/ directory to your server.
+#   2. Create a .env file from the env var reference in docs/deploy-enterprise.md.
+#   3. docker compose -f docker-compose.example.yaml up -d
+# ──────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+# ─── Required secrets (provide via .env or your secret manager) ─────────────
+# FORGE_REGISTRY_S3_ACCESS_KEY_ID      — S3 access key
+# FORGE_REGISTRY_S3_SECRET_ACCESS_KEY  — S3 secret key
+# FORGE_REGISTRY_TYPESENSE_API_KEY     — Typesense API key (min 16 chars)
+# See docs/deploy-enterprise.md for the full env var reference.
+
+services:
+  # ─── Forge Registry ─────────────────────────────────────────────────────────
+  forge-registry:
+    image: ghcr.io/arjunkhera/forge-registry:latest
+    container_name: forge-registry
+    restart: unless-stopped
+    ports:
+      # Expose only to the internal docker network; let the edge proxy handle
+      # public TLS. Remove the host binding if using Traefik/Nginx on the same
+      # Docker network.
+      - "127.0.0.1:8744:8744"
+    environment:
+      # ── Server ─────────────────────────────────────────────────────────────
+      FORGE_REGISTRY_HOST: "0.0.0.0"
+      FORGE_REGISTRY_PORT: "8744"
+      FORGE_REGISTRY_LOG_LEVEL: "info"         # fatal|error|warn|info|debug|trace
+
+      # ── Database (audit log + auth keys) ───────────────────────────────────
+      FORGE_REGISTRY_DB_PATH: "/data/registry/forge-registry.db"
+
+      # ── Object storage ─────────────────────────────────────────────────────
+      FORGE_REGISTRY_S3_BUCKET: "${FORGE_REGISTRY_S3_BUCKET}"
+      FORGE_REGISTRY_S3_REGION: "${FORGE_REGISTRY_S3_REGION:-us-east-1}"
+      FORGE_REGISTRY_S3_PREFIX: "${FORGE_REGISTRY_S3_PREFIX:-}"
+      # Uncomment for MinIO or other S3-compatible stores:
+      # FORGE_REGISTRY_S3_ENDPOINT: "${FORGE_REGISTRY_S3_ENDPOINT}"
+      # FORGE_REGISTRY_S3_FORCE_PATH_STYLE: "true"
+      FORGE_REGISTRY_S3_ACCESS_KEY_ID: "${FORGE_REGISTRY_S3_ACCESS_KEY_ID}"
+      FORGE_REGISTRY_S3_SECRET_ACCESS_KEY: "${FORGE_REGISTRY_S3_SECRET_ACCESS_KEY}"
+
+      # ── Auth ───────────────────────────────────────────────────────────────
+      # Point to one of the three config templates in configs/
+      FORGE_REGISTRY_CONFIG: "/etc/forge-registry/config.yaml"
+
+      # ── Search (optional) ──────────────────────────────────────────────────
+      FORGE_REGISTRY_TYPESENSE_HOST: "typesense"
+      FORGE_REGISTRY_TYPESENSE_PORT: "8108"
+      FORGE_REGISTRY_TYPESENSE_PROTOCOL: "http"
+      FORGE_REGISTRY_TYPESENSE_API_KEY: "${FORGE_REGISTRY_TYPESENSE_API_KEY}"
+
+    volumes:
+      # Persistent DB (audit log + auth keys)
+      - registry-data:/data/registry
+      # Mount your chosen auth config (see configs/ directory)
+      - ./configs/forge-registry-builtin.yaml:/etc/forge-registry/config.yaml:ro
+    depends_on:
+      typesense:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - forge-net
+    # Resource limits (adjust to your hardware)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ─── Typesense (optional full-text search) ──────────────────────────────────
+  # Remove this service and the FORGE_REGISTRY_TYPESENSE_* env vars above
+  # if you do not need search functionality.
+  typesense:
+    image: typesense/typesense:0.25.2
+    container_name: forge-typesense
+    restart: unless-stopped
+    # Do NOT expose Typesense publicly — it is an internal service.
+    expose:
+      - "8108"
+    environment:
+      TYPESENSE_DATA_DIR: "/typesense-data"
+      TYPESENSE_API_KEY: "${FORGE_REGISTRY_TYPESENSE_API_KEY}"
+      TYPESENSE_ENABLE_CORS: "false"
+    volumes:
+      - typesense-data:/typesense-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - forge-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ─── Edge Proxy (placeholder — replace with your own) ───────────────────────
+  # This service is intentionally stubbed. Replace it with your preferred
+  # reverse proxy: nginx, Caddy, Envoy, Traefik, AWS ALB, etc.
+  #
+  # Responsibilities of the edge proxy:
+  #   - TLS termination
+  #   - Routing requests to forge-registry on port 8744
+  #   - (For trusted-headers auth) injecting X-User-Id / X-User-Name headers
+  #     AFTER verifying the caller's JWT at the proxy layer.
+  #
+  # Example nginx snippet (not wired up here):
+  #
+  #   server {
+  #     listen 443 ssl;
+  #     server_name registry.example.com;
+  #
+  #     ssl_certificate     /etc/ssl/certs/registry.crt;
+  #     ssl_certificate_key /etc/ssl/private/registry.key;
+  #
+  #     location / {
+  #       proxy_pass http://forge-registry:8744;
+  #       proxy_set_header Host $host;
+  #       proxy_set_header X-Real-IP $remote_addr;
+  #       # For trusted-headers auth, inject after JWT verification:
+  #       # proxy_set_header X-User-Id   $jwt_sub;
+  #       # proxy_set_header X-User-Name $jwt_name;
+  #     }
+  #   }
+  #
+  # edge-proxy:
+  #   image: nginx:alpine
+  #   container_name: forge-edge-proxy
+  #   restart: unless-stopped
+  #   ports:
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/forge-registry.conf:ro
+  #     - /etc/ssl:/etc/ssl:ro
+  #   depends_on:
+  #     - forge-registry
+  #   networks:
+  #     - forge-net
+
+volumes:
+  # Persists the SQLite database (audit log + builtin auth keys).
+  # Back this up regularly — see docs/deploy-enterprise.md backup section.
+  registry-data:
+
+  # Persists Typesense index. Losing this is not catastrophic — the index
+  # can be rebuilt from the S3 object store on restart (re-index not yet
+  # automatic in v1, but planned for v2).
+  typesense-data:
+
+networks:
+  forge-net:
+    driver: bridge

@@ -1,0 +1,66 @@
+# ─── Forge Registry — Auth Strategy: webhook ──────────────────────────────────
+#
+# Auth model:
+#   For each incoming request, the registry forwards the request context to an
+#   external HTTP webhook. The webhook responds with an allow/deny decision.
+#   This enables policy-as-code via OPA/Rego, Cedar, or any custom policy
+#   engine wrapped in a small HTTP service.
+#
+# Webhook contract:
+#   POST <webhookUrl>
+#   Content-Type: application/json
+#
+#   Request body:
+#     {
+#       "action":   "read" | "publish",
+#       "resource": { "type": "<artifact-type>", "id": "<id>", "version": "<ver>" },
+#       "caller": {
+#         "userId":   "<from Authorization header or identity header>",
+#         "name":     "<display name>",
+#         "token":    "<raw Bearer token, so OPA can validate it>"
+#       }
+#     }
+#
+#   Expected response body (200 OK):
+#     { "allow": true }    — permit
+#     { "allow": false }   — deny
+#
+#   Any non-200 response or network error → deny (fail-closed).
+#
+# Performance note:
+#   Every authenticated request calls the webhook. Keep the policy service
+#   co-located with the registry (same docker network) to minimise latency.
+#   For high-traffic deployments, enable response caching in the policy service.
+#
+# See examples/opa-webhook/ for a working OPA + Node.js webhook server.
+#
+# Usage:
+#   Mount this file as /etc/forge-registry/config.yaml inside the container
+#   and set FORGE_REGISTRY_CONFIG=/etc/forge-registry/config.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+
+server:
+  host: "0.0.0.0"
+  port: 8744
+  coreVersion: "0.1.0"
+
+storage:
+  backend: s3
+  bucket: "your-bucket-name"
+  region: "us-east-1"
+  prefix: ""
+
+auth:
+  strategy: webhook
+  # URL of the policy decision endpoint.
+  # For the OPA example: http://opa-webhook:3100/v1/authz/decide
+  webhookUrl: "http://opa-webhook:3100/v1/authz/decide"
+  # Timeout for the webhook call (ms). Requests that exceed this are denied.
+  timeoutMs: 2000
+  # Optional shared secret. If set, the registry adds an
+  # Authorization: Bearer <webhookSecret> header to every policy call.
+  # The policy service should verify this header to reject spoofed requests.
+  webhookSecret: ""   # set via environment variable or your secret manager
+
+dbPath: "/data/registry/forge-registry.db"
+logLevel: "info"

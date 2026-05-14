@@ -1,0 +1,88 @@
+# ─── Forge Registry — Auth Strategy: trusted-headers ─────────────────────────
+#
+# Auth model:
+#   The registry trusts identity headers injected by an upstream proxy. The
+#   proxy is responsible for authenticating the caller (e.g., verifying a JWT
+#   or session cookie) and then forwarding the resolved identity via HTTP
+#   headers. The registry reads these headers and trusts them unconditionally.
+#
+# CRITICAL security requirement:
+#   The edge proxy MUST strip X-User-Id and X-User-Name from any incoming
+#   client requests before forwarding. If clients can inject these headers
+#   directly, they can impersonate any user. Configure your proxy to:
+#     - Authenticate the caller (JWT / session / mTLS).
+#     - Strip any X-User-Id / X-User-Name headers from the client request.
+#     - Set X-User-Id and X-User-Name based on the verified identity.
+#
+# Header mapping (v1):
+#   X-User-Id    — stable unique identifier for the caller (string, required)
+#   X-User-Name  — display name for audit log (string, optional)
+#
+# Authorization:
+#   - Reads:  X-User-Role header == "admin" OR no header (public reads allowed).
+#   - Writes: X-User-Role == "admin" required.
+#
+# NOTE: The trusted-headers strategy is forward-declared here for documentation
+# purposes. The runtime implementation ships in a later wave. Until then, use
+# the builtin strategy for write access.
+#
+# Usage:
+#   Mount this file as /etc/forge-registry/config.yaml inside the container
+#   and set FORGE_REGISTRY_CONFIG=/etc/forge-registry/config.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+
+server:
+  host: "0.0.0.0"
+  port: 8744
+  coreVersion: "0.1.0"
+
+storage:
+  backend: s3
+  bucket: "your-bucket-name"
+  region: "us-east-1"
+  prefix: ""
+
+auth:
+  strategy: trusted-headers
+  # Header names (case-insensitive; defaults shown below).
+  # Change only if your proxy uses non-standard header names.
+  userIdHeader: "X-User-Id"
+  userNameHeader: "X-User-Name"
+  userRoleHeader: "X-User-Role"
+  # Value expected in X-User-Role for write access.
+  adminRole: "admin"
+
+dbPath: "/data/registry/forge-registry.db"
+logLevel: "info"
+
+# ─── Example nginx edge proxy config snippet ──────────────────────────────────
+#
+# upstream forge_registry {
+#     server forge-registry:8744;
+# }
+#
+# server {
+#     listen 443 ssl;
+#     server_name registry.example.com;
+#
+#     ssl_certificate      /etc/ssl/certs/registry.crt;
+#     ssl_certificate_key  /etc/ssl/private/registry.key;
+#
+#     # Verify JWT using lua-resty-jwt or an auth_request subrequest.
+#     # Example: auth_request /auth;
+#
+#     location / {
+#         # SECURITY: Strip client-supplied identity headers unconditionally.
+#         proxy_set_header X-User-Id   "";
+#         proxy_set_header X-User-Name "";
+#         proxy_set_header X-User-Role "";
+#
+#         # Inject verified identity from JWT claims.
+#         # These values come from your JWT verification logic (e.g., lua vars).
+#         proxy_set_header X-User-Id   $jwt_sub;
+#         proxy_set_header X-User-Name $jwt_name;
+#         proxy_set_header X-User-Role $jwt_role;
+#
+#         proxy_pass http://forge_registry;
+#     }
+# }
