@@ -25,6 +25,7 @@ import {
   seedFromLive,
   projectName,
   preSeedNotesDir,
+  preSeedVaultDirs,
 } from '../lib/test-env.js';
 
 // ── horus test-env ───────────────────────────────────────────────────────────
@@ -80,13 +81,14 @@ testEnvCommand
     createSlotDirs(slotDataPath, vaultNames);
     dirSpinner.succeed(`Data directory: ${chalk.dim(slotDataPath)}`);
 
-    // Pre-seed notes dir so Anvil finds a valid git repo instead of HTTPS-cloning
-    const seedSpinner = ora('Pre-seeding notes directory...').start();
+    // Pre-seed notes and vault dirs so services find valid git repos instead of HTTPS-cloning
+    const seedSpinner = ora('Pre-seeding git repos...').start();
     try {
       await preSeedNotesDir(dataDir, slotDataPath);
-      seedSpinner.succeed('Notes directory ready');
+      await preSeedVaultDirs(dataDir, slotDataPath, vaultNames);
+      seedSpinner.succeed('Git repos ready');
     } catch (error) {
-      seedSpinner.fail(`Notes pre-seed failed: ${(error as Error).message}`);
+      seedSpinner.fail(`Pre-seed failed: ${(error as Error).message}`);
       removeLock(dataDir, slot);
       removeSlotDirs(slotDataPath);
       process.exit(1);

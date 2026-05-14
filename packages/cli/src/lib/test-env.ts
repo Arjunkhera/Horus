@@ -253,6 +253,32 @@ export async function preSeedNotesDir(dataDir: string, slotDataPath: string): Pr
   }
 }
 
+/**
+ * Pre-seed vault data dirs so each vault service starts with a valid git repo
+ * instead of attempting an HTTPS clone on startup.
+ */
+export async function preSeedVaultDirs(dataDir: string, slotDataPath: string, vaultNames: string[]): Promise<void> {
+  for (const name of vaultNames) {
+    const srcVaultPath = join(dataDir, 'vaults', name);
+    const destVaultPath = join(slotDataPath, 'vaults', name);
+
+    if (existsSync(join(srcVaultPath, '.git'))) {
+      if (existsSync(destVaultPath)) {
+        rmSync(destVaultPath, { recursive: true });
+      }
+      await execa('git', ['clone', '--local', srcVaultPath, destVaultPath]);
+    } else {
+      await execa('git', ['-C', destVaultPath, 'init']);
+      await execa('git', [
+        '-C', destVaultPath,
+        '-c', 'user.email=horus@local',
+        '-c', 'user.name=Horus',
+        'commit', '--allow-empty', '-m', 'init',
+      ]);
+    }
+  }
+}
+
 // ── Compose operations ───────────────────────────────────────────────────────
 
 export function buildComposeEnv(
