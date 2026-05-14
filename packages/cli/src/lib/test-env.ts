@@ -38,6 +38,8 @@ export interface SlotPorts {
   forge: number;
   typesense: number;
   ui: number;
+  neo4j_http: number;
+  neo4j_bolt: number;
 }
 
 export interface SlotStatus {
@@ -85,6 +87,8 @@ const PORT_OFFSETS = {
   vault_mcp: 100,
   forge: 150,
   ui: 160,
+  neo4j_http: 174,
+  neo4j_bolt: 187,
 } as const;
 
 export function loadTestEnvConfig(dataDir: string): TestEnvConfig {
@@ -118,6 +122,8 @@ export function calcPorts(slot: number, basePort: number): SlotPorts {
     vault_mcp:    base + PORT_OFFSETS.vault_mcp,
     forge:        base + PORT_OFFSETS.forge,
     ui:           base + PORT_OFFSETS.ui,
+    neo4j_http:   base + PORT_OFFSETS.neo4j_http,
+    neo4j_bolt:   base + PORT_OFFSETS.neo4j_bolt,
   };
 }
 
@@ -266,7 +272,6 @@ export function buildComposeEnv(
     VAULT_ROUTER_PORT:        String(ports.vault_router),
     [vaultPortEnvVar]:        String(ports.vault_svc),
     TYPESENSE_PORT:           String(ports.typesense),
-    READER_PORT:              String(ports.ui),
     UI_PORT:                  String(ports.ui),
     // TEST_PORT_* vars for overlay reference (harmless duplicates after above fix)
     TEST_PORT_ANVIL:        String(ports.anvil),
@@ -276,6 +281,10 @@ export function buildComposeEnv(
     TEST_PORT_VAULT_MCP:    String(ports.vault_mcp),
     TEST_PORT_FORGE:        String(ports.forge),
     TEST_PORT_UI:           String(ports.ui),
+    NEO4J_HTTP_PORT:        String(ports.neo4j_http),
+    NEO4J_BOLT_PORT:        String(ports.neo4j_bolt),
+    TEST_PORT_NEO4J_HTTP:   String(ports.neo4j_http),
+    TEST_PORT_NEO4J_BOLT:   String(ports.neo4j_bolt),
   };
 }
 
@@ -334,7 +343,7 @@ export async function composeDown(
 
 // ── Health polling ───────────────────────────────────────────────────────────
 
-const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense', 'reader-server'] as const;
+const HEALTH_SERVICES = ['anvil', 'forge', 'vault-mcp', 'typesense', 'reader', 'neo4j'] as const;
 
 async function checkContainerHealthByProject(
   runtime: Runtime,
