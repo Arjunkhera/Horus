@@ -253,7 +253,7 @@ export async function preSeedNotesDir(dataDir: string, slotDataPath: string): Pr
     if (existsSync(destNotesPath)) {
       rmSync(destNotesPath, { recursive: true });
     }
-    await execa('git', ['clone', '--local', srcNotesPath, destNotesPath]);
+    await execa('git', ['clone', '--no-hardlinks', srcNotesPath, destNotesPath]);
   } else {
     // Fallback: init a minimal git repo so Anvil doesn't try to HTTPS-clone
     await execa('git', ['-C', destNotesPath, 'init']);
@@ -279,7 +279,7 @@ export async function preSeedVaultDirs(dataDir: string, slotDataPath: string, va
       if (existsSync(destVaultPath)) {
         rmSync(destVaultPath, { recursive: true });
       }
-      await execa('git', ['clone', '--local', srcVaultPath, destVaultPath]);
+      await execa('git', ['clone', '--no-hardlinks', srcVaultPath, destVaultPath]);
     } else {
       await execa('git', ['-C', destVaultPath, 'init']);
       await execa('git', [
@@ -304,7 +304,7 @@ export async function preSeedRegistryDir(dataDir: string, slotDataPath: string):
     if (existsSync(destRegistryPath)) {
       rmSync(destRegistryPath, { recursive: true });
     }
-    await execa('git', ['clone', '--local', srcRegistryPath, destRegistryPath]);
+    await execa('git', ['clone', '--no-hardlinks', srcRegistryPath, destRegistryPath]);
     chmodSync(destRegistryPath, 0o777);
   } else {
     await execa('git', ['-C', destRegistryPath, 'init']);
