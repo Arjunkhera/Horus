@@ -1,32 +1,9 @@
 import { z } from 'zod';
 
-const FilesystemRegistrySchema = z.object({
-  type: z.literal('filesystem'),
-  name: z.string().min(1),
-  path: z.string().min(1),
-  writable: z.boolean().default(false),
-});
-
-const GitRegistrySchema = z.object({
-  type: z.literal('git'),
-  name: z.string().min(1),
-  url: z.string().url(),
-  /**
-   * Git ref (branch/tag) to check out.
-   * Preferred field name. Defaults to 'main'.
-   */
-  ref: z.string().default('main'),
-  /**
-   * Legacy alias for `ref`. If both are provided, `ref` wins.
-   * @deprecated Use `ref` instead.
-   */
-  branch: z.string().optional(),
-  path: z.string().default('registry'),
-  /** Environment variable name containing an auth token (e.g. FORGE_PRIVATE_REGISTRY_TOKEN). */
-  tokenEnv: z.string().optional(),
-  writable: z.boolean().default(false),
-});
-
+/**
+ * V1 supports only HTTP registries (R16).
+ * Filesystem and git registry types are rejected with a clear error message.
+ */
 const HttpRegistrySchema = z.object({
   type: z.literal('http'),
   name: z.string().min(1),
@@ -38,12 +15,30 @@ const HttpRegistrySchema = z.object({
 });
 
 /**
- * Discriminated union of all registry types.
+ * Catch-all schema for unsupported registry types (filesystem, git, etc.).
+ * Accepts any object with a `type` field that is not `http` and produces
+ * a clear validation error: "V1 supports only type: http registries".
  */
-export const RegistryConfigSchema = z.discriminatedUnion('type', [
-  FilesystemRegistrySchema,
-  GitRegistrySchema,
+const UnsupportedRegistrySchema = z
+  .object({ type: z.string() })
+  .passthrough()
+  .superRefine((_val, ctx) => {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'V1 supports only type: http registries',
+    });
+  }) as z.ZodType<never>;
+
+/**
+ * Registry configuration schema.
+ *
+ * V1 supports only `type: http` registries (R16).
+ * Specifying `type: filesystem` or `type: git` will fail validation
+ * with the message: "V1 supports only type: http registries".
+ */
+export const RegistryConfigSchema = z.union([
   HttpRegistrySchema,
+  UnsupportedRegistrySchema,
 ]);
 
 export type RegistryConfig = z.infer<typeof RegistryConfigSchema>;
@@ -55,19 +50,11 @@ export type RegistryConfig = z.infer<typeof RegistryConfigSchema>;
 export type RegistryConfigInput = z.input<typeof RegistryConfigSchema>;
 
 /**
- * Normalize a git registry: resolve legacy `branch` field into `ref`.
- * Call after parsing to ensure `ref` always has the correct value.
+ * Normalize a registry config entry.
+ * V1 supports only http registries; this function is a no-op but kept
+ * for backward compatibility with any callers.
  */
 export function normalizeRegistryConfig(reg: RegistryConfig): RegistryConfig {
-  if (reg.type === 'git') {
-    // If branch was provided but ref is the default 'main', use branch value
-    if (reg.branch && reg.ref === 'main') {
-      return { ...reg, ref: reg.branch, branch: undefined };
-    }
-    // Strip legacy branch field
-    const { branch: _, ...rest } = reg;
-    return rest as RegistryConfig;
-  }
   return reg;
 }
 

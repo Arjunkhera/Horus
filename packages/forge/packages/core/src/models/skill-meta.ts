@@ -19,6 +19,14 @@ const SemVerRangeSchema = z.string(); // e.g., ^1.0.0, ~2.1, >=1.0.0
  *   tags: ['development', 'sdlc']
  * });
  */
+export const ArtifactReferenceSchema = z.object({
+  type: z.enum(['skill', 'agent', 'plugin', 'persona', 'workspace-config']),
+  id: z.string().min(1),
+  version: z.string().min(1),
+});
+
+export type ArtifactReference = z.infer<typeof ArtifactReferenceSchema>;
+
 export const SkillMetaSchema = z.object({
   id: z.string().min(1).regex(/^[a-z0-9-]+$/, 'ID must be lowercase kebab-case'),
   name: z.string().min(1),
@@ -32,6 +40,9 @@ export const SkillMetaSchema = z.object({
   files: z.array(z.string()).default([]),
   homepage: z.string().url().optional(),
   repository: z.string().optional(),
+  references: z.array(ArtifactReferenceSchema).default([]).optional(),
+  /** Whether this artifact has been verified by the registry operator */
+  verified: z.boolean().optional(),
 });
 
 export type SkillMeta = z.infer<typeof SkillMetaSchema>;

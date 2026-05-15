@@ -3,7 +3,9 @@ export {
   SkillMetaSchema,
   SemVerSchema,
   SemVerRangeSchema,
+  ArtifactReferenceSchema,
   type SkillMeta,
+  type ArtifactReference,
 } from './skill-meta.js';
 
 // Agent Meta

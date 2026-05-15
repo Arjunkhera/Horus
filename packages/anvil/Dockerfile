@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /build
 
-COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml package.json pnpm-workspace.yaml .npmrc ./
 COPY packages/search/package.json ./packages/search/
 COPY packages/anvil/package.json ./packages/anvil/
 
@@ -32,7 +32,7 @@ RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /app
 
 # pnpm workspace structure (node_modules land under packages/anvil/)
-COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml package.json pnpm-workspace.yaml .npmrc ./
 COPY packages/search/package.json ./packages/search/
 COPY packages/anvil/package.json ./packages/anvil/
 RUN pnpm install --prod --frozen-lockfile

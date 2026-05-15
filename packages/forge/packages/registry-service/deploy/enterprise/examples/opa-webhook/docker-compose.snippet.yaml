@@ -1,0 +1,78 @@
+# ─── OPA Webhook — Docker Compose Snippet ────────────────────────────────────
+#
+# Paste these services into your main docker-compose.example.yaml to add
+# OPA-based policy enforcement to a Forge Registry deployment using the
+# webhook auth strategy.
+#
+# Changes required in the main compose:
+#   1. Switch the config volume mount on forge-registry to:
+#        ./configs/forge-registry-webhook.yaml:/etc/forge-registry/config.yaml:ro
+#   2. Add opa-webhook and opa to forge-registry's depends_on block.
+#   3. Add the WEBHOOK_SECRET env var to both forge-registry and opa-webhook.
+#
+# Network:
+#   All three services (forge-registry, opa-webhook, opa) must share the
+#   same docker network (forge-net) so they can reach each other by name.
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ─── OPA Webhook Server ─────────────────────────────────────────────────────
+  # Receives policy decisions requests from forge-registry, evaluates them
+  # against OPA, and returns { allow: true|false }.
+  opa-webhook:
+    image: node:22-slim
+    container_name: forge-opa-webhook
+    restart: unless-stopped
+    working_dir: /app
+    # Copy server.js into the container at runtime via volume mount.
+    # In production, build a proper Docker image instead.
+    command: ["node", "server.js"]
+    expose:
+      - "3100"
+    environment:
+      PORT: "3100"
+      OPA_URL: "http://opa:8181"
+      # Shared secret between forge-registry and this webhook server.
+      # Must match the webhookSecret in forge-registry-webhook.yaml.
+      WEBHOOK_SECRET: "${FORGE_REGISTRY_WEBHOOK_SECRET}"
+      # JWT signing secret for the sample HS256 policy.
+      # Replace with your RSA public key / JWKS URL for RS256.
+      JWT_SECRET: "${JWT_SECRET}"
+    volumes:
+      - ./examples/opa-webhook/server.js:/app/server.js:ro
+    depends_on:
+      opa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:http').get('http://localhost:3100/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - forge-net
+
+  # ─── OPA (Open Policy Agent) ────────────────────────────────────────────────
+  opa:
+    image: openpolicyagent/opa:latest-rootless
+    container_name: forge-opa
+    restart: unless-stopped
+    expose:
+      - "8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+      # Policy file is mounted below.
+      - "/policies/policy.rego"
+    volumes:
+      - ./examples/opa-webhook/policy.rego:/policies/policy.rego:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8181/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - forge-net

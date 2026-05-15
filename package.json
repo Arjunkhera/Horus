@@ -14,5 +14,8 @@
     "lint": "pnpm -r typecheck",
     "clean": "pnpm -r exec -- rm -rf dist node_modules"
   },
-  "devDependencies": {}
+  "dependencies": {
+    "@types/sql.js": "^1.4.11",
+    "sql.js": "^1.14.1"
+  }
 }

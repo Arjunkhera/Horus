@@ -15,9 +15,13 @@ export {
   PublishAuthError,
   PublishPushError,
   PublishValidationError,
+  PreUploadValidationError,
+  ForgeCoreVersionMismatchError,
+  type ValidationIssue,
 } from './errors.js';
 
 // Implementations
 export { FilesystemAdapter } from './filesystem-adapter.js';
 export { CompositeAdapter } from './composite-adapter.js';
 export { GitAdapter, type GitAdapterConfig } from './git-adapter.js';
+export { HttpAdapter, type HttpAdapterOptions } from './http-adapter.js';

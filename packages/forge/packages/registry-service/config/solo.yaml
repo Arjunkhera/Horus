@@ -1,0 +1,31 @@
+# Forge Registry — Solo developer configuration
+#
+# This file provides:
+#   - auth.strategy: builtin with a single local admin user
+#   - storage.backend: git (URL and deploy key set via environment variables)
+#
+# Sensitive values (git URL, deploy key path, admin API key) are NEVER stored
+# here — they are injected via environment variables at container startup.
+#
+# The registry service generates a one-time admin API key on first boot and
+# prints it to the container log. Retrieve it with:
+#   docker logs forge-registry 2>&1 | grep "admin key"
+
+server:
+  host: "0.0.0.0"
+  port: 8744
+
+# Storage backend is configured entirely via env vars (FORGE_REGISTRY_STORAGE_BACKEND,
+# FORGE_REGISTRY_GIT_URL, etc.) — the placeholder below is overridden at runtime.
+storage:
+  backend: git
+  url: "PLACEHOLDER_SET_VIA_ENV"
+
+auth:
+  strategy: builtin
+  admins:
+    - id: solo-admin
+      name: "Solo Developer"
+
+logLevel: info
+dbPath: /data/registry/forge-registry.db

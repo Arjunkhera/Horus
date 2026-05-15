@@ -271,6 +271,57 @@ services:
       retries: 3
 
 
+  # ── Forge Registry ─────────────────────────────────────────────────────────
+  # Artifact registry service for publishing and resolving Forge artifacts
+  # (skills, agents, plugins, personas, workspace-configs).
+  # Uses a personal git repo as the storage backend — no S3 credentials needed.
+  # Configure FORGE_REGISTRY_GIT_URL in workspace.env before starting.
+  forge-registry:
+    build:
+      context: packages/forge/packages/registry-service
+      dockerfile: Dockerfile
+    ports:
+      - "${FORGE_REGISTRY_PORT:-8744}:8744"
+    volumes:
+      - forge-registry-data:/data/registry
+      - ./packages/forge/packages/registry-service/config/solo.yaml:/etc/forge-registry/config.yaml:ro
+      # Uncomment to mount an SSH deploy key:
+      # - ${FORGE_REGISTRY_DEPLOY_KEY_FILE}:/run/secrets/deploy_key:ro
+    environment:
+      - FORGE_REGISTRY_HOST=0.0.0.0
+      - FORGE_REGISTRY_PORT=8744
+      - FORGE_REGISTRY_LOG_LEVEL=${FORGE_REGISTRY_LOG_LEVEL:-info}
+      - FORGE_REGISTRY_DB_PATH=/data/registry/forge-registry.db
+      - FORGE_REGISTRY_CONFIG=/etc/forge-registry/config.yaml
+      # Git storage backend
+      - FORGE_REGISTRY_STORAGE_BACKEND=git
+      - FORGE_REGISTRY_GIT_URL=${FORGE_REGISTRY_GIT_URL:-}
+      - FORGE_REGISTRY_GIT_LOCAL_PATH=/data/registry/git-store
+      - FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH=${FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH:-}
+      # Typesense (shared with other Horus services)
+      - FORGE_REGISTRY_TYPESENSE_HOST=typesense
+      - FORGE_REGISTRY_TYPESENSE_PORT=8108
+      - FORGE_REGISTRY_TYPESENSE_API_KEY=${TYPESENSE_API_KEY:-horus-local-key}
+    depends_on:
+      typesense:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
   # ── Reader Server ──────────────────────────────────────────────────────────
   # Express server: serves reader SPA, proxies /api/* to Anvil, and handles
   # POST /api/ai/ask with Cursor SDK agent lifecycle + SSE streaming.
@@ -367,3 +418,5 @@ volumes:
   neo4j-data:
   # Neo4j logs
   neo4j-logs:
+  # Forge Registry: sqlite db + local git clone of the artifact store
+  forge-registry-data:

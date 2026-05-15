@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SemVerSchema } from './skill-meta.js';
+import { SemVerSchema, ArtifactReferenceSchema } from './skill-meta.js';
 
 /**
  * Schema for metadata.yaml — describes a Forge persona artifact.
@@ -27,6 +27,9 @@ export const PersonaMetaSchema = z.object({
   tags: z.array(z.string()).default([]),
   homepage: z.string().url().optional(),
   repository: z.string().optional(),
+  references: z.array(ArtifactReferenceSchema).default([]).optional(),
+  /** Whether this artifact has been verified by the registry operator */
+  verified: z.boolean().optional(),
 });
 
 export type PersonaMeta = z.infer<typeof PersonaMetaSchema>;
