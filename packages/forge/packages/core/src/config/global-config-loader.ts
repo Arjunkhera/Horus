@@ -21,26 +21,25 @@ export const GLOBAL_CONFIG_DIR = process.env.FORGE_CONFIG_PATH
 export const GLOBAL_CONFIG_PATH = path.join(GLOBAL_CONFIG_DIR, 'forge.yaml');
 
 /**
- * The default local filesystem registry. Always present at the front of
- * the registry list so local artifacts take priority (local-first resolution).
+ * The default local HTTP registry (solo-dev registry-service on port 8744).
+ * Always present at the front of the registry list so local artifacts take
+ * priority (local-first resolution).
  */
 export const DEFAULT_LOCAL_REGISTRY: RegistryConfig = {
-  type: 'filesystem' as const,
+  type: 'http',
   name: 'local',
-  path: '~/.Horus/data/registry',
+  url: 'http://localhost:8744',
   writable: true,
 };
 
 /**
- * The default global Git registry. Always present at the end of the
+ * The default public Forge registry. Always present at the end of the
  * registry list as the last-resort read-only source for community artifacts.
  */
 export const DEFAULT_GLOBAL_REGISTRY: RegistryConfig = {
-  type: 'git' as const,
+  type: 'http',
   name: 'global',
-  url: 'https://github.com/Arjunkhera/Forge-Registry.git',
-  ref: 'master',
-  path: 'registry',
+  url: 'https://registry.horus.dev',
   writable: false,
 };
 
@@ -85,7 +84,7 @@ export async function loadGlobalConfig(
     const parsed = parseYaml(raw);
     const config = GlobalConfigSchema.parse(parsed);
 
-    // Normalize git registries (resolve legacy 'branch' -> 'ref')
+    // Normalize registry configs
     config.registries = config.registries.map(normalizeRegistryConfig);
 
     // Ensure default registries are present
@@ -112,25 +111,12 @@ export async function loadGlobalConfig(
     }
     config.repos.scan_paths = config.repos.scan_paths.map(expandPath);
 
-    // Expand registry paths for filesystem registries
-    for (const registry of config.registries) {
-      if (registry.type === 'filesystem') {
-        (registry as any).path = expandPath((registry as any).path);
-      }
-    }
-
     return config;
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
       // No global config — return defaults with default registries
       const config = GlobalConfigSchema.parse({});
       config.registries = ensureDefaultRegistries(config.registries);
-      // Expand local registry path
-      for (const registry of config.registries) {
-        if (registry.type === 'filesystem') {
-          (registry as any).path = expandPath((registry as any).path);
-        }
-      }
       return config;
     }
     // File exists but is malformed — warn and return defaults
@@ -139,11 +125,6 @@ export async function loadGlobalConfig(
     );
     const config = GlobalConfigSchema.parse({});
     config.registries = ensureDefaultRegistries(config.registries);
-    for (const registry of config.registries) {
-      if (registry.type === 'filesystem') {
-        (registry as any).path = expandPath((registry as any).path);
-      }
-    }
     return config;
   }
 }

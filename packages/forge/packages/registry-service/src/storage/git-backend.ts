@@ -27,6 +27,7 @@ import type {
   BundleFiles,
   StoredBundle,
   ArtifactIndexMeta,
+  VersionUnverifyOverride,
 } from './types.js';
 import type { GitStorageConfig } from '../config.js';
 
@@ -354,6 +355,107 @@ export class GitStorageBackend implements StorageBackend {
 
     const versions = entries.filter((e) => semver.valid(e));
     return versions.sort((a, b) => semver.rcompare(a, b));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Verification helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Path to the artifact-id-level verified record inside the working tree.
+   * Layout: {workDir}/verified-records/{type}s/{id}.json
+   */
+  private verifiedRecordPath(type: ArtifactType, id: string): string {
+    return path.join(this.workDir, 'verified-records', typeSegment(type), `${id}.json`);
+  }
+
+  /**
+   * Path to the per-version unverify override file inside the working tree.
+   * Layout: {workDir}/verified-overrides/{type}s/{id}/{version}.json
+   */
+  private overridePath(type: ArtifactType, id: string, version: string): string {
+    return path.join(this.workDir, 'verified-overrides', typeSegment(type), id, `${version}.json`);
+  }
+
+  async isVerified(type: ArtifactType, id: string): Promise<boolean> {
+    await this.ensureRepo();
+    try {
+      const content = await fs.readFile(this.verifiedRecordPath(type, id), 'utf8');
+      const parsed = JSON.parse(content) as { verified?: boolean };
+      return parsed.verified === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async setVerified(type: ArtifactType, id: string, verified: boolean): Promise<void> {
+    await this.ensureRepo();
+    const recordPath = this.verifiedRecordPath(type, id);
+    await fs.mkdir(path.dirname(recordPath), { recursive: true });
+    const payload = JSON.stringify({ verified, verifiedAt: new Date().toISOString() });
+    await fs.writeFile(recordPath, payload, 'utf8');
+
+    // Commit the verification record
+    await this.mutex.acquire();
+    try {
+      const rel = path.relative(this.workDir, recordPath);
+      await this.git(['add', rel]);
+      await this.git([
+        'commit', '-m', `verify: ${type}/${id} verified=${String(verified)}`,
+        '--author', 'Forge Registry <forge-registry@localhost>',
+      ]);
+      await this.git(['push', 'origin', 'HEAD']);
+    } finally {
+      this.mutex.release();
+    }
+  }
+
+  async isVersionRevoked(type: ArtifactType, id: string, version: string): Promise<boolean> {
+    return this.isVersionUnverified(type, id, version);
+  }
+
+  async isVersionUnverified(type: ArtifactType, id: string, version: string): Promise<boolean> {
+    await this.ensureRepo();
+    try {
+      await fs.access(this.overridePath(type, id, version));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async setVersionUnverified(
+    type: ArtifactType,
+    id: string,
+    version: string,
+    revokedBy: string,
+    reason?: string,
+  ): Promise<void> {
+    await this.ensureRepo();
+    const overridePath = this.overridePath(type, id, version);
+    await fs.mkdir(path.dirname(overridePath), { recursive: true });
+
+    const override: VersionUnverifyOverride = {
+      verified: false,
+      revokedBy,
+      revokedAt: new Date().toISOString(),
+      ...(reason !== undefined ? { reason } : {}),
+    };
+    await fs.writeFile(overridePath, JSON.stringify(override), 'utf8');
+
+    // Commit the override
+    await this.mutex.acquire();
+    try {
+      const rel = path.relative(this.workDir, overridePath);
+      await this.git(['add', rel]);
+      await this.git([
+        'commit', '-m', `unverify: ${type}/${id}@${version}`,
+        '--author', 'Forge Registry <forge-registry@localhost>',
+      ]);
+      await this.git(['push', 'origin', 'HEAD']);
+    } finally {
+      this.mutex.release();
+    }
   }
 
   async listAll(): Promise<ArtifactIndexMeta[]> {

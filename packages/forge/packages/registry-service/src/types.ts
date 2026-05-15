@@ -24,11 +24,7 @@ export interface ServiceUser {
 /**
  * Actions that can be authorized by the auth strategy.
  */
-<<<<<<< HEAD
 export type ServiceAction = 'publish' | 'read' | 'verify' | 'unverify';
-=======
-export type ServiceAction = 'publish' | 'read' | 'unverify';
->>>>>>> f461db5 (feat(registry-service): add per-version verification revocation [1d.2])
 
 /**
  * Resource descriptor passed to authorization checks.

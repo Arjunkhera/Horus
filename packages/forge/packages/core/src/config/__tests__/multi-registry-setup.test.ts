@@ -27,21 +27,18 @@ describe('Multi-registry setup', () => {
   });
 
   describe('DEFAULT_LOCAL_REGISTRY', () => {
-    it('is a writable filesystem registry named "local"', () => {
-      expect(DEFAULT_LOCAL_REGISTRY.type).toBe('filesystem');
+    it('is a writable http registry named "local"', () => {
+      expect(DEFAULT_LOCAL_REGISTRY.type).toBe('http');
       expect(DEFAULT_LOCAL_REGISTRY.name).toBe('local');
       expect((DEFAULT_LOCAL_REGISTRY as any).writable).toBe(true);
     });
   });
 
   describe('DEFAULT_GLOBAL_REGISTRY', () => {
-    it('is a read-only git registry named "global"', () => {
-      expect(DEFAULT_GLOBAL_REGISTRY.type).toBe('git');
+    it('is a read-only http registry named "global"', () => {
+      expect(DEFAULT_GLOBAL_REGISTRY.type).toBe('http');
       expect(DEFAULT_GLOBAL_REGISTRY.name).toBe('global');
-      expect((DEFAULT_GLOBAL_REGISTRY as any).url).toBe(
-        'https://github.com/Arjunkhera/Forge-Registry.git',
-      );
-      expect((DEFAULT_GLOBAL_REGISTRY as any).ref).toBe('master');
+      expect((DEFAULT_GLOBAL_REGISTRY as any).url).toBeDefined();
       expect((DEFAULT_GLOBAL_REGISTRY as any).writable).toBe(false);
     });
   });
@@ -62,39 +59,35 @@ describe('Multi-registry setup', () => {
 
     it('does not duplicate local if already present', () => {
       const existing: RegistryConfig[] = [
-        { type: 'filesystem', name: 'local', path: '/custom/path', writable: true },
+        { type: 'http' as const, name: 'local', url: 'http://localhost:8744', writable: true },
       ];
       const result = ensureDefaultRegistries(existing);
       const locals = result.filter(r => r.name === 'local');
       expect(locals).toHaveLength(1);
-      expect((locals[0] as any).path).toBe('/custom/path');
+      expect((locals[0] as any).url).toBe('http://localhost:8744');
     });
 
     it('does not duplicate global if already present', () => {
       const existing: RegistryConfig[] = [
         {
-          type: 'git',
+          type: 'http' as const,
           name: 'global',
-          url: 'https://custom.com/reg.git',
-          ref: 'main',
-          path: 'registry',
+          url: 'https://custom.com/reg',
           writable: false,
         },
       ];
       const result = ensureDefaultRegistries(existing);
       const globals = result.filter(r => r.name === 'global');
       expect(globals).toHaveLength(1);
-      expect((globals[0] as any).url).toBe('https://custom.com/reg.git');
+      expect((globals[0] as any).url).toBe('https://custom.com/reg');
     });
 
     it('sandwiches user registries between local and global', () => {
       const existing: RegistryConfig[] = [
         {
-          type: 'git',
+          type: 'http' as const,
           name: 'private',
-          url: 'https://github.com/myorg/registry.git',
-          ref: 'main',
-          path: 'registry',
+          url: 'https://git-registry.example.com',
           writable: true,
           tokenEnv: 'MY_TOKEN',
         },
@@ -109,20 +102,16 @@ describe('Multi-registry setup', () => {
     it('enforces local-first even if local was in the middle', () => {
       const existing: RegistryConfig[] = [
         {
-          type: 'git',
+          type: 'http' as const,
           name: 'private',
-          url: 'https://github.com/myorg/registry.git',
-          ref: 'main',
-          path: 'registry',
+          url: 'https://git-registry.example.com',
           writable: true,
         },
-        { type: 'filesystem', name: 'local', path: '/my/local', writable: true },
+        { type: 'http' as const, name: 'local', url: 'http://localhost:8744', writable: true },
         {
-          type: 'git',
+          type: 'http' as const,
           name: 'global',
-          url: 'https://github.com/Arjunkhera/Forge-Registry.git',
-          ref: 'master',
-          path: 'registry',
+          url: 'https://registry.horus.dev',
           writable: false,
         },
       ];
@@ -296,41 +285,34 @@ describe('Multi-registry setup', () => {
   });
 
   describe('normalizeRegistryConfig()', () => {
-    it('maps legacy branch to ref for git registries', () => {
+    it('is a no-op for http registries', () => {
       const reg: RegistryConfig = {
-        type: 'git',
+        type: 'http',
         name: 'test',
-        url: 'https://github.com/test/reg.git',
-        ref: 'main', // default
-        branch: 'develop',
-        path: 'registry',
+        url: 'https://git-registry.example.com',
         writable: false,
       };
       const normalized = normalizeRegistryConfig(reg);
-      expect((normalized as any).ref).toBe('develop');
-      expect((normalized as any).branch).toBeUndefined();
+      expect(normalized).toEqual(reg);
     });
 
-    it('preserves ref when both ref and branch are set (ref wins if non-default)', () => {
+    it('is a no-op for http registries with tokenEnv', () => {
       const reg: RegistryConfig = {
-        type: 'git',
+        type: 'http',
         name: 'test',
-        url: 'https://github.com/test/reg.git',
-        ref: 'v2',
-        branch: 'develop',
-        path: 'registry',
+        url: 'https://git-registry.example.com',
+        tokenEnv: 'MY_TOKEN',
         writable: false,
       };
       const normalized = normalizeRegistryConfig(reg);
-      // ref is non-default, so it wins
-      expect((normalized as any).ref).toBe('v2');
+      expect((normalized as any).tokenEnv).toBe('MY_TOKEN');
     });
 
-    it('is a no-op for filesystem registries', () => {
+    it('is a no-op for http registries (writable)', () => {
       const reg: RegistryConfig = {
-        type: 'filesystem',
+        type: 'http',
         name: 'local',
-        path: '/some/path',
+        url: 'http://localhost:8744',
         writable: true,
       };
       const normalized = normalizeRegistryConfig(reg);
@@ -342,20 +324,18 @@ describe('Multi-registry setup', () => {
     it('supports local + private + global registry ordering', async () => {
       await fs.writeFile(configPath, toYaml({
         registries: [
-          { type: 'filesystem', name: 'local', path: '~/.Horus/data/registry', writable: true },
+          { type: 'http', name: 'local', url: 'http://localhost:8744', writable: true },
           {
-            type: 'git',
+            type: 'http',
             name: 'private',
-            url: 'https://github.com/myorg/my-forge-registry.git',
-            ref: 'main',
+            url: 'https://git-registry.example.com',
             tokenEnv: 'FORGE_PRIVATE_REGISTRY_TOKEN',
             writable: true,
           },
           {
-            type: 'git',
+            type: 'http',
             name: 'global',
-            url: 'https://github.com/Arjunkhera/Forge-Registry.git',
-            ref: 'master',
+            url: 'https://registry.horus.dev',
             writable: false,
           },
         ],
@@ -364,16 +344,16 @@ describe('Multi-registry setup', () => {
       const config = await loadGlobalConfig(configPath);
       expect(config.registries).toHaveLength(3);
       expect(config.registries[0]!.name).toBe('local');
-      expect(config.registries[0]!.type).toBe('filesystem');
+      expect(config.registries[0]!.type).toBe('http');
       expect((config.registries[0] as any).writable).toBe(true);
 
       expect(config.registries[1]!.name).toBe('private');
-      expect(config.registries[1]!.type).toBe('git');
+      expect(config.registries[1]!.type).toBe('http');
       expect((config.registries[1] as any).writable).toBe(true);
       expect((config.registries[1] as any).tokenEnv).toBe('FORGE_PRIVATE_REGISTRY_TOKEN');
 
       expect(config.registries[2]!.name).toBe('global');
-      expect(config.registries[2]!.type).toBe('git');
+      expect(config.registries[2]!.type).toBe('http');
       expect((config.registries[2] as any).writable).toBe(false);
     });
   });

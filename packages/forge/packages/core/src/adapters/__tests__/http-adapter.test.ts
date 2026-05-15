@@ -170,8 +170,8 @@ describe('HttpAdapter', () => {
         type: 'agent' as const,
         tags: [],
         dependencies: {},
-        // rootSkill intentionally omitted
-      } as ArtifactBundle['meta'],
+        // rootSkill intentionally omitted to trigger pre-upload validation
+      } as unknown as ArtifactBundle['meta'],
       content: '# My Agent',
       contentPath: 'AGENT.md',
     };

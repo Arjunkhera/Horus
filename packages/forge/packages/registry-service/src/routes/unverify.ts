@@ -116,8 +116,11 @@ export function registerUnverifyRoute(
 
       // Append audit log entry
       await auditLog.append({
+        strategy: 'admin',
         actor: actorId,
         action: 'unverify',
+        resource: `${type}:${id}@${version}`,
+        decision: 'permit',
         targetType: type,
         targetId: id,
         targetVersion: version,

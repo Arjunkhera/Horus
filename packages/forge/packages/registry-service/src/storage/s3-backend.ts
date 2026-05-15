@@ -319,55 +319,9 @@ export class S3StorageBackend implements StorageBackend {
     return versions.sort((a, b) => semver.rcompare(a, b));
   }
 
-  async isVerified(type: ArtifactType, id: string): Promise<boolean> {
-    // Read the `verified` field from the latest version's metadata.yaml
-    try {
-      const versions = await this.listVersions(type, id);
-      if (versions.length === 0) return false;
-
-      // Use the latest version (first after descending sort)
-      const latestVersion = versions[0]!;
-      const metaKey = this.key(type, id, latestVersion, 'metadata.yaml');
-      const getResp = await this.client.send(
-        new GetObjectCommand({ Bucket: this.bucket, Key: metaKey }),
-      );
-      if (!getResp.Body) return false;
-
-      const { parse: parseYaml } = await import('yaml');
-      const chunks: Uint8Array[] = [];
-      const stream = getResp.Body as AsyncIterable<Uint8Array>;
-      for await (const chunk of stream) {
-        chunks.push(chunk);
-      }
-      const content = Buffer.concat(chunks).toString('utf8');
-      const parsed = parseYaml(content) as Record<string, unknown>;
-      return parsed['verified'] === true;
-    } catch {
-      return false;
-    }
-  }
-
   async isVersionRevoked(type: ArtifactType, id: string, version: string): Promise<boolean> {
-    // Check for a per-version revocation file: {prefix}{type}s/{id}/{version}/revocation.json
-    // This file, if present, contains { revoked: true } to mark the version as revoked.
-    const revocationKey = this.key(type, id, version, 'revocation.json');
-    try {
-      const getResp = await this.client.send(
-        new GetObjectCommand({ Bucket: this.bucket, Key: revocationKey }),
-      );
-      if (!getResp.Body) return false;
-
-      const chunks: Uint8Array[] = [];
-      const stream = getResp.Body as AsyncIterable<Uint8Array>;
-      for await (const chunk of stream) {
-        chunks.push(chunk);
-      }
-      const data = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
-      return data['revoked'] === true;
-    } catch {
-      // File doesn't exist or is unreadable — not revoked
-      return false;
-    }
+    // Delegate to isVersionUnverified — a version is "revoked" if there's an unverify override
+    return this.isVersionUnverified(type, id, version);
   }
 
   /**

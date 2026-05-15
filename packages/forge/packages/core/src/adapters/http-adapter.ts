@@ -40,19 +40,12 @@ import {
 // Package version (runtime read from package.json via createRequire)
 // ---------------------------------------------------------------------------
 
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 function getPackageVersion(): string {
   try {
-    // createRequire is the canonical way to load JSON in Node ESM with NodeNext.
-    const require = createRequire(import.meta.url);
-    const pkgPath = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../../package.json',
-    );
-    const pkg = require(pkgPath) as { version: string };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pkg = require(path.resolve(__dirname, '../../package.json')) as { version: string };
     return pkg.version;
   } catch {
     return '0.0.0';

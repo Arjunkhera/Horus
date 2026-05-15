@@ -2,7 +2,7 @@
 # Context: monorepo root. Builds the shared search package in isolation.
 FROM node:22-bookworm-slim AS search-builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /search
 COPY .npmrc ./
@@ -15,7 +15,7 @@ RUN pnpm build
 # ─── Stage 1: Build Forge ─────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /build
 
@@ -48,7 +48,7 @@ RUN pnpm --filter @forge/core build \
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────
 FROM node:22-bookworm-slim
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \

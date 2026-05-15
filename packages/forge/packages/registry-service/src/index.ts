@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   // 5. Create auth strategy (bootstraps admin keys on first start)
   const auth = new BuiltinAuthStrategy(
     config.dbPath,
-    config.auth.admins,
+    config.auth.strategy === 'builtin' ? config.auth.admins : [],
     bootstrapLogger as never, // pino is compatible with FastifyBaseLogger
   );
 

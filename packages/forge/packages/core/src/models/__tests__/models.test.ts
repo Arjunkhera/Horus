@@ -216,63 +216,60 @@ describe('ForgeConfig Schema', () => {
     expect(result.outputDir).toBe('.');
   });
 
-  it('should parse filesystem registry', () => {
+  it('should parse http registry (basic)', () => {
     const config = {
       name: 'my-workspace',
       registries: [
         {
-          type: 'filesystem' as const,
+          type: 'http' as const,
           name: 'local',
-          path: './registry',
+          url: 'http://localhost:8744',
         },
       ],
     };
     const result = ForgeConfigSchema.parse(config);
     expect(result.registries).toHaveLength(1);
     const reg = result.registries[0];
-    if (reg.type === 'filesystem') {
-      expect(reg.path).toBe('./registry');
-    }
+    expect(reg.type).toBe('http');
+    expect(reg.url).toBe('http://localhost:8744');
   });
 
-  it('should parse git registry with defaults', () => {
+  it('should parse http registry with defaults', () => {
     const config = {
       name: 'my-workspace',
       registries: [
         {
-          type: 'git' as const,
+          type: 'http' as const,
           name: 'remote',
-          url: 'https://github.com/example/registry.git',
+          url: 'http://localhost:8744',
         },
       ],
     };
     const result = ForgeConfigSchema.parse(config);
     const reg = result.registries[0];
-    expect(reg.type).toBe('git');
-    if (reg.type === 'git') {
-      expect(reg.ref).toBe('main');
-      expect(reg.path).toBe('registry');
+    expect(reg.type).toBe('http');
+    if (reg.type === 'http') {
+      expect(reg.url).toBe('http://localhost:8744');
     }
   });
 
-  it('should parse git registry with custom values', () => {
+  it('should parse http registry with custom values', () => {
     const config = {
       name: 'my-workspace',
       registries: [
         {
-          type: 'git' as const,
+          type: 'http' as const,
           name: 'remote',
-          url: 'https://github.com/example/registry.git',
-          ref: 'develop',
-          path: 'custom-registry',
+          url: 'http://localhost:8744',
+          tokenEnv: 'MY_TOKEN',
         },
       ],
     };
     const result = ForgeConfigSchema.parse(config);
     const reg = result.registries[0];
-    if (reg.type === 'git') {
-      expect(reg.ref).toBe('develop');
-      expect(reg.path).toBe('custom-registry');
+    if (reg.type === 'http') {
+      expect(reg.url).toBe('http://localhost:8744');
+      expect(reg.tokenEnv).toBe('MY_TOKEN');
     }
   });
 
@@ -464,42 +461,41 @@ describe('SemVer Schema', () => {
 });
 
 describe('Discriminated Union - RegistryConfig', () => {
-  it('should correctly discriminate filesystem registry', () => {
+  it('should correctly discriminate http registry (local)', () => {
     const config = {
       name: 'test',
       registries: [
         {
-          type: 'filesystem' as const,
+          type: 'http' as const,
           name: 'local',
-          path: '/some/path',
+          url: 'http://localhost:8744',
         },
       ],
     };
     const result = ForgeConfigSchema.parse(config);
     const reg = result.registries[0];
-    expect(reg.type).toBe('filesystem');
-    if (reg.type === 'filesystem') {
-      expect(reg.path).toBe('/some/path');
+    expect(reg.type).toBe('http');
+    if (reg.type === 'http') {
+      expect(reg.url).toBe('http://localhost:8744');
     }
   });
 
-  it('should correctly discriminate git registry', () => {
+  it('should correctly discriminate http registry (remote)', () => {
     const config = {
       name: 'test',
       registries: [
         {
-          type: 'git' as const,
+          type: 'http' as const,
           name: 'remote',
-          url: 'https://github.com/example/repo.git',
+          url: 'https://registry.horus.dev',
         },
       ],
     };
     const result = ForgeConfigSchema.parse(config);
     const reg = result.registries[0];
-    expect(reg.type).toBe('git');
-    if (reg.type === 'git') {
+    expect(reg.type).toBe('http');
+    if (reg.type === 'http') {
       expect('url' in reg).toBe(true);
-      expect('ref' in reg).toBe(true);
     }
   });
 
