@@ -8,7 +8,7 @@ import {
   readdirSync,
   cpSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
@@ -216,10 +216,22 @@ export function createSlotDirs(slotDataPath: string, vaultNames: string[] = ['de
     'neo4j-logs',
   ];
   for (const dir of dirs) {
-    const full = join(slotDataPath, dir);
-    mkdirSync(full, { recursive: true });
-    // Allow any container UID to write into these dirs
-    chmodSync(full, 0o777);
+    const fullPath = join(slotDataPath, dir);
+    mkdirSync(fullPath, { recursive: true });
+    try {
+      chmodSync(fullPath, 0o777);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EPERM' || code === 'EACCES') {
+        try {
+          execSync('sudo chmod 777 ' + fullPath, { stdio: 'pipe' });
+        } catch {
+          console.warn(`[test-env] Warning: could not chmod ${fullPath} (permission denied, sudo also failed)`);
+        }
+      } else {
+        throw err;
+      }
+    }
   }
 }
 
