@@ -504,6 +504,28 @@ export const setupCommand = new Command('setup')
       }
     }
 
+    // Step 7b: Chown Forge data dirs to UID 1001 on Linux
+    // The Forge container runs as UID 1001. On Linux (bare Docker/Podman, no
+    // uid-mapping shim), directories created by the provisioning user are owned
+    // by root or the current user, causing EACCES when Forge tries to open its
+    // config file. Docker Desktop on macOS handles uid mapping transparently, so
+    // we skip this step there.
+    if (process.platform === 'linux') {
+      const forgeDirs = ['config', 'registry', 'workspaces', 'sessions']
+        .map((d) => join(dataDir, d));
+      for (const dir of forgeDirs) {
+        mkdirSync(dir, { recursive: true });
+      }
+      const dirList = forgeDirs.map((d) => `"${d}"`).join(' ');
+      try {
+        execSync(`chown -R 1001:1001 ${dirList}`, { stdio: 'pipe' });
+      } catch (error) {
+        console.log(chalk.yellow('Warning: could not chown Forge data dirs to UID 1001.'));
+        console.log(chalk.dim('  Forge may fail to start if directory ownership is incorrect.'));
+        console.log(chalk.dim(`  Run manually: sudo chown -R 1001:1001 ${forgeDirs.join(' ')}`));
+      }
+    }
+
     // Step 8: Pull images (non-fatal — images may not be published yet)
     console.log('');
     console.log(chalk.bold('Pulling container images...'));
