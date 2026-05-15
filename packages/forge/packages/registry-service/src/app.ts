@@ -19,11 +19,8 @@ import { registerReadRoutes } from './routes/read.js';
 import { registerTypeRoutes } from './routes/types.js';
 import { registerSearchRoute } from './routes/search.js';
 import { registerDepsRoute } from './routes/deps.js';
-<<<<<<< HEAD
 import { registerVerifyRoute } from './routes/verify.js';
-=======
 import { registerUnverifyRoute } from './routes/unverify.js';
->>>>>>> f461db5 (feat(registry-service): add per-version verification revocation [1d.2])
 
 export interface AppDependencies {
   config: ServiceConfig;
@@ -67,11 +64,8 @@ export function createApp(deps: AppDependencies): FastifyInstance {
     registerSearchRoute(app, deps.search);
   }
   registerDepsRoute(app, deps.storage);
-<<<<<<< HEAD
   registerVerifyRoute(app, deps.storage, deps.auditLog, deps.auth, deps.search);
-=======
   registerUnverifyRoute(app, deps.storage, deps.auditLog, deps.auth, deps.search);
->>>>>>> f461db5 (feat(registry-service): add per-version verification revocation [1d.2])
 
   // Global error handler
   app.setErrorHandler((err, _request, reply) => {

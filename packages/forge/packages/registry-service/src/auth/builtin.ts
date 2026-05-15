@@ -157,11 +157,7 @@ export class BuiltinAuthStrategy implements AuthStrategy {
       return 'permit';
     }
 
-<<<<<<< HEAD
-    if (action === 'publish' || action === 'verify') {
-=======
-    if (action === 'publish' || action === 'unverify') {
->>>>>>> f461db5 (feat(registry-service): add per-version verification revocation [1d.2])
+    if (action === 'publish' || action === 'verify' || action === 'unverify') {
       if (user?.role === 'admin') return 'permit';
       return 'deny';
     }
