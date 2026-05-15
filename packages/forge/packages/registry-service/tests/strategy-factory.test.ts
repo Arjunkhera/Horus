@@ -57,7 +57,13 @@ describe('createAuthStrategy', () => {
   it('resolves "webhook" to WebhookAuthStrategy', () => {
     const config: AuthConfig = {
       strategy: 'webhook',
-      webhookUrl: 'https://auth.example.com/verify',
+      webhook: {
+        url: 'https://auth.example.com/verify',
+        timeout_ms: 500,
+        fail_mode: 'deny',
+        enforce_on: 'writes',
+        header_allowlist: [],
+      },
     };
     const strategy = createAuthStrategy(config, makeDbPath(), makeLogger());
     expect(strategy).toBeInstanceOf(WebhookAuthStrategy);
@@ -66,8 +72,7 @@ describe('createAuthStrategy', () => {
   it('resolves "trusted-headers" to TrustedHeadersAuthStrategy', () => {
     const config: AuthConfig = {
       strategy: 'trusted-headers',
-      userIdHeader: 'X-Forwarded-User',
-      roleHeader: 'X-Forwarded-Role',
+      headers: { user_id: 'X-User-Id', role: 'X-Role' },
     };
     const strategy = createAuthStrategy(config, makeDbPath(), makeLogger());
     expect(strategy).toBeInstanceOf(TrustedHeadersAuthStrategy);
@@ -102,25 +107,31 @@ describe('createAuthStrategy', () => {
     expect(typeof strategy.close).toBe('function');
   });
 
-  it('webhook stub strategy throws on identify() — not yet implemented', async () => {
+  it('webhook strategy: identify() returns null for read requests (enforce_on=writes skips webhook)', async () => {
     const config: AuthConfig = {
       strategy: 'webhook',
-      webhookUrl: 'https://auth.example.com/verify',
+      webhook: {
+        url: 'https://auth.example.com/verify',
+        timeout_ms: 500,
+        fail_mode: 'deny',
+        enforce_on: 'writes',
+        header_allowlist: [],
+      },
     };
     const strategy = createAuthStrategy(config, makeDbPath(), makeLogger());
-    await expect(strategy.identify({} as never)).rejects.toThrow('not implemented');
+    // Empty request defaults to GET — treated as read, webhook is skipped
+    const user = await strategy.identify({} as never);
+    expect(user).toBeNull();
   });
 
-  it('trusted-headers stub strategy throws on authorize() — not yet implemented', () => {
+  it('trusted-headers strategy: authorize() permits reads for anonymous', () => {
     const config: AuthConfig = {
       strategy: 'trusted-headers',
-      userIdHeader: 'X-Forwarded-User',
-      roleHeader: 'X-Forwarded-Role',
+      headers: { user_id: 'X-User-Id', role: 'X-Role' },
     };
     const strategy = createAuthStrategy(config, makeDbPath(), makeLogger());
-    expect(() =>
-      strategy.authorize(null, 'read', { type: 'skill', id: 'x', version: '1.0.0' }),
-    ).toThrow('not implemented');
+    const decision = strategy.authorize(null, 'read', { type: 'skill', id: 'x', version: '1.0.0' });
+    expect(decision).toBe('permit');
   });
 });
 
