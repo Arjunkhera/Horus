@@ -16,11 +16,14 @@
  */
 
 import { createPublicKey } from 'node:crypto';
-import { importSPKI, jwtVerify, type KeyLike } from 'jose';
+import { importSPKI, jwtVerify, type CryptoKey, type KeyObject } from 'jose';
 import type { FastifyRequest } from 'fastify';
 import type { AuthDecision, AuthStrategy } from './types.js';
 import type { ServiceAction, ServiceResource, ServiceUser } from '../types.js';
 import type { TrustedHeadersAuthConfig } from '../config.js';
+
+/** jose v6 removed the KeyLike union type — inline it here. */
+type KeyLike = CryptoKey | KeyObject;
 
 export class TrustedHeadersAuthStrategy implements AuthStrategy {
   private readonly cfg: TrustedHeadersAuthConfig;

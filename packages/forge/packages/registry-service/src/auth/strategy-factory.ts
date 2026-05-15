@@ -28,7 +28,7 @@ export function createAuthStrategy(
       return new BuiltinAuthStrategy(dbPath, authConfig.admins, logger);
 
     case 'webhook':
-      return new WebhookAuthStrategy(authConfig);
+      return new WebhookAuthStrategy(authConfig, logger);
 
     case 'trusted-headers':
       return new TrustedHeadersAuthStrategy(authConfig);

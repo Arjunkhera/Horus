@@ -51,6 +51,17 @@ export interface ArtifactIndexMeta {
 export type BundleFiles = Map<string, Buffer | string>;
 
 /**
+ * Persisted record of a per-version unverify override.
+ * Stored as JSON alongside the artifact version in storage.
+ */
+export interface VersionUnverifyOverride {
+  verified: false;
+  revokedBy: string;
+  revokedAt: string;
+  reason?: string;
+}
+
+/**
  * A complete bundle read from storage.
  * Keys are filenames; values are raw contents as Buffer.
  */
@@ -120,10 +131,35 @@ export interface StorageBackend {
   isVerified(type: ArtifactType, id: string): Promise<boolean>;
 
   /**
+   * Set the artifact-id-level verification flag.
+   * Persists verified=true/false at the artifact ID level.
+   */
+  setVerified(type: ArtifactType, id: string, verified: boolean): Promise<void>;
+
+  /**
    * Check whether a specific version of an artifact has been revoked.
    * Per-version revocations set verified=false on the specific version node,
    * regardless of artifact-id level verification.
    * Returns false (not revoked) if no per-version override exists.
    */
   isVersionRevoked(type: ArtifactType, id: string, version: string): Promise<boolean>;
+
+  /**
+   * Check whether a specific version has been individually unverified (revoked).
+   * Returns true if a per-version unverify override exists for this version.
+   */
+  isVersionUnverified(type: ArtifactType, id: string, version: string): Promise<boolean>;
+
+  /**
+   * Record a per-version unverify override for a specific artifact version.
+   * This persists a revocation record so the version is treated as unverified
+   * regardless of the artifact-id-level verified flag.
+   */
+  setVersionUnverified(
+    type: ArtifactType,
+    id: string,
+    version: string,
+    revokedBy: string,
+    reason?: string,
+  ): Promise<void>;
 }

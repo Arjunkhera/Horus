@@ -128,8 +128,11 @@ export function registerVerifyRoute(
 
       // Audit log
       await auditLog.append({
+        strategy: 'admin',
         actor: actorId,
         action: 'verify',
+        resource: `${type}:${id}`,
+        decision: 'permit',
         targetType: type,
         targetId: id,
         targetVersion: '*',

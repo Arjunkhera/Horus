@@ -28,7 +28,7 @@
  */
 
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
-import type { AuthStrategy } from './types.js';
+import type { AuthDecision, AuthStrategy } from './types.js';
 import type { ServiceAction, ServiceResource, ServiceUser } from '../types.js';
 import type { WebhookAuthConfig } from '../config.js';
 

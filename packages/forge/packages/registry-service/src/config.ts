@@ -54,9 +54,38 @@ const TrustedHeadersAuthConfigSchema = z.object({
   jwt: TrustedHeadersJwtConfigSchema.optional(),
 });
 
+const WebhookAuthConfigSchema = z.object({
+  strategy: z.literal('webhook'),
+  webhook: z.object({
+    /** URL of the external auth webhook endpoint */
+    url: z.string().url(),
+    /** Timeout in milliseconds for webhook calls (default: 500ms) */
+    timeout_ms: z.number().int().min(1).default(500),
+    /**
+     * fail_mode controls what happens when the webhook is unreachable or returns
+     * a non-2xx response.
+     * - 'deny' (default): fail closed — request is denied
+     * - 'permit': fail open — request is allowed through (with a warning)
+     */
+    fail_mode: z.enum(['deny', 'permit']).default('deny'),
+    /**
+     * enforce_on controls which requests are sent to the webhook.
+     * - 'writes' (default): only non-GET/HEAD/OPTIONS requests are checked
+     * - 'all': every request goes through the webhook
+     */
+    enforce_on: z.enum(['writes', 'all']).default('writes'),
+    /**
+     * Allowlist of header names to forward to the webhook.
+     * Use '*' to forward all headers (with a startup warning).
+     */
+    header_allowlist: z.union([z.array(z.string()), z.literal('*')]).default([]),
+  }),
+});
+
 const AuthConfigSchema = z.discriminatedUnion('strategy', [
   BuiltinAuthConfigSchema,
   TrustedHeadersAuthConfigSchema,
+  WebhookAuthConfigSchema,
 ]);
 
 const S3StorageConfigSchema = z.object({
@@ -140,9 +169,11 @@ export type ServiceConfig = z.infer<typeof ServiceConfigSchema>;
 export type RegistryConfig = ServiceConfig;
 export type TypesenseConfig = z.infer<typeof TypesenseConfigSchema>;
 export type AdminUser = z.infer<typeof AdminUserSchema>;
+export type AuthConfig = z.infer<typeof AuthConfigSchema>;
 export type BuiltinAuthConfig = z.infer<typeof BuiltinAuthConfigSchema>;
 export type TrustedHeadersAuthConfig = z.infer<typeof TrustedHeadersAuthConfigSchema>;
 export type TrustedHeadersJwtConfig = z.infer<typeof TrustedHeadersJwtConfigSchema>;
+export type WebhookAuthConfig = z.infer<typeof WebhookAuthConfigSchema>;
 export type S3StorageConfig = z.infer<typeof S3StorageConfigSchema>;
 export type GitStorageConfig = z.infer<typeof GitStorageConfigSchema>;
 
