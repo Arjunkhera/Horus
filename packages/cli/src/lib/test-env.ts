@@ -8,7 +8,7 @@ import {
   readdirSync,
   cpSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
@@ -253,6 +253,12 @@ export async function preSeedNotesDir(dataDir: string, slotDataPath: string): Pr
     if (existsSync(destNotesPath)) {
       rmSync(destNotesPath, { recursive: true });
     }
+    // Allow git to trust this directory even if Docker wrote files under a different UID
+    try {
+      execSync(`git config --global --add safe.directory ${srcNotesPath}`, { stdio: 'pipe' });
+    } catch {
+      // Non-fatal: proceed even if the safe.directory config fails
+    }
     await execa('git', ['clone', '--no-hardlinks', srcNotesPath, destNotesPath]);
   } else {
     // Fallback: init a minimal git repo so Anvil doesn't try to HTTPS-clone
@@ -279,6 +285,9 @@ export async function preSeedVaultDirs(dataDir: string, slotDataPath: string, va
       if (existsSync(destVaultPath)) {
         rmSync(destVaultPath, { recursive: true });
       }
+      try {
+        execSync(`git config --global --add safe.directory ${srcVaultPath}`, { stdio: 'pipe' });
+      } catch { /* non-fatal */ }
       await execa('git', ['clone', '--no-hardlinks', srcVaultPath, destVaultPath]);
     } else {
       await execa('git', ['-C', destVaultPath, 'init']);
@@ -304,6 +313,9 @@ export async function preSeedRegistryDir(dataDir: string, slotDataPath: string):
     if (existsSync(destRegistryPath)) {
       rmSync(destRegistryPath, { recursive: true });
     }
+    try {
+      execSync(`git config --global --add safe.directory ${srcRegistryPath}`, { stdio: 'pipe' });
+    } catch { /* non-fatal */ }
     await execa('git', ['clone', '--no-hardlinks', srcRegistryPath, destRegistryPath]);
     chmodSync(destRegistryPath, 0o777);
   } else {
