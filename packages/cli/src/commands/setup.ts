@@ -76,7 +76,7 @@ export const setupCommand = new Command('setup')
     // Step 1: Check if already configured
     if (configExists()) {
       if (opts.yes) {
-        console.log(chalk.yellow('Existing configuration found. Overwriting in non-interactive mode.'));
+        console.log(chalk.yellow('Existing configuration found. Merging with existing values in non-interactive mode.'));
       } else {
         const proceed = await confirm({
           message: 'Horus is already configured. Reconfigure?',
@@ -141,62 +141,94 @@ export const setupCommand = new Command('setup')
     let config: Config;
 
     if (opts.yes) {
-      // Non-interactive mode — use flags, env vars, then defaults
+      // Non-interactive mode — use flags, env vars, then existing config, then defaults.
+      // Existing config values are preserved when no explicit flag/env override is given.
+      const existing = configExists() ? loadConfig() : null;
       const defaults = defaultConfig();
 
-      // Parse vault names and repos from flags
-      const vaultNames: string[] = opts.vaultName
-        ? Array.isArray(opts.vaultName) ? opts.vaultName : [opts.vaultName]
-        : ['default'];
-      const vaultRepos: string[] = opts.vaultRepo
-        ? Array.isArray(opts.vaultRepo) ? opts.vaultRepo : [opts.vaultRepo]
-        : [process.env.VAULT_KNOWLEDGE_REPO_URL ?? ''];
+      // Parse vault names and repos from flags (only if explicitly provided)
+      let vaults: Record<string, VaultConfig>;
+      if (opts.vaultName || opts.vaultRepo) {
+        const vaultNames: string[] = opts.vaultName
+          ? Array.isArray(opts.vaultName) ? opts.vaultName : [opts.vaultName]
+          : ['default'];
+        const vaultRepos: string[] = opts.vaultRepo
+          ? Array.isArray(opts.vaultRepo) ? opts.vaultRepo : [opts.vaultRepo]
+          : [process.env.VAULT_KNOWLEDGE_REPO_URL ?? ''];
 
-      const vaults: Record<string, VaultConfig> = {};
-      vaultNames.forEach((name, i) => {
-        vaults[name] = {
-          repo: vaultRepos[i] ?? vaultRepos[0] ?? '',
-          default: i === 0,
-        };
-      });
+        vaults = {};
+        vaultNames.forEach((name, i) => {
+          vaults[name] = {
+            repo: vaultRepos[i] ?? vaultRepos[0] ?? '',
+            default: i === 0,
+          };
+        });
+      } else {
+        // Preserve existing vaults; fall back to env var or empty default
+        vaults = existing?.vaults ?? (
+          process.env.VAULT_KNOWLEDGE_REPO_URL
+            ? { default: { repo: process.env.VAULT_KNOWLEDGE_REPO_URL, default: true } }
+            : defaults.vaults
+        );
+      }
 
       // Build github_hosts: map each unique hostname from vault repos + anvil repo
       const primaryToken = opts.githubToken || process.env.GITHUB_TOKEN || '';
-      const anvilRepo = opts.anvilRepo || process.env.ANVIL_REPO_URL || defaults.repos.anvil_notes;
-      const allRepoUrls = [anvilRepo, ...Object.values(vaults).map((v) => v.repo)].filter(Boolean);
-      const seenHosts = new Set<string>();
-      const github_hosts: Record<string, GitHubHost> = {};
-      let hostIndex = 0;
-      for (const url of allRepoUrls) {
-        const hostname = extractHostname(url);
-        if (!seenHosts.has(hostname)) {
-          seenHosts.add(hostname);
-          const hostKey = hostIndex === 0 ? 'default' : hostname;
-          github_hosts[hostKey] = {
-            host: hostname,
-            token: primaryToken,
-          };
-          hostIndex++;
+      const anvilRepo =
+        opts.anvilRepo ||
+        process.env.ANVIL_REPO_URL ||
+        existing?.repos.anvil_notes ||
+        defaults.repos.anvil_notes;
+
+      // Only rebuild github_hosts if explicit flags/tokens are provided;
+      // otherwise preserve existing entries so tokens are not lost.
+      let github_hosts: Record<string, GitHubHost>;
+      if (opts.githubToken || !existing || Object.keys(existing.github_hosts).length === 0) {
+        const allRepoUrls = [anvilRepo, ...Object.values(vaults).map((v) => v.repo)].filter(Boolean);
+        const seenHosts = new Set<string>();
+        github_hosts = {};
+        let hostIndex = 0;
+        for (const url of allRepoUrls) {
+          const hostname = extractHostname(url);
+          if (!seenHosts.has(hostname)) {
+            seenHosts.add(hostname);
+            const hostKey = hostIndex === 0 ? 'default' : hostname;
+            github_hosts[hostKey] = {
+              host: hostname,
+              token: primaryToken,
+            };
+            hostIndex++;
+          }
         }
-      }
-      // Ensure at least one github_host entry
-      if (Object.keys(github_hosts).length === 0) {
-        github_hosts['default'] = { host: 'github.com', token: primaryToken };
+        // Ensure at least one github_host entry
+        if (Object.keys(github_hosts).length === 0) {
+          github_hosts['default'] = { host: 'github.com', token: primaryToken };
+        }
+      } else {
+        github_hosts = existing.github_hosts;
       }
 
       config = {
         ...defaults,
+        // Preserve all existing top-level fields first
+        ...(existing ?? {}),
+        // Then apply runtime (always re-detected)
         runtime: runtime.name,
-        data_dir: opts.dataDir || DEFAULT_DATA_DIR,
-        host_repos_path: opts.reposPath || '',
+        // Apply field-level overrides: explicit flag > existing value > default
+        data_dir: opts.dataDir || existing?.data_dir || DEFAULT_DATA_DIR,
+        host_repos_path: opts.reposPath || existing?.host_repos_path || '',
         repos: {
           anvil_notes: anvilRepo,
-          forge_registry: opts.forgeRepo || process.env.FORGE_REGISTRY_REPO_URL || defaults.repos.forge_registry,
+          forge_registry:
+            opts.forgeRepo ||
+            process.env.FORGE_REGISTRY_REPO_URL ||
+            existing?.repos.forge_registry ||
+            defaults.repos.forge_registry,
         },
         vaults,
         github_hosts,
         ai: {
-          key: process.env.HORUS_AI_KEY || '',
+          key: process.env.HORUS_AI_KEY || existing?.ai.key || '',
         },
       };
     } else {
