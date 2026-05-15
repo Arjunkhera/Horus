@@ -429,7 +429,7 @@ export class ForgeCore {
     const globalFallbacks = globalConfig.registries.filter(r => !workspaceNames.has(r.name));
     const allRegistries = [...workspaceRegs, ...globalFallbacks];
 
-    const writableConfigs = allRegistries.filter(r => (r.type === 'filesystem' || r.type === 'git') && r.writable !== false);
+    const writableConfigs = allRegistries.filter(r => r.writable !== false);
 
     if (writableConfigs.length === 0) {
       throw new ForgeError(

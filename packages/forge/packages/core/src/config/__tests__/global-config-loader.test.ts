@@ -95,7 +95,7 @@ describe('Global Config Loader', () => {
       const nestedPath = path.join(tmpDir, 'sub', 'dir', 'config.yaml');
       await saveGlobalConfig({
         registries: [
-          { type: 'filesystem', name: 'local', path: '/some/path', writable: false },
+          { type: 'http' as const, name: 'local', url: 'http://test.example.com', writable: false },
         ],
       }, nestedPath);
 
@@ -110,7 +110,7 @@ describe('Global Config Loader', () => {
   describe('addGlobalRegistry()', () => {
     it('adds a registry to config', async () => {
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://github.com/org/reg.git', ref: 'main', path: 'registry', writable: false },
+        { type: 'http' as const, name: 'team', url: 'https://test-registry.example.com', writable: false },
         configPath,
       );
       const team = config.registries.find(r => r.name === 'team');
@@ -120,21 +120,21 @@ describe('Global Config Loader', () => {
 
     it('replaces existing registry with same name', async () => {
       await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://old-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
+        { type: 'http' as const, name: 'team', url: 'https://old-url.com/reg', writable: false },
         configPath,
       );
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://new-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
+        { type: 'http' as const, name: 'team', url: 'https://new-url.com/reg', writable: false },
         configPath,
       );
       const teams = config.registries.filter(r => r.name === 'team');
       expect(teams).toHaveLength(1);
-      expect((teams[0] as any).url).toBe('https://new-url.com/reg.git');
+      expect((teams[0] as any).url).toBe('https://new-url.com/reg');
     });
 
     it('persists to disk', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'custom', path: '/reg', writable: false },
+        { type: 'http' as const, name: 'custom', url: 'http://test.example.com', writable: false },
         configPath,
       );
       const loaded = await loadGlobalConfig(configPath);
@@ -146,7 +146,7 @@ describe('Global Config Loader', () => {
   describe('removeGlobalRegistry()', () => {
     it('removes a registry by name', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'to-remove', path: '/reg', writable: false },
+        { type: 'http' as const, name: 'to-remove', url: 'http://test.example.com', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('to-remove', configPath);
@@ -155,7 +155,7 @@ describe('Global Config Loader', () => {
 
     it('no-ops if registry name not found', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'keep', path: '/reg', writable: false },
+        { type: 'http' as const, name: 'keep', url: 'http://test.example.com', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('nonexistent', configPath);

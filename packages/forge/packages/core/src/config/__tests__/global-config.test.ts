@@ -69,7 +69,7 @@ describe('Global Config', () => {
     it('parses config with all four sections', () => {
       const raw = {
         registries: [
-          { type: 'filesystem', name: 'local', path: '/reg' },
+          { type: 'http', name: 'local', url: 'http://localhost:8744' },
         ],
         workspace: {
           mount_path: '~/workspaces',
@@ -97,7 +97,7 @@ describe('Global Config', () => {
     it('applies defaults for missing sections', () => {
       const raw = {
         registries: [
-          { type: 'filesystem', name: 'local', path: '/reg' },
+          { type: 'http', name: 'local', url: 'http://localhost:8744' },
         ],
       };
       const config = GlobalConfigSchema.parse(raw);
@@ -145,7 +145,7 @@ describe('Global Config', () => {
     it('loads a valid config file with all sections', async () => {
       await fs.writeFile(configPath, toYaml({
         registries: [
-          { type: 'filesystem', name: 'local', path: '~/registry' },
+          { type: 'http', name: 'local', url: 'http://localhost:8744' },
         ],
         workspace: {
           mount_path: '~/my-workspaces',
@@ -192,16 +192,17 @@ describe('Global Config', () => {
       expect(config.repos.index_path).toBe(path.join(os.homedir(), 'Horus/data/config/repos.json'));
     });
 
-    it('expands filesystem registry paths', async () => {
+    it('loads http registry correctly', async () => {
       await fs.writeFile(configPath, toYaml({
         registries: [
-          { type: 'filesystem', name: 'local', path: '~/registry' },
+          { type: 'http', name: 'local', url: 'http://localhost:8744' },
         ],
       }));
 
       const config = await loadGlobalConfig(configPath);
       const local = config.registries.find(r => r.name === 'local');
-      expect((local as any).path).toBe(path.join(os.homedir(), 'registry'));
+      expect(local).toBeDefined();
+      expect(local!.type).toBe('http');
     });
 
     it('returns default registries for malformed yaml', async () => {
@@ -221,15 +222,13 @@ describe('Global Config', () => {
       expect(config.workspace.mount_path).toBe(path.join(os.homedir(), 'workspaces'));
     });
 
-    it('does not expand git registry URLs', async () => {
+    it('does not modify http registry URLs', async () => {
       await fs.writeFile(configPath, toYaml({
         registries: [
           {
-            type: 'git',
+            type: 'http',
             name: 'team',
             url: 'https://github.com/org/reg.git',
-            branch: 'main',
-            path: 'registry',
           },
         ],
       }));
@@ -245,7 +244,7 @@ describe('Global Config', () => {
       const nestedPath = path.join(tmpDir, 'sub', 'dir', 'config.yaml');
       await saveGlobalConfig({
         registries: [
-          { type: 'filesystem', name: 'local', path: '/some/path', writable: false },
+          { type: 'http' as const, name: 'local', url: 'http://localhost:8744', writable: false },
         ],
         workspace: { mount_path: '~/workspaces', default_config: 'default', retention_days: 30, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions', max_sessions: 20 },
         mcp_endpoints: {},
@@ -280,7 +279,7 @@ describe('Global Config', () => {
     it('preserves all config sections', async () => {
       const original: GlobalConfig = GlobalConfigSchema.parse({
         registries: [
-          { type: 'filesystem', name: 'local', path: '/registry' },
+          { type: 'http', name: 'local', url: 'http://localhost:8744' },
         ],
         workspace: {
           mount_path: '/home/user/workspaces',
@@ -299,8 +298,8 @@ describe('Global Config', () => {
       await saveGlobalConfig(original, configPath);
       const loaded = await loadGlobalConfig(configPath);
 
-      // filesystem registry (from config) + global (injected default) = at least original
-      const fsReg = loaded.registries.find(r => r.name === 'local' && r.type === 'filesystem');
+      // http registry (from config) + global (injected default) = at least original
+      const fsReg = loaded.registries.find(r => r.name === 'local' && r.type === 'http');
       expect(fsReg).toBeDefined();
       expect(loaded.workspace.mount_path).toBe('/home/user/workspaces');
       expect(loaded.workspace.default_config).toBe('my-config');
@@ -313,7 +312,7 @@ describe('Global Config', () => {
   describe('addGlobalRegistry()', () => {
     it('adds a registry to config', async () => {
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://github.com/org/reg.git', ref: 'main', path: 'registry', writable: false },
+        { type: 'http' as const, name: 'team', url: 'https://registry.horus.dev', writable: false },
         configPath,
       );
       const team = config.registries.find(r => r.name === 'team');
@@ -323,16 +322,16 @@ describe('Global Config', () => {
 
     it('replaces existing registry with same name', async () => {
       await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://old-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
+        { type: 'http' as const, name: 'team', url: 'https://old-url.com/reg', writable: false },
         configPath,
       );
       const config = await addGlobalRegistry(
-        { type: 'git', name: 'team', url: 'https://new-url.com/reg.git', ref: 'main', path: 'registry', writable: false },
+        { type: 'http' as const, name: 'team', url: 'https://new-url.com/reg', writable: false },
         configPath,
       );
       const teams = config.registries.filter(r => r.name === 'team');
       expect(teams).toHaveLength(1);
-      expect((teams[0] as any).url).toBe('https://new-url.com/reg.git');
+      expect((teams[0] as any).url).toBe('https://new-url.com/reg');
     });
 
     it('preserves other sections when adding registry', async () => {
@@ -346,7 +345,7 @@ describe('Global Config', () => {
 
       // Add a registry
       const config = await addGlobalRegistry(
-        { type: 'filesystem', name: 'local', path: '/registry', writable: true },
+        { type: 'http' as const, name: 'local', url: 'http://localhost:8744', writable: true },
         configPath,
       );
 
@@ -358,7 +357,7 @@ describe('Global Config', () => {
 
     it('persists to disk', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'custom', path: '/reg', writable: false },
+        { type: 'http' as const, name: 'custom', url: 'http://localhost:8744', writable: false },
         configPath,
       );
       const loaded = await loadGlobalConfig(configPath);
@@ -370,7 +369,7 @@ describe('Global Config', () => {
   describe('removeGlobalRegistry()', () => {
     it('removes a registry by name', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'to-remove', path: '/reg', writable: false },
+        { type: 'http' as const, name: 'to-remove', url: 'http://localhost:8744', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('to-remove', configPath);
@@ -379,7 +378,7 @@ describe('Global Config', () => {
 
     it('no-ops if registry name not found', async () => {
       await addGlobalRegistry(
-        { type: 'filesystem', name: 'keep', path: '/reg', writable: false },
+        { type: 'http' as const, name: 'keep', url: 'http://localhost:8744', writable: false },
         configPath,
       );
       const config = await removeGlobalRegistry('nonexistent', configPath);
@@ -390,7 +389,7 @@ describe('Global Config', () => {
       // Set up initial config with registry and workspace settings
       await saveGlobalConfig({
         registries: [
-          { type: 'filesystem', name: 'custom-reg', path: '/registry', writable: false },
+          { type: 'http' as const, name: 'custom-reg', url: 'http://localhost:8744', writable: false },
         ],
         workspace: { mount_path: '~/workspaces', default_config: 'custom', retention_days: 50, store_path: '~/Horus/data/config/workspaces.json', sessions_path: '~/Horus/data/config/sessions.json', managed_repos_path: '~/Horus/data/repos', sessions_root: '~/Horus/data/sessions', max_sessions: 20 },
         mcp_endpoints: {},
@@ -408,7 +407,7 @@ describe('Global Config', () => {
     it('loads registries-only config (legacy format)', async () => {
       await fs.writeFile(configPath, toYaml({
         registries: [
-          { type: 'git', name: 'team', url: 'https://github.com/org/reg.git', branch: 'main', path: 'registry' },
+          { type: 'http', name: 'team', url: 'https://registry.horus.dev' },
         ],
       }));
 
@@ -418,7 +417,7 @@ describe('Global Config', () => {
       expect(config.registries[0]!.name).toBe('local');
       const team = config.registries.find(r => r.name === 'team');
       expect(team).toBeDefined();
-      expect(team!.type).toBe('git');
+      expect(team!.type).toBe('http');
       // New sections should have defaults
       expect(config.workspace.mount_path).toBe(path.join(os.homedir(), 'forge-workspaces'));
       expect(config.mcp_endpoints).toEqual({});

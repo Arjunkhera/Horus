@@ -27,7 +27,7 @@ const UnsupportedRegistrySchema = z
       code: z.ZodIssueCode.custom,
       message: 'V1 supports only type: http registries',
     });
-  }) as z.ZodType<never>;
+  }) as unknown as z.ZodType<never>;
 
 /**
  * Registry configuration schema.
