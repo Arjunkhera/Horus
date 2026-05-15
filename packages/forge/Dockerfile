@@ -5,6 +5,7 @@ FROM node:22-bookworm-slim AS search-builder
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /search
+COPY .npmrc ./
 COPY packages/search/package.json packages/search/tsconfig.json ./
 RUN pnpm install --no-frozen-lockfile
 COPY packages/search/src/ ./src/
