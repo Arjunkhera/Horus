@@ -10,6 +10,7 @@
  * they log a warning and return null / empty results rather than throwing.
  */
 
+import Typesense from 'typesense';
 import type { ArtifactType } from '@forge/core';
 import type { StorageBackend } from '../storage/types.js';
 import type { RegistryConfig } from '../config.js';
@@ -80,8 +81,7 @@ interface TypesenseDocumentHandle {
 }
 
 interface TypesenseCollectionHandle {
-  documents: () => TypesenseDocumentsHandle;
-  document: (id: string) => TypesenseDocumentHandle;
+  documents: (() => TypesenseDocumentsHandle) & ((id: string) => TypesenseDocumentHandle);
   retrieve: () => Promise<{ num_documents: number }>;
   delete: () => Promise<unknown>;
 }
@@ -119,9 +119,6 @@ export class RegistrySearchClient {
     if (!tsConfig?.host) return null;
 
     try {
-      // Dynamically import typesense to avoid hard dep at module load time
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const Typesense = require('typesense') as { Client: new (cfg: TypesenseClientConfig) => TypesenseClient };
       const client = new Typesense.Client({
         nodes: [
           {
@@ -132,7 +129,7 @@ export class RegistrySearchClient {
         ],
         apiKey: tsConfig.apiKey,
         connectionTimeoutSeconds: 2,
-      });
+      }) as unknown as TypesenseClient;
       return new RegistrySearchClient(client);
     } catch {
       return null;
@@ -195,7 +192,7 @@ export class RegistrySearchClient {
     try {
       await this.ensureCollection();
       const docId = `${type}:${artifactId}:${version}`;
-      await this.ts.collections(COLLECTION).document(docId).update({ verified });
+      await this.ts.collections(COLLECTION).documents(docId).update({ verified });
     } catch (err) {
       if (logger) {
         logger.warn({ err, type, artifactId, version }, 'Search verified-field patch failed (non-fatal)');

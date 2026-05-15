@@ -1,0 +1,25 @@
+server:
+  host: "0.0.0.0"
+  port: 8744
+  coreVersion: "0.1.0"
+
+storage:
+  backend: s3
+  bucket: "forge-registry"
+  region: "us-east-1"
+  prefix: ""
+
+auth:
+  strategy: builtin
+  admins:
+    - id: "dev-admin"
+      name: "Dev Admin"
+
+dbPath: "/data/registry/forge-registry.db"
+logLevel: "debug"
+
+typesense:
+  host: "typesense"
+  port: 8108
+  protocol: "http"
+  apiKey: "xyz-local-dev-key"

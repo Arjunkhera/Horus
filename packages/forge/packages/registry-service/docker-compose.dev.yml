@@ -20,7 +20,7 @@ services:
   forge-registry:
     build:
       # Build context is the monorepo root so @forge/core can be resolved.
-      context: ../../../../..
+      context: ../../../..
       dockerfile: packages/forge/packages/registry-service/Dockerfile
     image: ghcr.io/arjunkhera/forge-registry:dev
     container_name: forge-registry
@@ -41,13 +41,21 @@ services:
       FORGE_REGISTRY_S3_ACCESS_KEY_ID: "minioadmin"
       FORGE_REGISTRY_S3_SECRET_ACCESS_KEY: "minioadmin"
 
-      # Point to a local YAML config if needed (optional)
-      # FORGE_REGISTRY_CONFIG: "/etc/forge-registry/config.yaml"
+      FORGE_REGISTRY_CONFIG: "/etc/forge-registry/config.yaml"
+
+      # Typesense search backend
+      FORGE_REGISTRY_TYPESENSE_HOST: "typesense"
+      FORGE_REGISTRY_TYPESENSE_PORT: "8108"
+      FORGE_REGISTRY_TYPESENSE_PROTOCOL: "http"
+      FORGE_REGISTRY_TYPESENSE_API_KEY: "xyz-local-dev-key"
     volumes:
+      - ./deploy/dev/config.yaml:/etc/forge-registry/config.yaml:ro
       - registry-data:/data/registry
     depends_on:
       minio-init:
         condition: service_completed_successfully
+      typesense:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
       interval: 30s
@@ -63,7 +71,7 @@ services:
     container_name: forge-typesense
     restart: unless-stopped
     ports:
-      - "8108:8108"
+      - "8109:8108"
     environment:
       TYPESENSE_DATA_DIR: "/typesense-data"
       TYPESENSE_API_KEY: "xyz-local-dev-key"
@@ -71,10 +79,11 @@ services:
     volumes:
       - typesense-data:/typesense-data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
-      interval: 15s
-      timeout: 3s
-      retries: 5
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/8108' 2>/dev/null && echo ok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     networks:
       - forge-net
 
