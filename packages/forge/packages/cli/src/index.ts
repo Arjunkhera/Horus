@@ -697,9 +697,7 @@ configCmd
         colWidths: [20, 12, 50],
       });
       for (const reg of config.registries) {
-        const location = reg.type === 'filesystem' ? reg.path
-          : reg.type === 'git' ? (reg as any).url
-          : (reg as any).url;
+        const location = reg.url;
         table.push([reg.name, reg.type, location]);
       }
       console.log(table.toString());
