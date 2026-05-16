@@ -1,0 +1,49 @@
+id: test-spec
+name: Test Spec
+description: "Versioned test specification for a story — generated, commit-bound, replace-body semantics. One logical spec per story; each promotion creates an immutable commit-keyed snapshot."
+icon: "test-tube"
+fields:
+  story:
+    type: reference
+    ref_type: story
+    required: true
+    description: "The story this test spec covers"
+    search_mode: term
+  commit:
+    type: string
+    required: true
+    immutable: true
+    description: "Git commit hash this spec snapshot is bound to"
+    search_mode: term
+  profile:
+    type: string
+    required: false
+    description: "Test profile / environment identifier (e.g. unit, integration)"
+    search_mode: term
+  version:
+    type: string
+    required: true
+    description: "Monotonic version label for this spec (e.g. v1, v2)"
+    default: "v1"
+    search_mode: term
+  generated:
+    type: boolean
+    required: false
+    default: true
+    description: "Always true — specs are machine-generated, never hand-authored"
+    search_mode: none
+template:
+  frontmatter:
+    tags: [generated, test-spec]
+  body: |
+    ## Test Specification
+
+    <!-- Generated — do not edit manually. Bound to commit. -->
+
+    ### Story
+
+    ### Acceptance Criteria Under Test
+
+    ### Test Cases
+
+    ### Notes

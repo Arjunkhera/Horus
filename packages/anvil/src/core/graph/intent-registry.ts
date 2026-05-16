@@ -54,6 +54,30 @@ const MVP_INTENTS: IntentDefinition[] = [
     inverseLabel: 'contains',
     description: 'Membership — source is a member of or belongs to the target',
   },
+  {
+    id: 'has_spec',
+    direction: 'directional',
+    inverseLabel: 'spec_of',
+    description: 'Testing — story has a test-spec; source story, target test-spec',
+  },
+  {
+    id: 'ran',
+    direction: 'directional',
+    inverseLabel: 'run_by',
+    description: 'Testing — test-run executed against a test-spec; source test-run, target test-spec',
+  },
+  {
+    id: 'verifies',
+    direction: 'directional',
+    inverseLabel: 'verified_by',
+    description: 'Testing — test-run verifies a story; source test-run, target story',
+  },
+  {
+    id: 'proof_of_work',
+    direction: 'directional',
+    inverseLabel: 'proves',
+    description: 'Testing — story is proven by a green test-run; source story, target test-run. Set at the A3 promotion gate.',
+  },
 ]
 
 /**
