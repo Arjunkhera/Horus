@@ -1,0 +1,35 @@
+apiVersion: testenv/v1
+repo: fixture-no-stack
+requires:
+  secrets: []
+phases:
+  setup:
+    steps:
+      - run: "echo 'setup step'"
+  launch:
+    provisioner: "echo 'launch provisioner'"
+  await_ready:
+    poll:
+      - probe: "GET :9999/health"
+        expect: "http_200"
+    timeout: 2
+    interval: 1
+  connection:
+    emit: "/tmp/testenv-runner-nostack-settings.json"
+  test:
+    policy: run-all
+    actions:
+      - name: type-check
+        invoke:
+          run: "echo 'type check: pass'"
+        expect:
+          exitCode: 0
+        needsStack: false
+      - name: lint
+        invoke:
+          run: "echo 'lint: pass'"
+        expect:
+          exitCode: 0
+        needsStack: false
+  teardown:
+    provisioner: "echo 'teardown provisioner'"
