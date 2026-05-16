@@ -191,6 +191,9 @@ importers:
       jose:
         specifier: ^6.2.2
         version: 6.2.2
+      pino:
+        specifier: ^9.0.0
+        version: 9.14.0
       semver:
         specifier: ^7.7.4
         version: 7.7.4

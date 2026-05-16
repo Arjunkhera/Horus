@@ -19,6 +19,8 @@ import {
   readLock,
   composeUp,
   composeDown,
+  composeUpStandalone,
+  composeDownStandalone,
   waitForShadowStackHealthy,
   getAllSlotStatuses,
   seedFromFixtures,
@@ -41,6 +43,11 @@ testEnvCommand
   .description('Start a shadow stack on alternate ports with isolated data')
   .option('--timeout <seconds>', 'Max wait for health checks (default: 120)', '120')
   .option('--image <overrides...>', 'Override service images (format: service=image:tag)')
+  .option(
+    '--standalone',
+    'Generate a fully-projected compose file (no overlay-merge). ' +
+    'Eliminates port-collision with a live stack. Required on fresh VMs.',
+  )
   .action(async (opts) => {
     const config = loadConfig();
     const dataDir = config.data_dir;
@@ -119,10 +126,18 @@ testEnvCommand
     }
 
     // Start shadow stack
-    const upSpinner = ora(`Starting shadow stack (project ${chalk.cyan(project)})...`).start();
+    const standaloneMode = Boolean(opts.standalone);
+    const modeLabel = standaloneMode ? 'standalone' : 'overlay';
+    const upSpinner = ora(
+      `Starting shadow stack (project ${chalk.cyan(project)}, mode: ${chalk.dim(modeLabel)})...`
+    ).start();
     try {
-      await composeUp(runtime, project, ports, slotDataPath, defaultVaultName, imageOverrides);
-      upSpinner.succeed(`Shadow stack started`);
+      if (standaloneMode) {
+        await composeUpStandalone(runtime, project, ports, slotDataPath, config, imageOverrides);
+      } else {
+        await composeUp(runtime, project, ports, slotDataPath, defaultVaultName, imageOverrides);
+      }
+      upSpinner.succeed(`Shadow stack started (${modeLabel})`);
     } catch (error) {
       upSpinner.fail('Failed to start shadow stack');
       removeLock(dataDir, slot);
@@ -242,10 +257,18 @@ testEnvCommand
       process.exit(1);
     }
 
-    // Stop compose
+    // Stop compose — prefer standalone teardown if the file exists (covers --standalone acquires);
+    // fall back to overlay teardown for backwards compatibility with existing slots.
     const downSpinner = ora(`Stopping ${chalk.cyan(project)}...`).start();
     try {
-      await composeDown(runtime, project, ports, slotDataPath, defaultVaultName);
+      const { existsSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const standaloneFile = join(slotDataPath, 'docker-compose.standalone.yml');
+      if (existsSync(standaloneFile)) {
+        await composeDownStandalone(runtime, project, slotDataPath);
+      } else {
+        await composeDown(runtime, project, ports, slotDataPath, defaultVaultName);
+      }
       downSpinner.succeed('Shadow stack stopped');
     } catch {
       downSpinner.warn('Failed to stop cleanly (continuing cleanup)');

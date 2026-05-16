@@ -25,8 +25,15 @@ vi.mock('./config.js', () => ({
   resolveGitHubHost: () => ({ host: 'github.com', token: 'test-token' }),
 }));
 
-import { installComposeFile, generateComposeFile, generateTestComposeFile } from './compose.js';
+import {
+  installComposeFile,
+  generateComposeFile,
+  generateTestComposeFile,
+  generateStandaloneComposeFile,
+  standaloneComposePath,
+} from './compose.js';
 import type { Config } from './config.js';
+import type { StandaloneSlotPorts } from './compose.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -187,5 +194,156 @@ describe('installComposeFile', () => {
     // Should NOT contain test-env references
     expect(content).not.toContain('TEST_PORT_');
     expect(content).not.toContain('TEST_DATA_PATH');
+  });
+});
+
+// ── generateStandaloneComposeFile ────────────────────────────────────────────
+
+function makeSlotPorts(base = 9100): StandaloneSlotPorts {
+  return {
+    anvil:        base,
+    vault_svc:    base + 1,
+    vault_router: base + 50,
+    vault_mcp:    base + 100,
+    forge:        base + 150,
+    typesense:    base + 8,
+    ui:           base + 160,
+    neo4j_http:   base + 174,
+    neo4j_bolt:   base + 187,
+  };
+}
+
+describe('generateStandaloneComposeFile', () => {
+  const SLOT_DATA = '/tmp/horus-test-slot-0';
+  const SLOT = 0;
+
+  it('produces a valid compose file with expected services', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({ config, ports, slotDataPath: SLOT_DATA, slot: SLOT });
+
+    expect(content).toContain('services:');
+    expect(content).toContain('anvil:');
+    expect(content).toContain('vault-personal:');
+    expect(content).toContain('vault-router:');
+    expect(content).toContain('vault-mcp:');
+    expect(content).toContain('forge:');
+    expect(content).toContain('typesense:');
+    expect(content).toContain('neo4j:');
+  });
+
+  it('uses explicit (hard-coded) port numbers — no ${VAR} port references', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({ config, ports, slotDataPath: SLOT_DATA, slot: SLOT });
+
+    // Anvil port must be the literal number, not a variable
+    expect(content).toContain('"9100:8100"');
+    expect(content).toContain('"9101:8000"');   // vault_svc
+    expect(content).toContain('"9150:8400"');   // vault_router
+    expect(content).toContain('"9200:8300"');   // vault_mcp
+    expect(content).toContain('"9250:8200"');   // forge
+    expect(content).toContain('"9108:8108"');   // typesense
+    expect(content).toContain('"9274:7474"');   // neo4j_http
+    expect(content).toContain('"9287:7687"');   // neo4j_bolt
+
+    // Must NOT contain compose env-var port syntax (e.g., ${TEST_PORT_ANVIL:-9100})
+    expect(content).not.toMatch(/"\$\{[A-Z_]+(?::-\d+)?\}:\d+"/);
+  });
+
+  it('uses slotDataPath for all volume bindings — no HORUS_DATA_PATH vars', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({ config, ports, slotDataPath: SLOT_DATA, slot: SLOT });
+
+    // All bind-mounts should reference the slot data path literally
+    expect(content).toContain(`${SLOT_DATA}/notes:/data/notes:rw`);
+    expect(content).toContain(`${SLOT_DATA}/typesense-data:/data`);
+    expect(content).toContain(`${SLOT_DATA}/neo4j-data:/data`);
+    expect(content).toContain(`${SLOT_DATA}/registry:/data/registry:rw`);
+
+    // Must not contain HORUS_DATA_PATH or TEST_DATA_PATH variables
+    expect(content).not.toContain('HORUS_DATA_PATH');
+    expect(content).not.toContain('TEST_DATA_PATH');
+  });
+
+  it('uses a distinct project-scoped network name (not horus-net)', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({ config, ports, slotDataPath: SLOT_DATA, slot: SLOT });
+
+    expect(content).toContain('horus-test-0-net:');
+    expect(content).not.toContain('horus-net:');
+  });
+
+  it('prefixes named volumes with the project name', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({ config, ports, slotDataPath: SLOT_DATA, slot: SLOT });
+
+    // Named volumes must be project-scoped (disjoint from live stack volumes)
+    expect(content).toContain('horus-test-0-vault-personal-workspace:');
+    // The volumes section must NOT define an unscoped name (i.e., starting a line with
+    // just "  vault-personal-workspace:" without the project prefix)
+    expect(content).not.toMatch(/^  vault-personal-workspace:/m);
+  });
+
+  it('respects --image overrides', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({
+      config,
+      ports,
+      slotDataPath: SLOT_DATA,
+      slot: SLOT,
+      imageOverrides: { anvil: 'myrepo/anvil:pr-123' },
+    });
+
+    expect(content).toContain('image: myrepo/anvil:pr-123');
+    // Other services unaffected
+    expect(content).toContain('image: ghcr.io/arjunkhera/horus/forge:latest');
+  });
+
+  it('slot 1 uses different base ports (no collision with slot 0)', () => {
+    const config = makeConfig();
+    const ports0 = makeSlotPorts(9100);
+    const ports1 = makeSlotPorts(9400);
+    const c0 = generateStandaloneComposeFile({ config, ports: ports0, slotDataPath: '/tmp/slot-0', slot: 0 });
+    const c1 = generateStandaloneComposeFile({ config, ports: ports1, slotDataPath: '/tmp/slot-1', slot: 1 });
+
+    // Slot 0 must not contain slot 1 ports and vice-versa
+    expect(c0).toContain('"9100:8100"');
+    expect(c0).not.toContain('"9400:8100"');
+    expect(c1).toContain('"9400:8100"');
+    expect(c1).not.toContain('"9100:8100"');
+  });
+
+  it('does not contain any ${...} env var substitutions in port or volume bindings', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({ config, ports, slotDataPath: SLOT_DATA, slot: SLOT });
+
+    // Extract only ports: and volumes: values — they should be bare strings
+    const portLines = content.split('\n').filter((l) => l.trim().startsWith('- "') && l.includes(':'));
+    for (const line of portLines) {
+      // Port lines like: - "9100:8100" should not contain ${ ... }
+      expect(line).not.toMatch(/\$\{/);
+    }
+  });
+
+  it('standalone file contains isolation invariant comment', () => {
+    const config = makeConfig();
+    const ports = makeSlotPorts(9100);
+    const content = generateStandaloneComposeFile({ config, ports, slotDataPath: SLOT_DATA, slot: SLOT });
+
+    expect(content).toContain('Isolation:');
+    expect(content).toContain('horus-test-0');
+  });
+});
+
+describe('standaloneComposePath', () => {
+  it('returns path inside slotDataPath', () => {
+    const p = standaloneComposePath('/tmp/slot-0');
+    expect(p).toBe('/tmp/slot-0/docker-compose.standalone.yml');
   });
 });
