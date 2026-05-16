@@ -186,8 +186,10 @@ export type GitStorageConfig = z.infer<typeof GitStorageConfigSchema>;
  *
  * Env vars take precedence over file values.
  * S3 credentials are ONLY accepted from env vars — never from config files.
+ * When S3 credentials are absent, the AWS SDK uses the default credential
+ * chain (EC2 instance profile, ECS task role, environment variables, etc.).
  *
- * @throws if config is invalid or S3 credentials are missing at runtime
+ * @throws if config is structurally invalid
  */
 export function loadConfig(): ServiceConfig {
   const configPath = process.env['FORGE_REGISTRY_CONFIG'];
@@ -303,20 +305,14 @@ export function loadConfig(): ServiceConfig {
 
   const config = result.data;
 
-  // Fail-closed: S3 credentials must be present at startup
-  if (config.storage.backend === 's3') {
-    const s3 = config.storage;
-    if (!s3.accessKeyId || !s3.secretAccessKey) {
-      // Allow missing credentials only when a custom endpoint is set (e.g., localstack with no-auth mode)
-      // In production, credentials are mandatory.
-      if (!s3.endpoint) {
-        throw new Error(
-          'S3 credentials are required. Set FORGE_REGISTRY_S3_ACCESS_KEY_ID and ' +
-            'FORGE_REGISTRY_S3_SECRET_ACCESS_KEY environment variables.',
-        );
-      }
-    }
-  }
+  // S3 credentials are optional — when absent the AWS SDK falls back to the
+  // default credential chain (EC2 instance profile, ECS task role, env vars,
+  // ~/.aws/credentials, etc.).  Explicit keys are still accepted for local
+  // development, LocalStack, and non-EC2 environments.
+  //
+  // The S3StorageBackend constructor already handles this: it only sets
+  // clientConfig.credentials when both accessKeyId and secretAccessKey are
+  // present.  No validation is needed here.
 
   return config;
 }
