@@ -1,0 +1,201 @@
+# Horus .testenv/manifest.yaml
+# First real consumer of testenv/v1 — end-to-end proof of the design.
+# Hardened from spike learnings: 676a5057 (shadow stack infra) +
+# a19c19a9 (agent-in-the-loop) + workarounds note b3725e13.
+# Design ref: b53213ec.
+
+apiVersion: testenv/v1
+repo: horus
+
+requires:
+  secrets:
+    - ANTHROPIC_API_KEY   # required by Claude Code agent (T5-style runs)
+    - CURSOR_API_KEY      # required by reader service (not an MCP probe target)
+  profiles:
+    laptop:
+      mem: 6g
+    cloud:
+      mem: 12g
+
+phases:
+  # ---------------------------------------------------------------------------
+  # Phase 1 — setup
+  # Encodes the prescribed tribal-knowledge steps discovered in spike 676a5057
+  # and documented in workarounds note b3725e13.
+  # ---------------------------------------------------------------------------
+  setup:
+    steps:
+      # Clone without hard-links: kernel protected_hardlinks rejects --local
+      # when source files are container-owned (spike 676a5057 bug #7).
+      - run: git clone --no-hardlinks {src} {workdir}
+        label: Clone repo (no-hardlinks)
+
+      # Install and build the full monorepo inside the slot.
+      - run: pnpm install && pnpm build
+        label: Install dependencies and build
+
+      # Forge runs as UID 1001; these dirs must be owned by that UID before
+      # the container starts (b3725e13 Step 2 / spike 676a5057 bug #3).
+      - run: >-
+          chown -R 1001:1001
+          {slot}/forge/config
+          {slot}/forge/registry
+          {slot}/forge/workspaces
+          {slot}/forge/sessions
+        label: Fix Forge ownership (UID 1001)
+
+      # Forge's git-based registry must exist before the container starts
+      # (spike 676a5057 bug #5).
+      - run: git -C {slot}/forge/registry init
+        label: Init Forge registry git repo
+
+      # neo4j and typesense write as root inside their containers; pre-chmod
+      # so the dirs are writable (spike 676a5057 bug #2 + a19c19a9 Bug D).
+      - run: chmod 777 {slot}/neo4j {slot}/typesense
+        label: Pre-chmod neo4j and typesense data dirs
+
+    assert:
+      - type: path_exists
+        path: "{slot}/forge/registry/.git"
+
+      - type: cmd_exit_zero
+        run: "pnpm build --filter @horus/testenv"
+
+    isolationChecks:
+      disjointDockerProject: true
+      disjointDockerNetworks: true
+      disjointDockerVolumes: true
+      disjointPortSpace: true
+      disjointDataDir: true
+      allRequiredSecretsPresent: true
+
+  # ---------------------------------------------------------------------------
+  # Phase 2 — launch
+  # Provisions the isolated stack via horus test-env acquire --standalone.
+  # --standalone generates a fully-projected compose file (no port-merge
+  # overlay) — the fix for the port-merge bug found in a19c19a9.
+  # ---------------------------------------------------------------------------
+  launch:
+    provisioner: "horus test-env acquire --slot {slot} --standalone"
+
+    assert:
+      # Exactly 8 containers: anvil, vault-mcp, forge, neo4j, typesense,
+      # reader-server, reader, and one supporting service.
+      - type: containers_running
+        count: 8
+
+      - type: ports_disjoint_from_live
+        value: true
+
+      - type: docker_project_name
+        pattern: "horus-test-{slot}"
+
+      - type: fully_projected_ports
+        value: true
+
+    isolationChecks:
+      distinctDockerProject: true
+      fullyProjectedPorts: true
+      connectionManifestEmitted: true
+
+  # ---------------------------------------------------------------------------
+  # Phase 3 — await_ready
+  # Poll the four MCP endpoints and the reader HTTP port until all are up.
+  # Spike a19c19a9 T4: MCP is plain JSON-RPC HTTP — no model/API key needed.
+  # ---------------------------------------------------------------------------
+  await_ready:
+    poll:
+      - probe: anvil_list_types
+        expect: returns_type_registry
+
+      - probe: knowledge_get_schema
+        expect: returns_page_types
+
+      - probe: forge_repo_list
+        expect: ok
+
+      - probe: "GET :{reader_port}"
+        expect: http_200
+
+    timeout: 180
+    interval: 5
+
+  # ---------------------------------------------------------------------------
+  # Phase 4 — connection
+  # The provisioner writes claude-settings.json to the slot; we assert it
+  # parses cleanly and carries -dev-suffixed MCP server names (spike 676a5057
+  # T3 + T4: anvil-dev, vault-dev, forge-dev — no collision with live).
+  # ---------------------------------------------------------------------------
+  connection:
+    emit: "{slot}/claude-settings.json"
+
+    assert:
+      - type: file_parses
+        path: "{slot}/claude-settings.json"
+        format: json
+
+      - type: mcp_names_suffixed
+        suffix: "-dev"
+
+  # ---------------------------------------------------------------------------
+  # Phase 5 — test
+  # Includes the promoted spike-T2 isolation-proof assertion:
+  # data written via shadow MCP must NOT appear in the live stack.
+  # ---------------------------------------------------------------------------
+  test:
+    policy: fail-fast
+
+    actions:
+      # Basic Anvil round-trip: create a note via shadow MCP, confirm it lands.
+      - name: anvil-roundtrip
+        invoke:
+          tool: anvil_create_note
+          args:
+            title: "testenv-check"
+        expect:
+          returns: note_id
+        evidence:
+          capture: response
+          extract: noteId
+          saveTo: evidence/anvil-roundtrip.json
+
+      # Promoted spike-T2 isolation proof: the live Anvil search must return
+      # zero results for the note title written above into the shadow stack.
+      # (a19c19a9: shadow POST /api/search → 1 result; live → 0 results)
+      - name: isolation-proof
+        invoke:
+          http: "live-anvil/search?q=testenv-check"
+        expect:
+          count: 0
+        evidence:
+          capture: response
+          saveTo: evidence/isolation-proof.json
+
+  # ---------------------------------------------------------------------------
+  # Phase 6 — teardown
+  # Release the stack, then run detective isolation assertions confirming:
+  # - no test project containers remain
+  # - live stack still running and unmodified
+  # - live data contains zero test artifacts
+  # - no secret residue in logs/tmp/config
+  # ---------------------------------------------------------------------------
+  teardown:
+    provisioner: "horus test-env release --slot {slot}"
+
+    assert:
+      - type: containers_remaining
+        count: 0
+
+      - type: live_stack_unmodified
+        value: true
+
+      - type: live_data_test_artifacts_zero
+        value: true
+
+      - type: no_secret_residue
+        value: true
+
+    isolationChecks:
+      liveStackUnmodified: true
+      liveDataTestArtifactsZero: true
+      noSecretResidue: true
