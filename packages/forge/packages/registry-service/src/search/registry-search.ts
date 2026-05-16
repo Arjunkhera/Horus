@@ -86,14 +86,28 @@ interface TypesenseCollectionHandle {
   delete: () => Promise<unknown>;
 }
 
-interface TypesenseCollectionsHandle {
-  (name: string): TypesenseCollectionHandle;
+/**
+ * The Typesense SDK exposes `client.collections` as a single overloaded method:
+ *   - client.collections()         → Collections instance (list/create)
+ *   - client.collections('name')   → Collection instance (per-collection ops)
+ *
+ * Calling it with no arguments returns the Collections object which has
+ * `create()` and `retrieve()` (list all).
+ * Calling it with a collection name returns a Collection object for that
+ * collection with `documents()`, `retrieve()`, `delete()`, etc.
+ */
+interface TypesenseCollectionsListHandle {
   create: (schema: Record<string, unknown>) => Promise<unknown>;
-  retrieveAll: () => Promise<Array<{ name: string }>>;
+  retrieve: () => Promise<Array<{ name: string }>>;
+}
+
+interface TypesenseCollectionsMethod {
+  (): TypesenseCollectionsListHandle;
+  (name: string): TypesenseCollectionHandle;
 }
 
 interface TypesenseClient {
-  collections: TypesenseCollectionsHandle;
+  collections: TypesenseCollectionsMethod;
 }
 
 interface TypesenseSearchResponse {
@@ -146,10 +160,10 @@ export class RegistrySearchClient {
     if (this.collectionEnsured) return;
 
     try {
-      const existing = await this.ts.collections.retrieveAll();
+      const existing = await this.ts.collections().retrieve();
       const found = existing.some((c) => c.name === COLLECTION);
       if (!found) {
-        await this.ts.collections.create(COLLECTION_SCHEMA as unknown as Record<string, unknown>);
+        await this.ts.collections().create(COLLECTION_SCHEMA as unknown as Record<string, unknown>);
       }
       this.collectionEnsured = true;
     } catch {
