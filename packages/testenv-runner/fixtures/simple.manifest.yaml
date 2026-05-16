@@ -1,0 +1,54 @@
+apiVersion: testenv/v1
+repo: fixture-simple
+requires:
+  secrets: []
+  profiles:
+    laptop:
+      mem: "4g"
+phases:
+  setup:
+    steps:
+      - run: "echo 'setup: step 1'"
+        label: "Echo setup"
+      - run: "echo 'setup: optional step'"
+        label: "Optional step"
+        optional: true
+    assert:
+      - type: cmd_exit_zero
+        run: "echo ok"
+  launch:
+    provisioner: "echo 'launch: provisioner'"
+    assert:
+      - type: cmd_exit_zero
+        run: "echo containers_ok"
+  await_ready:
+    poll:
+      - probe: "GET :9999/health"
+        expect: "http_200"
+    timeout: 2
+    interval: 1
+  connection:
+    emit: "/tmp/testenv-runner-test-settings.json"
+    assert:
+      - type: cmd_exit_zero
+        run: "echo connection_ok"
+  test:
+    policy: fail-fast
+    actions:
+      - name: echo-pass
+        invoke:
+          run: "echo 'test action: echo-pass'"
+        expect:
+          exitCode: 0
+        needsStack: false
+      - name: echo-pass-2
+        invoke:
+          run: "echo 'test action: echo-pass-2'"
+        expect:
+          exitCode: 0
+        needsStack: false
+  teardown:
+    provisioner: "echo 'teardown: provisioner'"
+    assert:
+      - type: cmd_exit_zero
+        run: "echo teardown_ok"

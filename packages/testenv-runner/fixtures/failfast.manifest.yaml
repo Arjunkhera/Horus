@@ -1,0 +1,41 @@
+apiVersion: testenv/v1
+repo: fixture-failfast
+requires:
+  secrets: []
+phases:
+  setup:
+    steps:
+      - run: "echo 'setup ok'"
+  launch:
+    provisioner: "echo 'launch ok'"
+  await_ready:
+    poll:
+      - probe: "GET :9999/health"
+        expect: "http_200"
+    timeout: 2
+    interval: 1
+  connection:
+    emit: "/tmp/testenv-failfast-settings.json"
+  test:
+    policy: fail-fast
+    actions:
+      - name: pass-first
+        invoke:
+          run: "echo 'pass'"
+        expect:
+          exitCode: 0
+        needsStack: false
+      - name: fail-second
+        invoke:
+          run: "exit 1"
+        expect:
+          exitCode: 0
+        needsStack: false
+      - name: should-be-skipped
+        invoke:
+          run: "echo 'this should not run'"
+        expect:
+          exitCode: 0
+        needsStack: false
+  teardown:
+    provisioner: "echo 'teardown always runs'"
