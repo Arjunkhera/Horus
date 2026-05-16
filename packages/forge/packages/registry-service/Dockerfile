@@ -37,12 +37,10 @@ COPY packages/forge/packages/core/src/ ./packages/forge/packages/core/src/
 COPY packages/forge/packages/registry-service/src/ ./packages/forge/packages/registry-service/src/
 
 # Build in dependency order: search → core → registry-service
-# @horus/search uses tsup; core and registry-service use tsc directly.
-# Use the pnpm store's actual tsup binary (not the shim which may not resolve).
+# @horus/search uses its package.json build script (tsup); core and registry-service use tsc.
 RUN TSC=$(find /build -name "tsc" -path "*/typescript/bin/tsc" | head -1) && \
-    TSUP_BIN=$(find /build/node_modules/.pnpm -name "tsup.js" -path "*/tsup/dist/cli-default.js" | head -1) && \
-    echo "Using tsc: $TSC, tsup: $TSUP_BIN" && \
-    cd /build/packages/search && node "$TSUP_BIN" src/index.ts --format esm --dts && \
+    echo "Using tsc: $TSC" && \
+    cd /build && pnpm --filter @horus/search run build && \
     cd /build/packages/forge/packages/core && $TSC -p tsconfig.json && \
     cd /build/packages/forge/packages/registry-service && $TSC -p tsconfig.json
 
