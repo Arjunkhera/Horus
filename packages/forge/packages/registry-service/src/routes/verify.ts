@@ -48,7 +48,7 @@ export function registerVerifyRoute(
             id: { type: 'string' },
           },
         },
-        body: { type: 'object', additionalProperties: true },
+        body: { type: 'object', additionalProperties: true, nullable: true },
       },
     },
     async (request, reply) => {

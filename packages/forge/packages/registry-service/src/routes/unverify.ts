@@ -47,6 +47,7 @@ export function registerUnverifyRoute(
             reason: { type: 'string' },
           },
           additionalProperties: false,
+          nullable: true,
         },
       },
     },
