@@ -10,7 +10,7 @@
 # ─── Stage 1: builder ─────────────────────────────────────────────────────────
 FROM node:22-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /build
 
@@ -21,6 +21,7 @@ COPY package.json pnpm-workspace.yaml .npmrc* ./
 COPY packages/forge/package.json ./packages/forge/
 COPY packages/forge/packages/core/package.json ./packages/forge/packages/core/
 COPY packages/forge/packages/registry-service/package.json ./packages/forge/packages/registry-service/
+COPY packages/search/package.json ./packages/search/
 
 # Install ALL deps (including devDeps) — required for tsc
 RUN pnpm install --no-frozen-lockfile
@@ -30,13 +31,16 @@ COPY packages/forge/tsconfig.json ./packages/forge/tsconfig.json
 COPY packages/forge/packages/core/tsconfig.json ./packages/forge/packages/core/tsconfig.json
 COPY packages/forge/packages/registry-service/tsconfig.json ./packages/forge/packages/registry-service/tsconfig.json
 
-# Copy source files
+# Copy source files (search package is needed as workspace dep)
+COPY packages/search/ ./packages/search/
 COPY packages/forge/packages/core/src/ ./packages/forge/packages/core/src/
 COPY packages/forge/packages/registry-service/src/ ./packages/forge/packages/registry-service/src/
 
 # Build in dependency order: core first, then registry-service
-RUN pnpm --filter @forge/core build \
-    && pnpm --filter @forge/registry-service build
+RUN TSC=$(find /build -name "tsc" -path "*/typescript/bin/tsc" | head -1) && \
+    echo "Using tsc at: $TSC" && \
+    cd /build/packages/forge/packages/core && $TSC -p tsconfig.json && \
+    cd /build/packages/forge/packages/registry-service && $TSC -p tsconfig.json
 
 
 # ─── Stage 2: runtime ─────────────────────────────────────────────────────────
@@ -64,6 +68,7 @@ COPY package.json pnpm-workspace.yaml .npmrc* ./
 COPY packages/forge/package.json ./packages/forge/
 COPY packages/forge/packages/core/package.json ./packages/forge/packages/core/
 COPY packages/forge/packages/registry-service/package.json ./packages/forge/packages/registry-service/
+COPY packages/search/package.json ./packages/search/
 
 RUN corepack enable && corepack prepare pnpm@latest --activate \
     && pnpm install --prod --no-frozen-lockfile
