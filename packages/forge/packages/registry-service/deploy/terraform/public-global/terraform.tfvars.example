@@ -1,0 +1,15 @@
+# terraform.tfvars.example — Copy to terraform.tfvars and fill in values
+#
+# Required variables (no defaults):
+key_pair_name = "horus-registry-us-east-1"   # EC2 key pair name (must exist in target region)
+ssh_cidr      = "YOUR_IP/32"                 # Your public IP for SSH access (use: curl ifconfig.me)
+
+# Sensitive — these are injected into the EC2 instance environment
+publisher_key_id  = ""   # Admin API key ID (hex string, generate with: openssl rand -hex 32)
+typesense_api_key = ""   # Typesense API key (hex string, generate with: openssl rand -hex 32)
+
+# Optional
+cloudwatch_alarm_email = ""          # Email for CloudWatch alarm notifications
+# instance_type        = "t4g.small" # Default is t4g.small (ARM64/Graviton)
+# s3_bucket_name       = "horus-forge-registry"
+# waf_rate_limit       = 2000        # Requests per 5 min per IP
