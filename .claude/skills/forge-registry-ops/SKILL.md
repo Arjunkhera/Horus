@@ -126,3 +126,19 @@ State is LOCAL at `terraform/public-global/terraform.tfstate`. Back up this file
 | WAF Rate Limit | 2000 req/5min/IP |
 | CloudWatch Alarms | 5 (CF requests, WAF blocks, S3 egress, CPU, status check) |
 | Monthly Cost | ~$18 |
+
+## Billing Protection
+
+| Budget | Limit | Action |
+|--------|-------|--------|
+| `Horus-Monthly-Total` | $50/mo | Email alerts at 50%, 80%, 100% |
+| `Horus-Hard-Limit-75` | $75/mo | **Auto-stops EC2** via Lambda kill switch |
+
+**Kill switch flow:** Spend > $75 → AWS Budgets → SNS (`budget-kill-switch`) → Lambda (`budget-kill-switch`) → `ec2:StopInstances`
+
+**After a budget kill:**
+```bash
+aws ec2 start-instances --instance-ids <id> --region us-east-1
+```
+
+Instance is tagged `BudgetKilled=true` when stopped by the kill switch.
