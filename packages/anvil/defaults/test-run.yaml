@@ -1,0 +1,74 @@
+id: test-run
+name: Test Run
+description: "Append-only record of a single test execution. Each run is linked to its spec version and to the story it verifies. Runs accumulate forever; the green run that establishes proof-of-work is linked via the story.proof_of_work edge."
+icon: "play-circle"
+behaviors:
+  append_only: true
+fields:
+  story:
+    type: reference
+    ref_type: story
+    required: true
+    description: "The story this run verifies"
+    search_mode: term
+  spec_version:
+    type: reference
+    ref_type: test-spec
+    required: true
+    description: "The test-spec snapshot this run executed against"
+    search_mode: term
+  commit:
+    type: string
+    required: true
+    immutable: true
+    description: "Git commit hash the tests ran against"
+    search_mode: term
+  profile:
+    type: string
+    required: false
+    description: "Test profile / environment identifier (e.g. unit, integration)"
+    search_mode: term
+  timestamp:
+    type: datetime
+    required: true
+    auto: now
+    immutable: true
+    description: "When this run was executed"
+    search_mode: term
+  verdict:
+    type: enum
+    values: [red, green, regression]
+    required: true
+    description: "Overall run outcome: red (failing), green (passing), regression (previously passing now failing)"
+    search_mode: term
+  test_results:
+    type: text
+    required: false
+    description: "Machine-readable per-test results (JSON event log or summary)"
+    search_mode: none
+  evidence_refs:
+    type: reference_list
+    required: false
+    description: "References to artifact files containing full logs and evidence"
+    search_mode: none
+template:
+  frontmatter:
+    tags: [generated, test-run]
+  body: |
+    ## Test Run Report
+
+    <!-- Generated — do not edit manually. Append-only. -->
+
+    ### Summary
+
+    | Field | Value |
+    |-------|-------|
+    | Story | |
+    | Spec Version | |
+    | Commit | |
+    | Profile | |
+    | Verdict | |
+
+    ### Per-Test Results
+
+    ### Evidence
