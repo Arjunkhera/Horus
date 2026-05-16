@@ -42,11 +42,14 @@ export function registerUnverifyRoute(
     {
       schema: {
         body: {
-          type: 'object',
-          properties: {
-            reason: { type: 'string' },
-          },
-          additionalProperties: false,
+          oneOf: [
+            {
+              type: 'object',
+              properties: { reason: { type: 'string' } },
+              additionalProperties: false,
+            },
+            { type: 'null' },
+          ],
         },
       },
     },
