@@ -35,11 +35,16 @@ export const DEFAULT_LOCAL_REGISTRY: RegistryConfig = {
 /**
  * The default public Forge registry. Always present at the end of the
  * registry list as the last-resort read-only source for community artifacts.
+ *
+ * Reads are served via CloudFront CDN for low latency.
+ * Writes (publish) must go to the EC2 origin directly (http://34.234.40.171:8744)
+ * because CloudFront blocks POST requests — configure a writable registry entry
+ * pointing at the EC2 origin when you need to publish to the cloud registry.
  */
 export const DEFAULT_GLOBAL_REGISTRY: RegistryConfig = {
   type: 'http',
   name: 'global',
-  url: 'https://registry.horus.dev',
+  url: 'https://d1agcpjabvrj1s.cloudfront.net',
   writable: false,
 };
 

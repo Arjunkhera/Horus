@@ -28,10 +28,11 @@ registries:
     name: local
     url: http://localhost:4873
     writable: true
-  # Public global registry (read-only fallback)
+  # Public global registry (read-only fallback, served via CloudFront CDN)
+  # NOTE: CloudFront blocks POST — use EC2 direct (http://34.234.40.171:8744) for writes
   - type: http
     name: global
-    url: https://registry.horus.dev/v1
+    url: https://d1agcpjabvrj1s.cloudfront.net
 
 artifacts:
   skills: {}
