@@ -25,7 +25,10 @@ echo "=== Forge Registry bootstrap started at $(date -u) ==="
 ###############################################################################
 
 dnf update -y
-dnf install -y \
+
+# AL2023 ships curl-minimal which conflicts with full curl.
+# Use --allowerasing to swap curl-minimal for full curl (needed by nginx, healthchecks).
+dnf install -y --allowerasing \
   docker \
   nginx \
   openssl \

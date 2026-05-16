@@ -30,6 +30,7 @@ This repo ships three thin-pointer skills under `.claude/skills/<name>/SKILL.md`
 | User asks for a CLI release, version bump, or `npm publish` of `@arkhera30/cli` | **horus-cli-release-gate** | Walks the CLI release procedure: bump → build → test → publish → tag → verify. References `shared/procedures/horus-release.md`. |
 | User asks to add a new MCP tool to Anvil, Forge, or Vault MCP | **horus-mcp-tool-add** | Names the registration file, schema location, and test pattern for each MCP server. References per-package guides. |
 | User asks to add a new Anvil type to the Reader, fix a Reader UI bug, add a page or route, change Reader styling, or make any edit to `packages/reader/` | **horus-reader-dev** | Covers the no-bundler architecture, script load order, type display system (`TYPE_ORDER` + `activeTypes`), CSS type color recipe, and `forge_develop` workflow for the Reader. |
+| User asks to deploy, redeploy, troubleshoot, or operate the Forge Remote Registry; mentions terraform, EC2, CloudFront, registry infrastructure | **forge-registry-ops** | Architecture quick ref, script inventory, critical gotchas, Vault page links for full procedures. |
 
 ## Always Load (Vault Pages)
 
@@ -41,6 +42,9 @@ Before working on this repo, load context from Vault. These pages are the author
 | `shared/concepts/horus-package-architecture.md` | How packages depend on each other, network call graph, shared infrastructure |
 | `shared/guides/horus-development-workflow.md` | Build, test, deploy workflow |
 | `shared/procedures/horus-release.md` | Release procedure for service images (CI) and CLI (npm) |
+| `procedures/forge-registry-deploy.md` | Full deployment procedure: Docker build, Terraform, EC2 bootstrap, smoke test |
+| `concepts/forge-registry-architecture.md` | AWS infrastructure architecture: EC2, CloudFront, S3, WAF, IAM, CloudWatch |
+| `learnings/forge-registry-deploy-gotchas.md` | 9 deployment pitfalls (AL2023, pnpm v11, Typesense, S3 creds) |
 
 Load a specific package guide when working on that package:
 
@@ -56,6 +60,7 @@ Load a specific package guide when working on that package:
 | `packages/ui-server` + `packages/ui-client` | `shared/guides/horus-ui-package.md` |
 | `packages/reader` | `shared/guides/horus-reader-development.md` |
 | Anvil graph layer | `shared/concepts/horus-anvil-graph.md` |
+| `packages/forge/packages/registry-service` | `procedures/forge-registry-deploy.md` + `concepts/forge-registry-architecture.md` |
 | Personal task / PKM | `shared/guides/horus-pkm.md` |
 
 To load a page: `knowledge_get_page({ id: "<page-id>" })` — accepts UUID or file path.
