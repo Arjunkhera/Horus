@@ -9,12 +9,16 @@ import {
   cpSync,
 } from 'node:fs';
 import { execFileSync, execSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { execa } from 'execa';
 import type { Runtime } from './runtime.js';
 import { HORUS_DIR } from './constants.js';
+import {
+  generateStandaloneComposeFile,
+  standaloneComposePath,
+} from './compose.js';
+import type { Config } from './config.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -430,6 +434,84 @@ export async function composeDown(
     runtime.name,
     ['compose', '-p', projectName, 'down', '--volumes', '--remove-orphans'],
     { cwd: HORUS_DIR, env, reject: false },
+  );
+}
+
+/**
+ * Start a standalone shadow stack using a fully-projected compose file.
+ *
+ * Writes the compose file to {slotDataPath}/docker-compose.standalone.yml
+ * then runs `docker compose -p <project> -f <file> up -d --force-recreate`.
+ * No overlay-merge against the live compose — zero risk of port-array collision.
+ *
+ * Also applies the chown fix for Forge dirs (spike a19c19a9): sets UID 1001
+ * ownership on config/registry/workspaces/sessions before compose starts.
+ */
+export async function composeUpStandalone(
+  runtime: Runtime,
+  projectName: string,
+  ports: SlotPorts,
+  slotDataPath: string,
+  config: Config,
+  imageOverrides?: Record<string, string>,
+): Promise<void> {
+  // Apply chown fix for Forge dirs (fresh-VM: container writes as UID 1001,
+  // but dirs created by Node as current user → Forge start fails with EACCES).
+  const forgeDirs = ['config', 'registry', 'workspaces', 'sessions'];
+  for (const dir of forgeDirs) {
+    const fullPath = join(slotDataPath, dir);
+    try {
+      execSync(`chown -R 1001:1001 ${fullPath}`, { stdio: 'pipe' });
+    } catch {
+      try {
+        execSync(`sudo chown -R 1001:1001 ${fullPath}`, { stdio: 'pipe' });
+      } catch {
+        // Non-fatal: some environments (macOS Docker Desktop) don't need it
+      }
+    }
+  }
+
+  // Write the fully-projected standalone compose file
+  const content = generateStandaloneComposeFile({
+    config,
+    ports,
+    slotDataPath,
+    slot: parseInt(projectName.replace('horus-test-', ''), 10),
+    runtime: runtime.name,
+    imageOverrides,
+  });
+  const composePath = standaloneComposePath(slotDataPath);
+  writeFileSync(composePath, content, 'utf-8');
+
+  const result = await execa(
+    runtime.name,
+    ['compose', '-p', projectName, '-f', composePath, 'up', '-d', '--force-recreate'],
+    { cwd: slotDataPath, env: { ...process.env as Record<string, string>, HORUS_RUNTIME: runtime.name }, reject: false },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Failed to start standalone shadow stack (project ${projectName}):\n${result.stderr}`,
+    );
+  }
+}
+
+/**
+ * Tear down a standalone shadow stack.
+ * Uses the standalone compose file if present; falls back to project name only.
+ */
+export async function composeDownStandalone(
+  runtime: Runtime,
+  projectName: string,
+  slotDataPath: string,
+): Promise<void> {
+  const composePath = standaloneComposePath(slotDataPath);
+  const args = existsSync(composePath)
+    ? ['compose', '-p', projectName, '-f', composePath, 'down', '--volumes', '--remove-orphans']
+    : ['compose', '-p', projectName, 'down', '--volumes', '--remove-orphans'];
+  await execa(
+    runtime.name,
+    args,
+    { cwd: slotDataPath, env: { ...process.env as Record<string, string>, HORUS_RUNTIME: runtime.name }, reject: false },
   );
 }
 
