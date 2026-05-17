@@ -4,8 +4,8 @@
 
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
-import { assertManifest } from '@horus/testenv';
-import type { Manifest } from '@horus/testenv';
+import { assertManifest } from '@akhera-horus/testenv';
+import type { Manifest } from '@akhera-horus/testenv';
 
 /**
  * Load a testenv/v1 manifest from a YAML file path.

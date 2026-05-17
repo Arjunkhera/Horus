@@ -18,7 +18,7 @@ import type {
   Phase2IsolationChecks,
   Phase6IsolationChecks,
   RunStatus,
-} from '@horus/testenv';
+} from '@akhera-horus/testenv';
 import { renderTemplate, type TemplateContext } from './template.js';
 
 export interface AssertionResult {

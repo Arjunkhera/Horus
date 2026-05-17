@@ -22,7 +22,7 @@ import type {
   RunResult,
   RunStatus,
   TestAction,
-} from '@horus/testenv';
+} from '@akhera-horus/testenv';
 import { EventLog } from './event-log.js';
 import { buildRedactor } from './redact.js';
 import { renderTemplate, type TemplateContext } from './template.js';

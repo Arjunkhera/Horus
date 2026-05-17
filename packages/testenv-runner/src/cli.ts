@@ -29,7 +29,7 @@ import { readFileSync } from 'node:fs';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { validateManifest, formatValidationErrors } from '@horus/testenv';
+import { validateManifest, formatValidationErrors } from '@akhera-horus/testenv';
 import { run } from './runner.js';
 
 // ---------------------------------------------------------------------------

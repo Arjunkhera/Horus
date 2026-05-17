@@ -5,7 +5,7 @@
  * The corpus-ready format is defined in @horus/testenv (EventLogEntrySchema / RunResultSchema).
  */
 
-import type { EventLogEntry, EventSeverity, PhaseId } from '@horus/testenv';
+import type { EventLogEntry, EventSeverity, PhaseId } from '@akhera-horus/testenv';
 
 export interface EventLogOptions {
   /** If true, emit each event to stdout as NDJSON immediately. Default: true. */
