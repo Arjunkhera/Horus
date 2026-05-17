@@ -393,11 +393,8 @@ export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman
     ports:
       - "\${VAULT_ROUTER_PORT:-8050}:8400"
     environment:
-      - VAULT_ENDPOINTS=${vaultEndpoints}
-      - VAULT_DEFAULT=${defaultVaultName}
-    depends_on:
-${vaultRouterDependsOn}
-    networks:
+${vaultEndpoints ? `      - VAULT_ENDPOINTS=${vaultEndpoints}\n` : ''}      - VAULT_DEFAULT=${defaultVaultName}
+${vaultRouterDependsOn ? `    depends_on:\n${vaultRouterDependsOn}\n` : ''}    networks:
       - horus-net
     restart: unless-stopped
     deploy:
@@ -628,12 +625,9 @@ export function generateStandaloneComposeFile(options: {
     ports:
       - "${ports.vault_router}:8400"
     environment:
-      - VAULT_ENDPOINTS=${vaultEndpoints}
-      - VAULT_DEFAULT=${defaultVaultName}
+${vaultEndpoints ? `      - VAULT_ENDPOINTS=${vaultEndpoints}\n` : ''}      - VAULT_DEFAULT=${defaultVaultName}
       - LOG_LEVEL=info
-    depends_on:
-${vaultRouterDependsOn}
-    networks:
+${vaultRouterDependsOn ? `    depends_on:\n${vaultRouterDependsOn}\n` : ''}    networks:
       - ${network}
     restart: unless-stopped
     deploy:
@@ -853,6 +847,13 @@ ${vaultRouterDependsOn}
 
   // Build volumes section (named volumes prefixed with project to stay disjoint from live)
   const vaultVolumeNames = vaultEntries.map(([name]) => `  ${project}-vault-${name}-workspace:`).join('\n');
+  const volumesSection: string[] = vaultVolumeNames
+    ? [
+        `# ── Volumes ───────────────────────────────────────────────────────────────────`,
+        `volumes:`,
+        vaultVolumeNames,
+      ]
+    : [];
 
   const sections: string[] = [
     `# ─────────────────────────────────────────────────────────────────────────────`,
@@ -882,9 +883,7 @@ ${vaultRouterDependsOn}
     `  ${network}:`,
     `    driver: bridge`,
     ``,
-    `# ── Volumes ───────────────────────────────────────────────────────────────────`,
-    `volumes:`,
-    vaultVolumeNames,
+    ...volumesSection,
   ];
 
   return sections.join('\n');

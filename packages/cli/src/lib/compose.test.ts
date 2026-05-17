@@ -347,3 +347,94 @@ describe('standaloneComposePath', () => {
     expect(p).toBe('/tmp/slot-0/docker-compose.standalone.yml');
   });
 });
+
+// ── Zero-vault regression tests (bug c958777b) ────────────────────────────────
+// A fresh/zero-vault config must produce valid YAML with no empty depends_on:
+// or volumes: blocks, and must not emit VAULT_ENDPOINTS= with an empty value.
+
+function makeZeroVaultConfig(): Config {
+  const cfg = makeConfig();
+  return { ...cfg, vaults: {} };
+}
+
+describe('generateComposeFile — zero vaults (bug c958777b)', () => {
+  it('does not emit VAULT_ENDPOINTS when there are no vaults', () => {
+    const content = generateComposeFile(makeZeroVaultConfig());
+    expect(content).not.toMatch(/- VAULT_ENDPOINTS=/);
+  });
+
+  it('does not emit a bare depends_on: mapping in vault-router', () => {
+    const content = generateComposeFile(makeZeroVaultConfig());
+    // A bare depends_on: would be immediately followed by another yaml key
+    // at the same or lower indentation (networks:, restart:, etc.)
+    expect(content).not.toMatch(/depends_on:\s*\n\s{4}networks:/);
+    expect(content).not.toMatch(/depends_on:\s*\n\s{4}restart:/);
+  });
+
+  it('still emits the neo4j named volumes section', () => {
+    const content = generateComposeFile(makeZeroVaultConfig());
+    expect(content).toContain('neo4j-data:');
+    expect(content).toContain('neo4j-logs:');
+  });
+
+  it('produces parseable YAML structure (no bare mappings)', () => {
+    const content = generateComposeFile(makeZeroVaultConfig());
+    // Ensure no line is just "depends_on:" with nothing indented beneath it
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (lines[i].trimEnd() === '    depends_on:') {
+        // Next non-empty line must be indented deeper (service name or condition)
+        const next = lines.slice(i + 1).find((l) => l.trim() !== '');
+        expect(next).toMatch(/^      /);
+      }
+    }
+  });
+});
+
+describe('generateStandaloneComposeFile — zero vaults (bug c958777b)', () => {
+  const SLOT_DATA = '/tmp/horus-test-slot-0';
+  const SLOT = 0;
+
+  it('does not emit VAULT_ENDPOINTS when there are no vaults', () => {
+    const content = generateStandaloneComposeFile({
+      config: makeZeroVaultConfig(),
+      ports: makeSlotPorts(9100),
+      slotDataPath: SLOT_DATA,
+      slot: SLOT,
+    });
+    expect(content).not.toMatch(/- VAULT_ENDPOINTS=/);
+  });
+
+  it('does not emit a bare depends_on: mapping in vault-router', () => {
+    const content = generateStandaloneComposeFile({
+      config: makeZeroVaultConfig(),
+      ports: makeSlotPorts(9100),
+      slotDataPath: SLOT_DATA,
+      slot: SLOT,
+    });
+    expect(content).not.toMatch(/depends_on:\s*\n\s{4}networks:/);
+    expect(content).not.toMatch(/depends_on:\s*\n\s{4}restart:/);
+  });
+
+  it('omits the top-level volumes: section entirely when no vaults', () => {
+    const content = generateStandaloneComposeFile({
+      config: makeZeroVaultConfig(),
+      ports: makeSlotPorts(9100),
+      slotDataPath: SLOT_DATA,
+      slot: SLOT,
+    });
+    // No volumes: key should appear (standalone uses only bind-mounts, no named volumes without vaults)
+    expect(content).not.toMatch(/^volumes:/m);
+  });
+
+  it('still emits networks: section after dropping volumes:', () => {
+    const content = generateStandaloneComposeFile({
+      config: makeZeroVaultConfig(),
+      ports: makeSlotPorts(9100),
+      slotDataPath: SLOT_DATA,
+      slot: SLOT,
+    });
+    expect(content).toContain('networks:');
+    expect(content).toContain('horus-test-0-net:');
+  });
+});
