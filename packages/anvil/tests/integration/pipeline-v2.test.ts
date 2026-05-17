@@ -392,6 +392,25 @@ describe('Entity lifecycle via tool handlers', () => {
     }
   })
 
+  it('should create entity when type is not in fields (MCP call pattern)', async () => {
+    // Regression test for: anvil_create_entity "Required field missing: type"
+    // The MCP layer passes type as a top-level param, not inside fields.
+    // The validate stage must inject input.type into fieldsCopy before calling validateNote.
+    const ctx = { storageBackend, edgeStore, intentRegistry, typeRegistry, fileStore }
+    const result = await handleCreateEntity(ctx, {
+      type: 'note',
+      title: 'Lifecycle MCP Pattern',
+      fields: {},  // type intentionally absent — matches real MCP call shape
+    })
+
+    expect(isAnvilError(result)).toBe(false)
+    if (!isAnvilError(result)) {
+      expect(result.entityId).toBeDefined()
+      expect(result.type).toBe('note')
+      expect(result.title).toBe('Lifecycle MCP Pattern')
+    }
+  })
+
   it('should update entity fields via handleUpdateEntity', async () => {
     const created = await createEntity('task', 'Lifecycle Update', { status: 'open', priority: 'P1-high' })
     expect(isAnvilError(created)).toBe(false)
