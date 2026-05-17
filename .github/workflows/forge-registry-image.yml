@@ -13,10 +13,6 @@ jobs:
   build-and-push:
     name: Build & Push ARM64 image
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
