@@ -85,8 +85,10 @@ export async function validateEntity(
   const resolvedType = registry.getType(input.type)!;
 
   // --- 2. Field validation (delegates to existing validator) ---
-  // Pass a shallow copy so auto-population side-effects don't mutate the caller's object
-  const fieldsCopy = { ...input.fields };
+  // Pass a shallow copy so auto-population side-effects don't mutate the caller's object.
+  // Include `type` explicitly: _core.yaml declares it required, but the pipeline keeps it
+  // as an out-of-band discriminator (input.type) rather than in input.fields.
+  const fieldsCopy = { ...input.fields, type: input.type };
   const fieldResult = validateNote(fieldsCopy, resolvedType, 'strict');
   errors.push(...fieldResult.errors);
   warnings.push(...fieldResult.warnings);
