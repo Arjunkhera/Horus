@@ -23,6 +23,7 @@ import type {
   RunStatus,
   TestAction,
 } from '@akhera-horus/testenv';
+import { allSecretNames, resolveRequiredSecrets } from '@akhera-horus/testenv';
 import { EventLog } from './event-log.js';
 import { buildRedactor } from './redact.js';
 import { renderTemplate, type TemplateContext } from './template.js';
@@ -274,6 +275,31 @@ async function runLaunch(
       };
     }
     log.info('launch', 'Provisioner completed successfully');
+
+    // Slot discovery: if the provisioner emits a JSON object on stdout, merge
+    // its slot context into ctx so connection/test/teardown templates resolve
+    // correctly. The provisioner (not the caller) owns slot assignment.
+    // Non-JSON provisioners are unaffected (parse failure is ignored).
+    const provStdout = result.stdout.trim();
+    if (provStdout.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(provStdout) as Record<string, unknown>;
+        if (parsed.slot !== undefined) ctx.slot = String(parsed.slot);
+        if (typeof parsed.slot_data_path === 'string') ctx.slot_data_path = parsed.slot_data_path;
+        if (typeof parsed.project === 'string') ctx.project = parsed.project;
+        if (parsed.ports && typeof parsed.ports === 'object') {
+          for (const [k, v] of Object.entries(parsed.ports as Record<string, unknown>)) {
+            ctx[`port_${k}`] = String(v);
+          }
+        }
+        log.info(
+          'launch',
+          `Provisioner slot context: slot=${ctx.slot} project=${ctx.project} data=${ctx.slot_data_path}`,
+        );
+      } catch {
+        log.warn('launch', 'Provisioner stdout looked like JSON but failed to parse — ignoring');
+      }
+    }
   }
 
   // Assertions
@@ -303,7 +329,13 @@ async function runLaunch(
   // Phase-2 isolation checks (structural) — after launch
   if (phases.launch.isolationChecks) {
     log.info('launch', 'Running Phase-2 structural isolation checks');
-    const emitPath = ctx.slot ? `${ctx.slot}/claude-settings.json` : undefined;
+    // claude-settings.json is written into the slot DATA dir by the
+    // provisioner — use slot_data_path (abs), not the bare slot id.
+    const emitPath = ctx.slot_data_path
+      ? `${ctx.slot_data_path}/claude-settings.json`
+      : ctx.slot
+        ? `${ctx.slot}/claude-settings.json`
+        : undefined;
     const checks = evaluatePhase2IsolationChecks(phases.launch.isolationChecks, {
       ...ctx,
       emitPath,
@@ -876,8 +908,11 @@ export async function run(manifest: Manifest, opts: RunOptions = {}): Promise<Ru
     stream = true,
   } = opts;
 
-  const secretNames = manifest.requires.secrets ?? [];
-  const redact = buildRedactor(secretNames);
+  const secretReqs = manifest.requires.secrets ?? [];
+  // Required set is profile-scoped; the redactor covers ALL declared names so
+  // a profile-optional secret's value is still never leaked if present.
+  const secretNames = resolveRequiredSecrets(secretReqs, profile);
+  const redact = buildRedactor(allSecretNames(secretReqs));
 
   const log = new EventLog({ stream, redact });
 

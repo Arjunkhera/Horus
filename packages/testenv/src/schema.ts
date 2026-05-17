@@ -497,13 +497,58 @@ export type Profile = z.infer<typeof ProfileSchema>;
 // Requires
 // ---------------------------------------------------------------------------
 
+/**
+ * A required secret. Either a bare env-var name (always required), or an
+ * object that scopes the requirement to specific run profiles. A profile-scoped
+ * secret is only asserted present when the active --profile is in `profiles`;
+ * outside those profiles it is optional (the service that needs it is not
+ * under test).
+ */
+export const SecretRequirementSchema = z.union([
+  z.string().min(1),
+  z.object({
+    name: z.string().min(1),
+    profiles: z.array(z.string().min(1)).nonempty(),
+  }),
+]);
+
+export type SecretRequirement = z.infer<typeof SecretRequirementSchema>;
+
+/**
+ * Every declared secret name regardless of profile scoping.
+ * Used to build the redactor so values are never leaked, even when the
+ * secret is optional for the active profile.
+ */
+export function allSecretNames(secrets: SecretRequirement[]): string[] {
+  return secrets.map((s) => (typeof s === 'string' ? s : s.name));
+}
+
+/**
+ * The secret names that MUST be present for the given run profile.
+ * Bare-string secrets are always required. Object secrets are required only
+ * when the active profile is listed in their `profiles`.
+ */
+export function resolveRequiredSecrets(
+  secrets: SecretRequirement[],
+  profileName: string | undefined,
+): string[] {
+  return secrets
+    .filter((s) =>
+      typeof s === 'string'
+        ? true
+        : profileName !== undefined && s.profiles.includes(profileName),
+    )
+    .map((s) => (typeof s === 'string' ? s : s.name));
+}
+
 export const RequiresSchema = z.object({
   /**
-   * Environment variable NAMES required by this manifest.
-   * The runner asserts these are all present (non-empty) at Phase 1.
-   * Values are never logged or exposed.
+   * Environment variables required by this manifest. Each entry is either a
+   * bare NAME (always required) or `{ name, profiles }` (required only under
+   * the listed run profiles). The runner asserts the resolved set is present
+   * (non-empty) at Phase 1. Values are never logged or exposed.
    */
-  secrets: z.array(z.string().min(1)).default([]),
+  secrets: z.array(SecretRequirementSchema).default([]),
   /**
    * Named run profiles (e.g., laptop, cloud) with resource budgets.
    * At least one profile is recommended.

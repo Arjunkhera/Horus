@@ -1,27 +1,37 @@
 # Horus .testenv/manifest.yaml
 # First real consumer of testenv/v1 — end-to-end proof of the design.
-# Hardened from spike learnings: 676a5057 (shadow stack infra) +
-# a19c19a9 (agent-in-the-loop) + workarounds note b3725e13.
-# Design ref: b53213ec.
+# Slot/path/project contract per design ee2d53d2:
+#  - acquire OWNS slot assignment and emits {slot, slot_data_path, project,
+#    ports} as JSON; the runner discovers it (no caller-imposed --slot).
+#  - {slot}            → bare slot id (e.g. 0); used for the docker project.
+#  - {slot_data_path}  → absolute slot data dir (e.g. …/test-env/slot-0).
+#  - {workdir}/{src}   → repo clone/build dir vs source repo.
+# The spike-discovered host-prep workarounds (chown UID-1001, forge-registry
+# git init, neo4j/typesense chmod) now live in the CLI's acquire/createSlotDirs
+# path — the manifest no longer carries them. Design ref: ee2d53d2 / b53213ec.
 
 apiVersion: testenv/v1
 repo: horus
 
 requires:
   secrets:
-    - ANTHROPIC_API_KEY   # required by Claude Code agent (T5-style runs)
-    - CURSOR_API_KEY      # required by reader service (not an MCP probe target)
+    - ANTHROPIC_API_KEY            # required by the Claude Code agent (T5-style runs)
+    # reader-server only — required only when the reader is under test (full profile)
+    - name: CURSOR_API_KEY
+      profiles: [full]
   profiles:
     laptop:
       mem: 6g
     cloud:
       mem: 12g
+    full:
+      mem: 12g
 
 phases:
   # ---------------------------------------------------------------------------
   # Phase 1 — setup
-  # Encodes the prescribed tribal-knowledge steps discovered in spike 676a5057
-  # and documented in workarounds note b3725e13.
+  # Clone the repo under test into an isolated workdir and build it. Host/slot
+  # preparation is owned by `horus test-env acquire` (launch phase), not here.
   # ---------------------------------------------------------------------------
   setup:
     steps:
@@ -30,36 +40,18 @@ phases:
       - run: git clone --no-hardlinks {src} {workdir}
         label: Clone repo (no-hardlinks)
 
-      # Install and build the full monorepo inside the slot.
-      - run: pnpm install && pnpm build
-        label: Install dependencies and build
-
-      # Forge runs as UID 1001; these dirs must be owned by that UID before
-      # the container starts (b3725e13 Step 2 / spike 676a5057 bug #3).
-      - run: >-
-          chown -R 1001:1001
-          {slot}/forge/config
-          {slot}/forge/registry
-          {slot}/forge/workspaces
-          {slot}/forge/sessions
-        label: Fix Forge ownership (UID 1001)
-
-      # Forge's git-based registry must exist before the container starts
-      # (spike 676a5057 bug #5).
-      - run: git -C {slot}/forge/registry init
-        label: Init Forge registry git repo
-
-      # neo4j and typesense write as root inside their containers; pre-chmod
-      # so the dirs are writable (spike 676a5057 bug #2 + a19c19a9 Bug D).
-      - run: chmod 777 {slot}/neo4j {slot}/typesense
-        label: Pre-chmod neo4j and typesense data dirs
+      # Install deps, then build the testenv toolchain (the change surface
+      # this .testenv exercises). Scoped, not `pnpm -r build`: a full-monorepo
+      # build is slow and pulls in unrelated packages whose clean-clone build
+      # ordering is a separate concern, out of scope for the testing flow.
+      # pnpm filter flags MUST precede the script name; placed after, they are
+      # passed as args to the package build (tsup) and rejected.
+      - run: pnpm install && pnpm --filter @akhera-horus/testenv --filter @akhera-horus/testenv-runner --filter @arkhera30/cli build
+        label: Install dependencies and build testenv toolchain
 
     assert:
-      - type: path_exists
-        path: "{slot}/forge/registry/.git"
-
       - type: cmd_exit_zero
-        run: "pnpm build --filter @horus/testenv"
+        run: "pnpm --filter @akhera-horus/testenv build"
 
     isolationChecks:
       disjointDockerProject: true
@@ -71,24 +63,27 @@ phases:
 
   # ---------------------------------------------------------------------------
   # Phase 2 — launch
-  # Provisions the isolated stack via horus test-env acquire --standalone.
-  # --standalone generates a fully-projected compose file (no port-merge
-  # overlay) — the fix for the port-merge bug found in a19c19a9.
+  # Provision the isolated stack. `acquire` auto-assigns the slot and emits a
+  # JSON object on stdout; the runner parses it into {slot},
+  # {slot_data_path}, {project}, {port_*}. --standalone generates a
+  # fully-projected compose file (no port-merge overlay).
   # ---------------------------------------------------------------------------
   launch:
-    provisioner: "horus test-env acquire --slot {slot} --standalone"
+    provisioner: "horus test-env acquire --standalone --json"
 
     assert:
-      # Exactly 8 containers: anvil, vault-mcp, forge, neo4j, typesense,
-      # reader-server, reader, and one supporting service.
+      # The --standalone stack is exactly 7 long-running services:
+      # anvil, vault-mcp, vault-router, vault-personal, forge, neo4j, typesense.
+      # (reader/reader-server are NOT part of the standalone topology — they are
+      # profile-gated and excluded here; see DQ4.)
       - type: containers_running
-        count: 8
+        count: 7
 
       - type: ports_disjoint_from_live
         value: true
 
       - type: docker_project_name
-        pattern: "horus-test-{slot}"
+        pattern: "{project}"
 
       - type: fully_projected_ports
         value: true
@@ -100,8 +95,10 @@ phases:
 
   # ---------------------------------------------------------------------------
   # Phase 3 — await_ready
-  # Poll the four MCP endpoints and the reader HTTP port until all are up.
-  # Spike a19c19a9 T4: MCP is plain JSON-RPC HTTP — no model/API key needed.
+  # Poll the MCP endpoints until all are up. MCP is plain JSON-RPC HTTP — no
+  # model/API key needed (spike a19c19a9 T4). The reader-server is launched as
+  # part of the stack but is profile-gated (full) and not a readiness probe
+  # here — it is not under test in laptop/cloud (design ee2d53d2 DQ4).
   # ---------------------------------------------------------------------------
   await_ready:
     poll:
@@ -114,24 +111,21 @@ phases:
       - probe: forge_repo_list
         expect: ok
 
-      - probe: "GET :{reader_port}"
-        expect: http_200
-
     timeout: 180
     interval: 5
 
   # ---------------------------------------------------------------------------
   # Phase 4 — connection
-  # The provisioner writes claude-settings.json to the slot; we assert it
+  # acquire writes claude-settings.json into the slot data dir; assert it
   # parses cleanly and carries -dev-suffixed MCP server names (spike 676a5057
-  # T3 + T4: anvil-dev, vault-dev, forge-dev — no collision with live).
+  # T3/T4: anvil-dev, vault-dev, forge-dev — no collision with live).
   # ---------------------------------------------------------------------------
   connection:
-    emit: "{slot}/claude-settings.json"
+    emit: "{slot_data_path}/claude-settings.json"
 
     assert:
       - type: file_parses
-        path: "{slot}/claude-settings.json"
+        path: "{slot_data_path}/claude-settings.json"
         format: json
 
       - type: mcp_names_suffixed
@@ -161,7 +155,6 @@ phases:
 
       # Promoted spike-T2 isolation proof: the live Anvil search must return
       # zero results for the note title written above into the shadow stack.
-      # (a19c19a9: shadow POST /api/search → 1 result; live → 0 results)
       - name: isolation-proof
         invoke:
           http: "live-anvil/search?q=testenv-check"
@@ -173,11 +166,9 @@ phases:
 
   # ---------------------------------------------------------------------------
   # Phase 6 — teardown
-  # Release the stack, then run detective isolation assertions confirming:
-  # - no test project containers remain
-  # - live stack still running and unmodified
-  # - live data contains zero test artifacts
-  # - no secret residue in logs/tmp/config
+  # Release the slot discovered at launch, then run detective isolation
+  # assertions confirming no test containers remain, the live stack is
+  # unmodified and free of test artifacts, and no secret residue leaked.
   # ---------------------------------------------------------------------------
   teardown:
     provisioner: "horus test-env release --slot {slot}"

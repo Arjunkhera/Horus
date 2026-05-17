@@ -66,8 +66,13 @@ function evalAssertion(assertion: Assertion, ctx: TemplateContext): AssertionRes
 
     case 'containers_running': {
       try {
+        // Scope to the test compose project so a live stack's containers are
+        // not counted (slot/project contract — ctx.project from launch JSON).
+        const projectFilter = ctx.project
+          ? ` --filter "label=com.docker.compose.project=${ctx.project}"`
+          : '';
         const result = execSync(
-          `docker ps --filter "status=running" --format "{{.ID}}" 2>/dev/null | wc -l`,
+          `docker ps --filter "status=running"${projectFilter} --format "{{.ID}}" 2>/dev/null | wc -l`,
           { stdio: 'pipe' },
         )
           .toString()
@@ -77,7 +82,7 @@ function evalAssertion(assertion: Assertion, ctx: TemplateContext): AssertionRes
         return {
           type: assertion.type,
           status: ok ? 'pass' : 'fail',
-          detail: `Expected ${assertion.count} running containers, found ${count}`,
+          detail: `Expected ${assertion.count} running containers${ctx.project ? ` in project ${ctx.project}` : ''}, found ${count}`,
         };
       } catch {
         return {
@@ -90,8 +95,13 @@ function evalAssertion(assertion: Assertion, ctx: TemplateContext): AssertionRes
 
     case 'containers_remaining': {
       try {
+        // Scope to the test compose project — after release this project's
+        // container count must be 0, regardless of any live stack.
+        const projectFilter = ctx.project
+          ? ` --filter "label=com.docker.compose.project=${ctx.project}"`
+          : '';
         const result = execSync(
-          `docker ps -a --format "{{.ID}}" 2>/dev/null | wc -l`,
+          `docker ps -a${projectFilter} --format "{{.ID}}" 2>/dev/null | wc -l`,
           { stdio: 'pipe' },
         )
           .toString()
@@ -101,7 +111,7 @@ function evalAssertion(assertion: Assertion, ctx: TemplateContext): AssertionRes
         return {
           type: assertion.type,
           status: ok ? 'pass' : 'fail',
-          detail: `Expected ${assertion.count} remaining containers, found ${count}`,
+          detail: `Expected ${assertion.count} remaining containers${ctx.project ? ` in project ${ctx.project}` : ''}, found ${count}`,
         };
       } catch {
         return {

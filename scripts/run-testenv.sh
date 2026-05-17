@@ -13,11 +13,19 @@
 #
 # Requirements:
 #   --ec2:  AWS CLI configured (aws sts get-caller-identity must succeed)
-#           AWS_REGION, EC2_AMI_ID, EC2_INSTANCE_TYPE, EC2_KEY_NAME,
+#           AWS_REGION, EC2_AMI_ID, EC2_INSTANCE_TYPE,
 #           EC2_SECURITY_GROUP_ID env vars (or defaults below)
+#           EC2_KEY_FILE (optional): path to an existing .pem for EC2_KEY_NAME;
+#                         if unset, an ephemeral key pair is created & deleted
 #           ANTHROPIC_API_KEY env var
 #   --local: @arkhera30/cli and @akhera-horus/testenv-runner installed globally
 #            ANTHROPIC_API_KEY env var
+#
+# Required secrets (asserted at runner Phase 1):
+#   ANTHROPIC_API_KEY  always required (Claude Code agent runs)
+#   CURSOR_API_KEY     ONLY required under the `full` profile (reader-server
+#                      under test). --local uses `laptop`, --ec2 uses `cloud`,
+#                      so CURSOR_API_KEY is NOT required for either mode here.
 #
 # Exit codes:
 #   0 — scenario PASS
@@ -39,6 +47,7 @@ EC2_AMI_ID="${EC2_AMI_ID:-ami-0c02fb55956c7d316}"   # Amazon Linux 2 us-east-1
 EC2_INSTANCE_TYPE="${EC2_INSTANCE_TYPE:-t3.xlarge}"   # 4 vCPU / 16 GB — enough for shadow stack
 EC2_KEY_NAME="${EC2_KEY_NAME:-}"
 EC2_SECURITY_GROUP_ID="${EC2_SECURITY_GROUP_ID:-}"
+EC2_KEY_FILE="${EC2_KEY_FILE:-}"   # optional: existing .pem for EC2_KEY_NAME; unset ⇒ ephemeral key pair
 
 # ── Argument parsing ─────────────────────────────────────────────────────────
 
@@ -75,8 +84,11 @@ check_prereqs_ec2() {
   command -v aws           >/dev/null 2>&1 || fail "aws CLI not found"
   aws sts get-caller-identity >/dev/null 2>&1 || fail "AWS credentials not configured"
   [[ -n "${ANTHROPIC_API_KEY:-}" ]]        || fail "ANTHROPIC_API_KEY not set"
-  [[ -n "$EC2_KEY_NAME" ]]                 || fail "EC2_KEY_NAME not set"
   [[ -n "$EC2_SECURITY_GROUP_ID" ]]        || fail "EC2_SECURITY_GROUP_ID not set"
+  if [[ -n "$EC2_KEY_FILE" ]]; then
+    [[ -f "$EC2_KEY_FILE" ]]               || fail "EC2_KEY_FILE set but file not found: $EC2_KEY_FILE"
+    [[ -n "$EC2_KEY_NAME" ]]               || fail "EC2_KEY_FILE set but EC2_KEY_NAME (matching AWS key pair name) not set"
+  fi
   [[ -f "$MANIFEST" ]]                     || fail "manifest not found: $MANIFEST"
 }
 
@@ -98,25 +110,30 @@ print_result() {
 run_local() {
   check_prereqs_local
 
-  local slot
-  slot="$(date +%s)"
-  local data_dir="${HOME}/Horus/data/test-env/slot-${slot}"
+  # The runner OWNS slot lifecycle: its launch phase runs the manifest
+  # provisioner (`horus test-env acquire --standalone --json`), discovers the
+  # auto-assigned slot, and its teardown phase releases it. The script must NOT
+  # pre-acquire (that caused a double-acquire) nor impose a slot.
+  local workdir
+  workdir="$(mktemp -d "${TMPDIR:-/tmp}/horus-testenv-work.XXXXXX")"
 
-  log "Mode: local  |  slot: $slot"
+  log "Mode: local  |  workdir: $workdir"
   log "Evidence dir: $EVIDENCE_DIR"
 
   mkdir -p "$EVIDENCE_DIR"
 
-  # Teardown trap — always release the slot on exit
-  trap 'log "Teardown: releasing slot $slot..."; horus test-env release --slot "$slot" 2>/dev/null || true' EXIT
+  # Safety-net trap — release any slot still active (runner auto-detects the
+  # acquired slot) and remove the temp workdir on exit.
+  trap '
+    log "Teardown safety-net: releasing any active slot...";
+    horus test-env release 2>/dev/null || true;
+    [[ -n "$workdir" && -d "$workdir" ]] && rm -rf "$workdir" || true
+  ' EXIT
 
-  log "Acquiring standalone shadow stack (slot $slot)..."
-  horus test-env acquire --slot "$slot" --standalone
-
-  log "Running scenario..."
+  log "Running scenario (runner provisions the shadow stack)..."
   testenv-run "$MANIFEST" \
     --src "$REPO_ROOT" \
-    --slot "$slot" \
+    --workdir "$workdir" \
     --profile laptop \
     --run-class adhoc \
     --output "$RESULT_FILE" \
@@ -138,20 +155,44 @@ run_ec2() {
   check_prereqs_ec2
 
   local instance_id=""
-  local key_file="${TMPDIR:-/tmp}/horus-testenv-key-$$.pem"
+  local ephemeral_key_name=""
+  local key_file effective_key_name
+
+  if [[ -n "$EC2_KEY_FILE" ]]; then
+    # Caller supplied an existing private key for EC2_KEY_NAME (CI/harness convention).
+    key_file="$EC2_KEY_FILE"
+    effective_key_name="$EC2_KEY_NAME"
+    log "Using caller-supplied key pair: $EC2_KEY_NAME ($EC2_KEY_FILE)"
+  else
+    # No key supplied — create an ephemeral key pair, deleted on teardown.
+    key_file="${TMPDIR:-/tmp}/horus-testenv-key-$$.pem"
+    ephemeral_key_name="horus-testenv-$$-$(date +%s)"
+    effective_key_name="$ephemeral_key_name"
+    log "Creating ephemeral EC2 key pair: $ephemeral_key_name"
+    aws ec2 create-key-pair \
+      --key-name "$ephemeral_key_name" \
+      --region "$AWS_REGION" \
+      --query 'KeyMaterial' --output text > "$key_file"
+    chmod 600 "$key_file"
+  fi
 
   log "Mode: ec2  |  type: $EC2_INSTANCE_TYPE  |  region: $AWS_REGION"
   log "Evidence dir: $EVIDENCE_DIR"
 
   mkdir -p "$EVIDENCE_DIR"
 
-  # Teardown trap — always terminate the instance and clean up key on exit
+  # Teardown trap — always terminate the instance, delete ephemeral key, clean up on exit.
+  # A caller-supplied EC2_KEY_FILE is NEVER deleted; only an ephemeral pair/file is.
   trap '
     log "Teardown: terminating EC2 instance $instance_id..."
     [[ -n "$instance_id" ]] && \
       aws ec2 terminate-instances --instance-ids "$instance_id" \
         --region "$AWS_REGION" >/dev/null 2>&1 || true
-    [[ -f "$key_file" ]] && rm -f "$key_file" || true
+    if [[ -n "$ephemeral_key_name" ]]; then
+      aws ec2 delete-key-pair --key-name "$ephemeral_key_name" \
+        --region "$AWS_REGION" >/dev/null 2>&1 || true
+      [[ -f "$key_file" ]] && rm -f "$key_file" || true
+    fi
     log "Teardown complete."
   ' EXIT
 
@@ -161,7 +202,7 @@ run_ec2() {
   launch_result="$(aws ec2 run-instances \
     --image-id "$EC2_AMI_ID" \
     --instance-type "$EC2_INSTANCE_TYPE" \
-    --key-name "$EC2_KEY_NAME" \
+    --key-name "$effective_key_name" \
     --security-group-ids "$EC2_SECURITY_GROUP_ID" \
     --region "$AWS_REGION" \
     --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=horus-testenv-run},{Key=Purpose,Value=ci-testenv}]' \
@@ -230,15 +271,16 @@ set -euo pipefail
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
 
 # Extract repo
-mkdir -p ~/horus-src
+mkdir -p ~/horus-src ~/horus-work
 tar -xzf /tmp/horus-src.tar.gz -C ~/horus-src
 
-# Acquire standalone shadow stack
-horus test-env acquire --standalone
+# Do NOT pre-acquire: the runner's launch phase provisions the stack
+# (horus test-env acquire --standalone --json) and its teardown releases it.
 
 # Run scenario
 testenv-run ~/horus-src/.testenv/manifest.yaml \
   --src ~/horus-src \
+  --workdir ~/horus-work \
   --profile cloud \
   --run-class adhoc \
   --output ~/testenv-result.json \
