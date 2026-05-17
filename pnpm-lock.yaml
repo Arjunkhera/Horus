@@ -285,7 +285,7 @@ importers:
 
   packages/testenv-runner:
     dependencies:
-      '@horus/testenv':
+      '@akhera-horus/testenv':
         specifier: workspace:*
         version: link:../testenv
       yaml:
