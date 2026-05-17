@@ -17,8 +17,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateRunResult, validateManifest } from '@horus/testenv';
-import type { Manifest } from '@horus/testenv';
+import { validateRunResult, validateManifest } from '@akhera-horus/testenv';
+import type { Manifest } from '@akhera-horus/testenv';
 import { run } from '../src/runner.js';
 import { loadManifest } from '../src/loader.js';
 import { buildRedactor, redactValue } from '../src/redact.js';

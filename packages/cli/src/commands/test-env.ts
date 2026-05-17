@@ -48,7 +48,18 @@ testEnvCommand
     'Generate a fully-projected compose file (no overlay-merge). ' +
     'Eliminates port-collision with a live stack. Required on fresh VMs.',
   )
+  .option(
+    '--json',
+    'Emit a single machine-readable JSON object ' +
+    '{slot, slot_data_path, project, ports} on stdout. All human/progress ' +
+    'output is redirected to stderr so stdout is pure JSON (for the testenv runner).',
+  )
   .action(async (opts) => {
+    const jsonMode = Boolean(opts.json);
+    // In JSON mode, stdout must contain ONLY the final JSON object — route
+    // all spinners and human output to stderr.
+    const mkSpinner = (text: string) =>
+      ora({ text, stream: jsonMode ? process.stderr : process.stdout });
     const config = loadConfig();
     const dataDir = config.data_dir;
     const testCfg = loadTestEnvConfig(dataDir);
@@ -58,7 +69,7 @@ testEnvCommand
     const defaultVaultEntry = Object.entries(config.vaults).find(([, v]) => v.default);
     const defaultVaultName = defaultVaultEntry?.[0] ?? vaultNames[0] ?? 'default';
 
-    const spinner = ora('Detecting runtime...').start();
+    const spinner = mkSpinner('Detecting runtime...').start();
     let runtime;
     try {
       runtime = await detectRuntime(config.runtime);
@@ -85,12 +96,12 @@ testEnvCommand
     const project = projectName(slot);
 
     // Create isolated data directories
-    const dirSpinner = ora(`Creating slot-${slot} data directories...`).start();
+    const dirSpinner = mkSpinner(`Creating slot-${slot} data directories...`).start();
     createSlotDirs(slotDataPath, vaultNames);
     dirSpinner.succeed(`Data directory: ${chalk.dim(slotDataPath)}`);
 
     // Pre-seed notes and vault dirs so services find valid git repos instead of HTTPS-cloning
-    const seedSpinner = ora('Pre-seeding git repos...').start();
+    const seedSpinner = mkSpinner('Pre-seeding git repos...').start();
     try {
       await preSeedNotesDir(dataDir, slotDataPath);
       await preSeedVaultDirs(dataDir, slotDataPath, vaultNames);
@@ -128,7 +139,7 @@ testEnvCommand
     // Start shadow stack
     const standaloneMode = Boolean(opts.standalone);
     const modeLabel = standaloneMode ? 'standalone' : 'overlay';
-    const upSpinner = ora(
+    const upSpinner = mkSpinner(
       `Starting shadow stack (project ${chalk.cyan(project)}, mode: ${chalk.dim(modeLabel)})...`
     ).start();
     try {
@@ -147,7 +158,7 @@ testEnvCommand
     }
 
     // Wait for health
-    const healthSpinner = ora('Waiting for services to be healthy...').start();
+    const healthSpinner = mkSpinner('Waiting for services to be healthy...').start();
     const timeoutMs = parseInt(opts.timeout, 10) * 1000;
     try {
       await waitForShadowStackHealthy(runtime, project, timeoutMs, 3_000, (statuses) => {
@@ -175,6 +186,14 @@ testEnvCommand
       removeSlotDirs(slotDataPath);
       console.error((error as Error).message);
       process.exit(1);
+    }
+
+    // Machine-readable output for the testenv runner (slot discovery contract).
+    if (jsonMode) {
+      process.stdout.write(
+        JSON.stringify({ slot, slot_data_path: slotDataPath, project, ports }) + '\n',
+      );
+      return;
     }
 
     // Output connection info

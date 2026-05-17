@@ -36,8 +36,12 @@ export {
   TeardownPhaseSchema,
   // Requires / profile
   RequiresSchema,
+  SecretRequirementSchema,
   ProfileSchema,
   PhasesSchema,
+  // Secret resolution helpers
+  allSecretNames,
+  resolveRequiredSecrets,
   // Root manifest
   ManifestSchema,
   // Event log / result
@@ -69,6 +73,7 @@ export type {
   TestPhase,
   TeardownPhase,
   Requires,
+  SecretRequirement,
   Profile,
   Phases,
   Manifest,
