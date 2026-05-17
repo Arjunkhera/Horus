@@ -16,7 +16,7 @@
 #           AWS_REGION, EC2_AMI_ID, EC2_INSTANCE_TYPE, EC2_KEY_NAME,
 #           EC2_SECURITY_GROUP_ID env vars (or defaults below)
 #           ANTHROPIC_API_KEY env var
-#   --local: @arkhera30/cli and @horus/testenv-runner installed globally
+#   --local: @arkhera30/cli and @akhera-horus/testenv-runner installed globally
 #            ANTHROPIC_API_KEY env var
 #
 # Exit codes:
@@ -65,7 +65,7 @@ fail() { echo "[run-testenv] FAIL: $*" >&2; exit 1; }
 
 check_prereqs_local() {
   command -v horus         >/dev/null 2>&1 || fail "horus CLI not found — run: npm i -g @arkhera30/cli"
-  command -v testenv-run   >/dev/null 2>&1 || fail "testenv-run not found — run: npm i -g @horus/testenv-runner"
+  command -v testenv-run   >/dev/null 2>&1 || fail "testenv-run not found — run: npm i -g @akhera-horus/testenv-runner"
   command -v docker        >/dev/null 2>&1 || fail "docker not found"
   [[ -n "${ANTHROPIC_API_KEY:-}" ]]        || fail "ANTHROPIC_API_KEY not set"
   [[ -f "$MANIFEST" ]]                     || fail "manifest not found: $MANIFEST"
@@ -205,7 +205,7 @@ sudo systemctl start docker
 sudo usermod -aG docker ec2-user
 
 # Install horus CLI and testenv-runner
-sudo npm install -g @arkhera30/cli @horus/testenv-runner
+sudo npm install -g @arkhera30/cli @akhera-horus/testenv-runner
 
 # Setup horus (zero-vault, no config needed)
 mkdir -p ~/Horus

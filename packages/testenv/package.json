@@ -1,5 +1,5 @@
 {
-  "name": "@horus/testenv",
+  "name": "@akhera-horus/testenv",
   "version": "0.1.0",
   "description": "testenv/v1 declarative manifest schema, types, and validator",
   "type": "module",

@@ -1,7 +1,7 @@
 {
-  "name": "@horus/testenv-runner",
+  "name": "@akhera-horus/testenv-runner",
   "version": "0.1.0",
-  "description": "runner-core CLI — deterministic 6-phase executor for testenv/v1 manifests",
+  "description": "runner-core CLI \u2014 deterministic 6-phase executor for testenv/v1 manifests",
   "type": "module",
   "bin": {
     "testenv-run": "./dist/cli.js"
@@ -24,8 +24,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@horus/testenv": "workspace:*",
-    "yaml": "^2.0.0"
+    "yaml": "^2.0.0",
+    "@akhera-horus/testenv": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
