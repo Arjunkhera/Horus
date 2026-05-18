@@ -67,6 +67,7 @@ export const setupCommand = new Command('setup')
   .option('--forge-repo <url>', 'Forge registry repository URL')
   .option('--github-token <token>', 'GitHub personal access token for private repos (primary host)')
   .option('--claude-desktop', 'Configure Claude Desktop MCP servers during setup (non-interactive opt-in)')
+  .option('--registry <url>', 'Enterprise registry URL. When set, skips the personal git registry prompt and uses the company registry instead.')
   .action(async (opts) => {
     console.log('');
     console.log(chalk.bold('Horus Setup'));
@@ -136,6 +137,19 @@ export const setupCommand = new Command('setup')
     }
 
     const runtime = await detectRuntime(selectedRuntime);
+
+    // Step 2b: Check global registry reachability (non-fatal warning)
+    const cfSpinner = ora('Checking global registry (CloudFront)...').start();
+    try {
+      const cfRes = await fetch('https://d1agcpjabvrj1s.cloudfront.net/health', { signal: AbortSignal.timeout(8_000) });
+      if (cfRes.ok) {
+        cfSpinner.succeed('Global registry reachable');
+      } else {
+        cfSpinner.warn(`Global registry responded with HTTP ${cfRes.status} — continuing`);
+      }
+    } catch {
+      cfSpinner.warn('Global registry unreachable — setup will continue, but artifact resolution may be limited');
+    }
 
     // Step 3: Gather configuration
     let config: Config;
@@ -225,6 +239,9 @@ export const setupCommand = new Command('setup')
             existing?.repos.forge_registry ||
             defaults.repos.forge_registry,
         },
+        registry_git_url: opts.forgeRepo || existing?.registry_git_url || undefined,
+        registry_deploy_key: existing?.registry_deploy_key || undefined,
+        enterprise_registry_url: opts.registry || existing?.enterprise_registry_url || undefined,
         vaults,
         github_hosts,
         ai: {
@@ -310,10 +327,59 @@ export const setupCommand = new Command('setup')
         validate: (v) => v.trim().length > 0 || 'Anvil needs a notes repo to store your data.',
       });
 
-      const forge_registry = await input({
-        message: `Forge registry repo URL:\n${example('forge-registry')}\n`,
-        validate: (v) => v.trim().length > 0 || 'Forge needs a registry repo.',
-      });
+      // Registry setup: enterprise vs solo-dev path
+      let forge_registry = '';
+      let registry_git_url = '';
+      let registry_deploy_key = '';
+
+      if (opts.registry) {
+        // Enterprise path: use company registry URL, skip git repo prompt
+        console.log('');
+        console.log(chalk.bold.cyan('Enterprise Registry'));
+        console.log(chalk.green(`  Registry URL: ${opts.registry}`));
+        console.log(chalk.dim('  Skipping personal git registry — using company registry instead.'));
+        console.log('');
+      } else {
+        // Solo-dev path: git repo is mandatory (backs the personal registry-service via GitStorageBackend)
+        console.log('');
+        console.log(chalk.bold('Personal Registry (Git-Backed)'));
+        console.log(chalk.dim('Horus stores your artifacts and repo metadata in a private git repo you own.'));
+        console.log(chalk.dim('This repo backs the local registry-service that runs alongside Horus.'));
+        console.log(chalk.dim('Create an empty GitHub repo and paste the URL below.'));
+        console.log('');
+
+        registry_git_url = await input({
+          message: `Registry git repo URL:\n${example('horus-registry')}\n`,
+          validate: async (v) => {
+            if (!v.trim()) return 'A git repo URL is required for the personal registry.';
+            // Validate the URL is accessible via git ls-remote
+            try {
+              execSync(`git ls-remote "${v.trim()}" HEAD`, { stdio: 'pipe', timeout: 15_000 });
+              return true;
+            } catch {
+              return `Cannot access "${v.trim()}" — check the URL and ensure you have read access.`;
+            }
+          },
+        });
+
+        const wantsDeployKey = await confirm({
+          message: 'Does the registry repo require a deploy key (SSH private key)?',
+          default: false,
+        });
+
+        if (wantsDeployKey) {
+          registry_deploy_key = await input({
+            message: 'Path to deploy key (SSH private key file):',
+            validate: (v) => {
+              if (!v.trim()) return 'Deploy key path cannot be empty.';
+              if (!existsSync(v.trim())) return `File not found: ${v.trim()}`;
+              return true;
+            },
+          });
+        }
+
+        forge_registry = registry_git_url;
+      }
 
       // Vault collection flow
       console.log('');
@@ -422,6 +488,9 @@ export const setupCommand = new Command('setup')
           anvil_notes: anvil_notes.trim(),
           forge_registry: forge_registry.trim(),
         },
+        registry_git_url: registry_git_url?.trim() || undefined,
+        registry_deploy_key: registry_deploy_key?.trim() || undefined,
+        enterprise_registry_url: opts.registry?.trim() || undefined,
         vaults,
         github_hosts,
         ai: {
@@ -675,6 +744,16 @@ export const setupCommand = new Command('setup')
       const defaultLabel = vault.default ? chalk.dim(' (default)') : '';
       console.log(`    ${name}${defaultLabel}:  http://localhost:${port}`);
     });
+    console.log('');
+
+    console.log(chalk.bold('  Registry cascade:'));
+    if (config.enterprise_registry_url) {
+      console.log(`    1. ${config.enterprise_registry_url}  ${chalk.dim('(company registry — read/write)')}`);
+      console.log(chalk.dim('       No global fallback (air-gapped)'));
+    } else {
+      console.log(`    1. localhost:8744  ${chalk.dim('(personal registry — read/write, backed by git)')}`);
+      console.log(`    2. CloudFront     ${chalk.dim('(global public registry — read-only)')}`);
+    }
     console.log('');
 
     // Suppress unused variable warning for lastStates
