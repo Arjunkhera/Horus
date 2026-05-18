@@ -756,7 +756,7 @@ async function runTest(
       const actionResult = await runTestAction(action, log, ctx, redact);
       actionResults.push(actionResult);
 
-      if (actionResult.status !== 'pass') {
+      if (actionResult.status !== 'pass' && actionResult.status !== 'delegated') {
         log.warn('test', `fail-fast: stopping after failed action "${action.name}"`);
         aborted = true;
         // Mark all remaining actions as skipped
@@ -796,7 +796,10 @@ async function runTest(
 
   const anyFailed = actionResults.some((r) => r.status === 'fail' || r.status === 'error');
   const status: RunStatus = anyFailed ? 'fail' : 'pass';
-  log.info('test', `Phase 5: test — ${status} (${actionResults.filter((r) => r.status === 'pass').length}/${actions.length} passed)`);
+  const passed = actionResults.filter((r) => r.status === 'pass').length;
+  const delegated = actionResults.filter((r) => r.status === 'delegated').length;
+  const delegatedMsg = delegated > 0 ? `, ${delegated} delegated` : '';
+  log.info('test', `Phase 5: test — ${status} (${passed}/${actions.length} passed${delegatedMsg})`);
 
   return {
     result: {
