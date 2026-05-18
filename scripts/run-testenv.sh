@@ -43,7 +43,7 @@ RESULT_FILE="${EVIDENCE_DIR}/run-result.json"
 
 # EC2 defaults (override with env vars)
 AWS_REGION="${AWS_REGION:-us-east-1}"
-EC2_AMI_ID="${EC2_AMI_ID:-ami-0c02fb55956c7d316}"   # Amazon Linux 2 us-east-1
+EC2_AMI_ID="${EC2_AMI_ID:-ami-02b2c1b57c5105166}"   # Amazon Linux 2023 us-east-1
 EC2_INSTANCE_TYPE="${EC2_INSTANCE_TYPE:-t3.xlarge}"   # 4 vCPU / 16 GB — enough for shadow stack
 EC2_KEY_NAME="${EC2_KEY_NAME:-}"
 EC2_SECURITY_GROUP_ID="${EC2_SECURITY_GROUP_ID:-}"
@@ -239,18 +239,47 @@ run_ec2() {
   log "Bootstrapping instance..."
   ssh -o StrictHostKeyChecking=no -i "$key_file" "ec2-user@${public_ip}" bash <<BOOTSTRAP
 set -euo pipefail
-# Install Node 20
+# Install Node 20 (NodeSource repo)
 curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-sudo yum install -y nodejs docker git
+sudo dnf install -y nodejs docker git
+
+# Docker Compose v2 plugin (not in AL2023 default repos)
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# pnpm (required by runner Phase 1)
+sudo npm install -g pnpm
+
 sudo systemctl start docker
+sudo systemctl enable docker
 sudo usermod -aG docker ec2-user
 
 # Install horus CLI and testenv-runner
 sudo npm install -g @arkhera30/cli @akhera-horus/testenv-runner
 
-# Setup horus (zero-vault, no config needed)
+# Setup horus — sg activates docker group for current shell
 mkdir -p ~/Horus
-horus setup -y
+sg docker -c "horus setup -y" || true
+
+# Fix empty HOST_REPOS_PATH (horus setup leaves it blank on fresh installs)
+if grep -q '^HOST_REPOS_PATH=$' ~/Horus/.env 2>/dev/null; then
+  mkdir -p ~/horus-repos
+  sed -i 's|^HOST_REPOS_PATH=$|HOST_REPOS_PATH=/home/ec2-user/horus-repos|' ~/Horus/.env
+fi
+
+# Initialize git repos for services that need them
+for dir in ~/Horus/data/notes ~/Horus/data/registry; do
+  if [ -d "\$dir" ] && [ ! -d "\$dir/.git" ]; then
+    sudo git -C "\$dir" init
+    sudo git -C "\$dir" commit --allow-empty -m "init"
+  fi
+done
+
+# Fix ownership for Forge data dirs
+sudo chown -R 1001:1001 ~/Horus/data/config ~/Horus/data/registry \
+  ~/Horus/data/workspaces ~/Horus/data/sessions 2>/dev/null || true
 
 echo "Bootstrap complete"
 BOOTSTRAP
