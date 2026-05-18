@@ -1,6 +1,6 @@
 {
   "name": "@akhera-horus/testenv-runner",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "runner-core CLI — deterministic 6-phase executor for testenv/v1 manifests",
   "type": "module",
   "bin": {
