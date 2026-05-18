@@ -9,6 +9,7 @@ import { AuditLog } from './audit/audit-log.js';
 import { PublishPipeline } from './pipeline/publish-pipeline.js';
 import { RegistrySearchClient } from './search/registry-search.js';
 import { RepoSearchClient } from './search/repo-search.js';
+import { RepoStorageAdapter } from './storage/repo-storage.js';
 import { createApp } from './app.js';
 
 async function main(): Promise<void> {
@@ -60,8 +61,18 @@ async function main(): Promise<void> {
     search ?? undefined,
   );
 
+  // 7b. Create repo storage adapter (git backend only — repos live in the local worktree)
+  const repoStorage = config.storage.backend === 'git'
+    ? new RepoStorageAdapter(config.storage.localPath)
+    : null;
+
   // 8. Build Fastify app
-  const app = createApp({ config, storage, auth, auditLog, pipeline, search: search ?? undefined });
+  const app = createApp({
+    config, storage, auth, auditLog, pipeline,
+    search: search ?? undefined,
+    repoStorage: repoStorage ?? undefined,
+    repoSearch: repoSearch ?? undefined,
+  });
 
   // 9. Verify storage is reachable before accepting traffic
   try {
@@ -84,13 +95,11 @@ async function main(): Promise<void> {
       });
   }
 
-  // 10b. Cold rebuild repo search index if empty
-  // Note: repoStorage (RR-4) is not yet available — will be wired when implemented.
-  // For now we ensure the collection exists; rebuild will index 0 docs until
-  // repo storage is connected.
-  if (repoSearch) {
-    void repoSearch
-      .rebuildFromStorage([])
+  // 10b. Cold rebuild repo search index from storage
+  if (repoSearch && repoStorage) {
+    void repoStorage
+      .listAll()
+      .then((repos) => repoSearch.rebuildFromStorage(repos))
       .then((count) => {
         app.log.info(`Repo search cold rebuild complete: indexed ${count} repos`);
       })
