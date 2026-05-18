@@ -103,12 +103,14 @@ publish_one() {
   pnpm --filter "${npm_name}" build
 
   # Step 3: publish
+  # Use pnpm publish to resolve workspace:* protocols before uploading.
+  # npm publish does NOT resolve them, breaking global installs.
   log "Publishing to npm..."
   cd "$full_dir"
   if [[ -n "$access" ]]; then
-    npm publish --access "$access"
+    pnpm publish --access "$access" --no-git-checks
   else
-    npm publish
+    pnpm publish --no-git-checks
   fi
   log "Published ${npm_name}@${version}"
 
