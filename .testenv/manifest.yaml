@@ -49,9 +49,9 @@ phases:
       - run: pnpm install && pnpm --filter @akhera-horus/testenv --filter @akhera-horus/testenv-runner --filter @arkhera30/cli build
         label: Install dependencies and build testenv toolchain
 
-    assert:
-      - type: cmd_exit_zero
-        run: "pnpm --filter @akhera-horus/testenv build"
+    # No cmd_exit_zero assert here: it would redundantly re-run the build the
+    # step above already performed, under runner-core's 30s/1MB execSync caps —
+    # pure flake surface. The build step succeeding IS the setup validation.
 
     isolationChecks:
       disjointDockerProject: true
