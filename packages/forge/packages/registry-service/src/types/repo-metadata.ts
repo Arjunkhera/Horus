@@ -87,13 +87,28 @@ export const CreateRepoInputSchema = RepoMetadataSchema.pick({
   }).partial(),
 );
 
-/** Patch payload — omits identity and server-set lifecycle fields; all remaining optional. */
-export const PatchRepoInputSchema = RepoMetadataSchema.omit({
-  org: true,
-  name: true,
-  registeredAt: true,
-  updatedAt: true,
-}).partial();
+/**
+ * Patch payload — omits identity and server-set lifecycle fields; all remaining optional.
+ * Sub-schemas (workflow, credential, host, vaultScope) are also partial to allow
+ * deep-merge semantics: e.g. { workflow: { mergeStrategy: "squash" } } without
+ * requiring the full WorkflowSchema shape.
+ */
+export const PatchRepoInputSchema = z.object({
+  canonicalUrl: z.string().min(1).optional(),
+  host: HostSchema.partial().optional(),
+  credential: CredentialSchema.partial().optional(),
+  workflow: WorkflowSchema.partial().optional(),
+  vaultScope: VaultScopeSchema.partial().optional(),
+  description: z.string().optional(),
+  topics: z.array(z.string()).optional(),
+  language: z.string().optional(),
+  defaultBranch: z.string().optional(),
+  isPrivate: z.boolean().optional(),
+  isFork: z.boolean().optional(),
+  stars: z.number().int().nonnegative().optional(),
+  lastPushedAt: z.string().datetime().optional(),
+  extra: z.record(z.unknown()).optional(),
+});
 
 // ---------------------------------------------------------------------------
 // Inferred types
