@@ -27,6 +27,18 @@ requires:
     full:
       mem: 12g
 
+# ---------------------------------------------------------------------------
+# MCP connection topology — declares named endpoints the test actions target.
+# Template vars ({port_*}) are populated at runtime from acquire --json output.
+# ---------------------------------------------------------------------------
+connections:
+  shadow:
+    anvil: { transport: sse, url: "http://localhost:{port_anvil_dev}/mcp" }
+    vault: { transport: sse, url: "http://localhost:{port_vault_dev}/mcp" }
+    forge: { transport: sse, url: "http://localhost:{port_forge_dev}/mcp" }
+  live:
+    anvil: { transport: sse, url: "http://localhost:{port_anvil}/mcp" }
+
 phases:
   # ---------------------------------------------------------------------------
   # Phase 1 — setup
@@ -135,6 +147,8 @@ phases:
   # Phase 5 — test
   # Includes the promoted spike-T2 isolation-proof assertion:
   # data written via shadow MCP must NOT appear in the live stack.
+  # Actions declare their MCP target via `connection:` (see connections block).
+  # runner-core reports these as `delegated`; the sdlc-testenv agent executes them.
   # ---------------------------------------------------------------------------
   test:
     policy: fail-fast
@@ -142,6 +156,7 @@ phases:
     actions:
       # Basic Anvil round-trip: create a note via shadow MCP, confirm it lands.
       - name: anvil-roundtrip
+        connection: shadow.anvil
         invoke:
           tool: anvil_create_note
           args:
@@ -155,9 +170,14 @@ phases:
 
       # Promoted spike-T2 isolation proof: the live Anvil search must return
       # zero results for the note title written above into the shadow stack.
+      # (Previously invoke.http: "live-anvil/search" — but Anvil is MCP-only,
+      # no REST endpoint. Rewritten to invoke.tool with connection: live.anvil.)
       - name: isolation-proof
+        connection: live.anvil
         invoke:
-          http: "live-anvil/search?q=testenv-check"
+          tool: anvil_search
+          args:
+            query: "testenv-check"
         expect:
           count: 0
         evidence:
