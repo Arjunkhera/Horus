@@ -44,6 +44,7 @@ import { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse } from '
 import { sessionList, type SessionListOptions, type SessionListResult } from './session/session-list.js';
 import { sessionCleanup, type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
 import { ForgeSearchClient } from './search/forge-search-client.js';
+import { RepoRegistryClient } from './repo/repo-registry-client.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -165,6 +166,8 @@ export class ForgeCore {
   private _lifecycleManager?: WorkspaceLifecycleManager;
   /** Lazily initialized — null when Typesense is not configured. */
   private _searchClient?: ForgeSearchClient | null;
+  /** Lazily initialized — null when no http registry is configured. */
+  private _repoRegistryClient?: RepoRegistryClient | null;
 
   constructor(
     private readonly workspaceRoot: string = process.cwd(),
@@ -186,6 +189,34 @@ export class ForgeCore {
       this._searchClient = ForgeSearchClient.create();
     }
     return this._searchClient;
+  }
+
+  /**
+   * Return a RepoRegistryClient configured from the first http registry in the
+   * global config, or null when no registry is available.
+   * The client uses `~/.horus/repo-registry-cache.json` as an offline cache.
+   */
+  async getRepoRegistryClient(): Promise<RepoRegistryClient | null> {
+    if (this._repoRegistryClient !== undefined) {
+      return this._repoRegistryClient;
+    }
+    const globalConfig = await loadGlobalConfig(this.globalConfigPath);
+    const reg = globalConfig.registries.find(r => r.type === 'http');
+    if (!reg) {
+      this._repoRegistryClient = null;
+      return null;
+    }
+    let token = reg.token;
+    if (!token && reg.tokenEnv) {
+      token = process.env[reg.tokenEnv];
+    }
+    const cachePath = path.join(path.dirname(globalConfig.repos.index_path.replace(/^~/, os.homedir())), 'repo-registry-cache.json');
+    this._repoRegistryClient = new RepoRegistryClient({
+      baseUrl: reg.url,
+      token,
+      cachePath,
+    });
+    return this._repoRegistryClient;
   }
 
   private async getMetadataStore(): Promise<WorkspaceMetadataStore> {
