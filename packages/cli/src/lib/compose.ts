@@ -193,6 +193,40 @@ const TYPESENSE_SERVICE = `\
       start_period: 5s
     restart: unless-stopped`;
 
+const REGISTRY_SERVICE = `\
+  # ── Registry ───────────────────────────────────────────────────────────────
+  # Personal local registry-service backed by a private git repo.
+  # Omitted when enterprise_registry_url is configured (air-gapped mode).
+  registry:
+    image: ghcr.io/arjunkhera/horus/registry:latest
+    ports:
+      - "\${REGISTRY_PORT:-8744}:8744"
+    volumes:
+      - \${HORUS_DATA_PATH}/registry:/data/registry:rw
+    environment:
+      - REGISTRY_PORT=8744
+      - REGISTRY_HOST=0.0.0.0
+      - REGISTRY_DATA_PATH=/data/registry
+      - FORGE_REGISTRY_REPO_URL=\${FORGE_REGISTRY_REPO_URL:-}
+      - FORGE_REGISTRY_DEPLOY_KEY=\${FORGE_REGISTRY_DEPLOY_KEY:-}
+      - GITHUB_TOKEN=\${GITHUB_TOKEN:-}
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 64m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3`;
+
 const READER_SERVICE = `\
   # ── Reader ─────────────────────────────────────────────────────────────────
   # Horus Reader — Express server + NLP agent search at port 8400.
@@ -471,6 +505,9 @@ ${vaultRouterDependsOn ? `    depends_on:\n${vaultRouterDependsOn}\n` : ''}    n
     '',
     TYPESENSE_SERVICE,
     '',
+    // Include local registry-service only when NOT using an enterprise registry.
+    // In air-gapped / enterprise mode, the company registry replaces it entirely.
+    ...(config.enterprise_registry_url ? [] : [REGISTRY_SERVICE, '']),
     ...(config.enable_ui !== false ? [READER_SERVICE, ''] : []),
     '# ── Networks ──────────────────────────────────────────────────────────────────',
     'networks:',

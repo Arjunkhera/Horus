@@ -52,12 +52,40 @@ export const DEFAULT_GLOBAL_REGISTRY: RegistryConfig = {
  * Ensure the registry list includes the required local (first) and global
  * (last) registries. User-defined registries are sandwiched between them.
  *
- * Rules:
+ * Rules (solo-dev mode — no enterpriseRegistryUrl):
  * - If no registry named 'local' exists, prepend the default local registry.
  * - If no registry named 'global' exists, append the default global registry.
  * - Ordering: local always first, global always last, user registries in the middle.
+ *
+ * Enterprise / air-gapped mode (enterpriseRegistryUrl provided):
+ * - Skips DEFAULT_LOCAL_REGISTRY and DEFAULT_GLOBAL_REGISTRY entirely.
+ * - Adds a single writable registry entry for the company URL (name: 'enterprise').
+ * - Any explicitly user-configured 'local' or 'global' entries are preserved if
+ *   they already exist in the list, but defaults are not injected.
  */
-export function ensureDefaultRegistries(registries: RegistryConfig[]): RegistryConfig[] {
+export function ensureDefaultRegistries(
+  registries: RegistryConfig[],
+  enterpriseRegistryUrl?: string,
+): RegistryConfig[] {
+  if (enterpriseRegistryUrl) {
+    // Enterprise / air-gapped path: use only the company registry.
+    const hasEnterprise = registries.some(r => r.name === 'enterprise');
+    if (hasEnterprise) {
+      // Already configured — return as-is (user may have customised it)
+      return registries;
+    }
+    const enterpriseReg: RegistryConfig = {
+      type: 'http',
+      name: 'enterprise',
+      url: enterpriseRegistryUrl,
+      writable: true,
+    };
+    // Prepend enterprise registry; keep any other user-defined entries after it
+    const others = registries.filter(r => r.name !== 'enterprise');
+    return [enterpriseReg, ...others];
+  }
+
+  // Solo-dev path: inject default local + global registries if absent
   const hasLocal = registries.some(r => r.name === 'local');
   const hasGlobal = registries.some(r => r.name === 'global');
 
@@ -77,13 +105,20 @@ export function ensureDefaultRegistries(registries: RegistryConfig[]): RegistryC
  * Load the global Forge configuration from ~/Horus/data/config/forge.yaml.
  * Returns an empty config (no registries) if the file doesn't exist.
  * Expands all tilde paths to absolute paths.
- * Ensures default local and global registries are always present.
+ * Ensures default local and global registries are always present, unless
+ * ENTERPRISE_REGISTRY_URL is set in the environment (air-gapped mode).
  *
  * @param configPath - Override the default path (useful for testing).
  */
 export async function loadGlobalConfig(
   configPath: string = GLOBAL_CONFIG_PATH,
 ): Promise<GlobalConfig> {
+  // In enterprise / air-gapped mode, Forge is told about the company registry
+  // via the ENTERPRISE_REGISTRY_URL environment variable (written to .env by
+  // `horus setup --registry <url>`). When set, the default local and global
+  // registries are not injected.
+  const enterpriseRegistryUrl = process.env.ENTERPRISE_REGISTRY_URL || undefined;
+
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
     const parsed = parseYaml(raw);
@@ -92,8 +127,8 @@ export async function loadGlobalConfig(
     // Normalize registry configs
     config.registries = config.registries.map(normalizeRegistryConfig);
 
-    // Ensure default registries are present
-    config.registries = ensureDefaultRegistries(config.registries);
+    // Ensure default registries are present (enterprise-aware)
+    config.registries = ensureDefaultRegistries(config.registries, enterpriseRegistryUrl);
 
     // Expand all tilde paths to absolute paths
     if (config.workspace.mount_path) {
@@ -121,7 +156,7 @@ export async function loadGlobalConfig(
     if (err?.code === 'ENOENT') {
       // No global config — return defaults with default registries
       const config = GlobalConfigSchema.parse({});
-      config.registries = ensureDefaultRegistries(config.registries);
+      config.registries = ensureDefaultRegistries(config.registries, enterpriseRegistryUrl);
       return config;
     }
     // File exists but is malformed — warn and return defaults
@@ -129,7 +164,7 @@ export async function loadGlobalConfig(
       `[Forge] Warning: Could not parse global config at ${configPath}: ${err.message}. Using defaults.`,
     );
     const config = GlobalConfigSchema.parse({});
-    config.registries = ensureDefaultRegistries(config.registries);
+    config.registries = ensureDefaultRegistries(config.registries, enterpriseRegistryUrl);
     return config;
   }
 }

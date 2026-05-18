@@ -138,17 +138,41 @@ export const setupCommand = new Command('setup')
 
     const runtime = await detectRuntime(selectedRuntime);
 
-    // Step 2b: Check global registry reachability (non-fatal warning)
-    const cfSpinner = ora('Checking global registry (CloudFront)...').start();
-    try {
-      const cfRes = await fetch('https://d1agcpjabvrj1s.cloudfront.net/health', { signal: AbortSignal.timeout(8_000) });
-      if (cfRes.ok) {
-        cfSpinner.succeed('Global registry reachable');
-      } else {
-        cfSpinner.warn(`Global registry responded with HTTP ${cfRes.status} — continuing`);
+    // Step 2b: Check registry reachability
+    if (opts.registry) {
+      // Enterprise mode: validate the company registry is reachable (fatal if not)
+      const registrySpinner = ora(`Checking company registry at ${opts.registry}...`).start();
+      try {
+        const healthUrl = opts.registry.replace(/\/$/, '') + '/health';
+        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(10_000) });
+        if (res.ok) {
+          registrySpinner.succeed(`Company registry reachable (HTTP ${res.status})`);
+        } else {
+          registrySpinner.fail(`Company registry returned HTTP ${res.status}`);
+          console.log(chalk.red(`  URL: ${healthUrl}`));
+          console.log(chalk.dim('  Ensure the registry is running and accessible from this machine.'));
+          process.exit(1);
+        }
+      } catch (err) {
+        registrySpinner.fail('Company registry is not reachable');
+        console.log(chalk.red(`  URL: ${opts.registry}`));
+        console.log(chalk.dim(`  Error: ${(err as Error).message}`));
+        console.log(chalk.dim('  Ensure the registry is running and accessible from this machine.'));
+        process.exit(1);
       }
-    } catch {
-      cfSpinner.warn('Global registry unreachable — setup will continue, but artifact resolution may be limited');
+    } else {
+      // Solo-dev mode: check global registry reachability (non-fatal warning)
+      const cfSpinner = ora('Checking global registry (CloudFront)...').start();
+      try {
+        const cfRes = await fetch('https://d1agcpjabvrj1s.cloudfront.net/health', { signal: AbortSignal.timeout(8_000) });
+        if (cfRes.ok) {
+          cfSpinner.succeed('Global registry reachable');
+        } else {
+          cfSpinner.warn(`Global registry responded with HTTP ${cfRes.status} — continuing`);
+        }
+      } catch {
+        cfSpinner.warn('Global registry unreachable — setup will continue, but artifact resolution may be limited');
+      }
     }
 
     // Step 3: Gather configuration
@@ -334,6 +358,7 @@ export const setupCommand = new Command('setup')
 
       if (opts.registry) {
         // Enterprise path: use company registry URL, skip git repo prompt
+        // (reachability was already validated in step 2b above)
         console.log('');
         console.log(chalk.bold.cyan('Enterprise Registry'));
         console.log(chalk.green(`  Registry URL: ${opts.registry}`));
