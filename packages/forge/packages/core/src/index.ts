@@ -35,6 +35,10 @@ export { RepoIndexQuery } from './repo/repo-index-query.js';
 export { normalizeGitUrl } from './repo/url-utils.js';
 export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type RepoDevelopResult, type RepoDevelopNeedsConfirmation, type RepoDevelopNeedsRepoDisambiguation, type WorkflowInput } from './repo/repo-develop.js';
 
+// Repo Registry
+export { RepoRegistryClient, type RepoRegistryClientOptions, type RepoMetadataRecord, type CreateRepoInput, type PatchRepoInput, type SearchParams, type SearchResult, type ResolveResult, type RepoHost, type RepoCredential, type RepoWorkflowMeta, type RepoVaultScope } from './repo/repo-registry-client.js';
+export { RepoNotFoundError, RepoExistsError, RepoAmbiguousError } from './repo/repo-errors.js';
+
 // Search
 export { ForgeSearchClient, type ForgeSearchHit } from './search/forge-search-client.js';
 
