@@ -299,9 +299,11 @@ BOOTSTRAP
 set -euo pipefail
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
 
-# Extract repo
+# Extract repo and init git (git archive strips .git)
 mkdir -p ~/horus-src ~/horus-work
 tar -xzf /tmp/horus-src.tar.gz -C ~/horus-src
+cd ~/horus-src && git init -q && git add -A && git commit -q -m "testenv snapshot" --allow-empty
+cd ~
 
 # Do NOT pre-acquire: the runner's launch phase provisions the stack
 # (horus test-env acquire --standalone --json) and its teardown releases it.
