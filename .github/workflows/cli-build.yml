@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build @horus/search
+        run: pnpm --filter @horus/search build
+
       - name: Build @forge/core
         run: pnpm --filter @forge/core build
 
