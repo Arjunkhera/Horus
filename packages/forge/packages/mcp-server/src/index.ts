@@ -8,7 +8,7 @@ import {
   type CallToolRequest,
   type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ForgeCore, runStartupMigrations, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions, type ArtifactType, type ArtifactBundle, type ArtifactMeta } from '@forge/core';
+import { ForgeCore, runStartupMigrations, type RepoIndexEntry, type AutoDetectedWorkflow, type SessionListOptions, type SessionCleanupOptions, type ArtifactType, type ArtifactBundle, type ArtifactMeta, RepoNotFoundError, RepoExistsError, RepoAmbiguousError, type CreateRepoInput, type PatchRepoInput } from '@forge/core';
 import * as http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { promises as fsPromises } from 'node:fs';
@@ -190,9 +190,75 @@ const TOOLS = [
     },
   },
   {
+    name: 'forge_repo_register',
+    description:
+      'Register a new repository in the repo registry. Requires org, name, and canonicalUrl. All other fields are optional.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        org: { type: 'string', description: 'Organization or owner name' },
+        name: { type: 'string', description: 'Repository name' },
+        canonicalUrl: { type: 'string', description: 'Canonical URL of the repository (https or git@)' },
+        description: { type: 'string', description: 'Short description of the repository (optional)' },
+        language: { type: 'string', description: 'Primary programming language (optional)' },
+        defaultBranch: { type: 'string', description: 'Default branch name (optional)' },
+        topics: { type: 'array', items: { type: 'string' }, description: 'Topic tags (optional)' },
+        isPrivate: { type: 'boolean', description: 'Whether the repository is private (optional)' },
+        isFork: { type: 'boolean', description: 'Whether this is a fork (optional)' },
+      },
+      required: ['org', 'name', 'canonicalUrl'],
+    },
+  },
+  {
+    name: 'forge_repo_get',
+    description:
+      'Get full metadata for a repository from the registry by org and name.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        org: { type: 'string', description: 'Organization or owner name' },
+        name: { type: 'string', description: 'Repository name' },
+      },
+      required: ['org', 'name'],
+    },
+  },
+  {
+    name: 'forge_repo_update',
+    description:
+      'Update metadata for an existing repository in the registry. Only the fields provided are changed (PATCH semantics).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        org: { type: 'string', description: 'Organization or owner name' },
+        name: { type: 'string', description: 'Repository name' },
+        canonicalUrl: { type: 'string', description: 'Canonical URL (optional)' },
+        description: { type: 'string', description: 'Short description (optional)' },
+        language: { type: 'string', description: 'Primary programming language (optional)' },
+        defaultBranch: { type: 'string', description: 'Default branch name (optional)' },
+        topics: { type: 'array', items: { type: 'string' }, description: 'Topic tags (optional)' },
+        isPrivate: { type: 'boolean', description: 'Whether the repository is private (optional)' },
+        isFork: { type: 'boolean', description: 'Whether this is a fork (optional)' },
+      },
+      required: ['org', 'name'],
+    },
+  },
+  {
+    name: 'forge_repo_remove',
+    description:
+      'Remove a repository from the registry by org and name.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        org: { type: 'string', description: 'Organization or owner name' },
+        name: { type: 'string', description: 'Repository name' },
+      },
+      required: ['org', 'name'],
+    },
+  },
+  {
     name: 'forge_repo_list',
     description:
-      'List repositories from the local index. Filter by query (name, path, or URL) and/or language. Automatically scans if no index exists.',
+      'Search repositories in the registry. Supports filtering by query, org, language, framework, tag, with pagination. Falls back to local index when no registry is configured.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -200,9 +266,29 @@ const TOOLS = [
           type: 'string',
           description: 'Search query to filter repositories (optional)',
         },
+        org: {
+          type: 'string',
+          description: 'Filter by organization (optional)',
+        },
         language: {
           type: 'string',
           description: 'Filter by programming language (optional)',
+        },
+        framework: {
+          type: 'string',
+          description: 'Filter by framework (optional)',
+        },
+        tag: {
+          type: 'string',
+          description: 'Filter by topic tag (optional)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results to return (optional)',
+        },
+        offset: {
+          type: 'number',
+          description: 'Pagination offset (optional)',
         },
       },
     },
@@ -210,7 +296,7 @@ const TOOLS = [
   {
     name: 'forge_repo_resolve',
     description:
-      'Find a specific repository by name or remote URL. Automatically scans if no index exists.',
+      'Find a specific repository by name or URL. Tries the registry first, falls back to local index when no registry is configured.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -218,7 +304,7 @@ const TOOLS = [
           type: 'string',
           description: 'Repository name to search for (optional)',
         },
-        remoteUrl: {
+        url: {
           type: 'string',
           description: 'Remote URL (https or git@) to match against (optional)',
         },
@@ -228,7 +314,7 @@ const TOOLS = [
   {
     name: 'forge_repo_workflow',
     description:
-      'Resolve the git workflow configuration for a repository. Resolution order: (1) confirmed workflow in repo index, (2) Vault repo profile, (3) auto-detect from git remotes. When needsConfirmation=true is returned, present autoDetected values to the user, then call again with the confirmed workflow parameter to save. Returns strategy (owner|fork|contributor), default branch, PR target, and hosting info.',
+      '[DEPRECATED] Resolve the git workflow configuration for a repository. Use forge_repo_get to retrieve workflow from the registry. Resolution order: (1) confirmed workflow in repo index, (2) Vault repo profile, (3) auto-detect from git remotes. When needsConfirmation=true is returned, present autoDetected values to the user, then call again with the confirmed workflow parameter to save. Returns strategy (owner|fork|contributor), default branch, PR target, and hosting info.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -277,7 +363,7 @@ const TOOLS = [
   {
     name: 'forge_repo_scan',
     description:
-      'Trigger a full repository index rescan. Use this after cloning a new repository to make it discoverable via forge_repo_resolve and forge_develop. ' +
+      '[DEPRECATED] Trigger a full repository index rescan. Use forge_repo_register instead to add repositories to the registry. ' +
       'Scan paths are read from the global Forge config — no parameters needed. ' +
       'Returns the number of scan paths checked and repositories found.',
     inputSchema: {
@@ -606,12 +692,104 @@ function buildServer(workspaceRoot: string): Server {
           };
         }
 
+        case 'forge_repo_register': {
+          const { org, name, canonicalUrl, ...rest } = (args ?? {}) as CreateRepoInput;
+          const client = await forge.getRepoRegistryClient();
+          if (!client) {
+            return {
+              content: [{ type: 'text', text: 'Registry not configured. Add an http registry to forge.yaml.' }],
+              isError: true,
+            };
+          }
+          try {
+            const record = await client.register({ org, name, canonicalUrl, ...rest });
+            return { content: [{ type: 'text', text: JSON.stringify(record, null, 2) }] };
+          } catch (err) {
+            if (err instanceof RepoExistsError) {
+              return {
+                content: [{ type: 'text', text: `Repo already registered: ${org}/${name}` }],
+                isError: true,
+              };
+            }
+            throw err;
+          }
+        }
+
+        case 'forge_repo_get': {
+          const { org, name } = (args ?? {}) as { org: string; name: string };
+          const client = await forge.getRepoRegistryClient();
+          if (!client) {
+            return {
+              content: [{ type: 'text', text: 'Registry not configured. Add an http registry to forge.yaml.' }],
+              isError: true,
+            };
+          }
+          try {
+            const record = await client.get(org, name);
+            return { content: [{ type: 'text', text: JSON.stringify(record, null, 2) }] };
+          } catch (err) {
+            if (err instanceof RepoNotFoundError) {
+              return {
+                content: [{ type: 'text', text: `Repo not found: ${org}/${name}` }],
+                isError: true,
+              };
+            }
+            throw err;
+          }
+        }
+
+        case 'forge_repo_update': {
+          const { org, name, ...patch } = (args ?? {}) as { org: string; name: string } & PatchRepoInput;
+          const client = await forge.getRepoRegistryClient();
+          if (!client) {
+            return {
+              content: [{ type: 'text', text: 'Registry not configured. Add an http registry to forge.yaml.' }],
+              isError: true,
+            };
+          }
+          try {
+            const record = await client.update(org, name, patch);
+            return { content: [{ type: 'text', text: JSON.stringify(record, null, 2) }] };
+          } catch (err) {
+            if (err instanceof RepoNotFoundError) {
+              return {
+                content: [{ type: 'text', text: `Repo not found: ${org}/${name}` }],
+                isError: true,
+              };
+            }
+            throw err;
+          }
+        }
+
+        case 'forge_repo_remove': {
+          const { org, name } = (args ?? {}) as { org: string; name: string };
+          const client = await forge.getRepoRegistryClient();
+          if (!client) {
+            return {
+              content: [{ type: 'text', text: 'Registry not configured. Add an http registry to forge.yaml.' }],
+              isError: true,
+            };
+          }
+          try {
+            await client.remove(org, name);
+            return { content: [{ type: 'text', text: JSON.stringify({ removed: true, org, name }, null, 2) }] };
+          } catch (err) {
+            if (err instanceof RepoNotFoundError) {
+              return {
+                content: [{ type: 'text', text: `Repo not found: ${org}/${name}` }],
+                isError: true,
+              };
+            }
+            throw err;
+          }
+        }
+
         case 'forge_repo_scan': {
           const index = await forge.repoScan();
           return {
             content: [{
               type: 'text',
-              text: JSON.stringify({
+              text: '⚠️ forge_repo_scan is deprecated. Use forge_repo_register instead.\n\n' + JSON.stringify({
                 scanPaths: index.scanPaths,
                 reposFound: index.repos.length,
                 repos: index.repos.map((r: RepoIndexEntry) => ({
@@ -625,7 +803,21 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_repo_list': {
-          const { query, language } = (args ?? {}) as { query?: string; language?: string };
+          const { query, org, language, framework, tag, limit, offset } = (args ?? {}) as {
+            query?: string;
+            org?: string;
+            language?: string;
+            framework?: string;
+            tag?: string;
+            limit?: number;
+            offset?: number;
+          };
+          const client = await forge.getRepoRegistryClient();
+          if (client) {
+            const result = await client.search({ query, org, language, framework, tag, limit, offset });
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+          // Fallback: local index
           let repos = await forge.repoList(query);
           if (language) {
             repos = repos.filter((r: RepoIndexEntry) => r.language?.toLowerCase() === language.toLowerCase());
@@ -648,10 +840,45 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_repo_resolve': {
-          const { name, remoteUrl } = (args ?? {}) as { name?: string; remoteUrl?: string };
+          const { name, url } = (args ?? {}) as { name?: string; url?: string };
+          if (!name && !url) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({ error: true, message: 'Either name or url must be provided' }) }],
+              isError: true,
+            };
+          }
+          const client = await forge.getRepoRegistryClient();
+          if (client) {
+            try {
+              const result = await client.resolve({ name, url });
+              if (!result.match) {
+                return {
+                  content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'REPO_NOT_FOUND', message: 'Repository not found' }) }],
+                  isError: true,
+                };
+              }
+              return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (err) {
+              if (err instanceof RepoAmbiguousError) {
+                return {
+                  content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                      ambiguous: true,
+                      message: err.message,
+                      candidates: err.candidates,
+                    }, null, 2),
+                  }],
+                };
+              }
+              throw err;
+            }
+          }
+          // Fallback: local index
+          const remoteUrl = url;
           if (!name && !remoteUrl) {
             return {
-              content: [{ type: 'text', text: JSON.stringify({ error: true, message: 'Either name or remoteUrl must be provided' }) }],
+              content: [{ type: 'text', text: JSON.stringify({ error: true, message: 'Either name or url must be provided' }) }],
               isError: true,
             };
           }
@@ -662,8 +889,8 @@ function buildServer(workspaceRoot: string): Server {
                 type: 'text',
                 text: JSON.stringify({
                   ambiguous: true,
-                  message: `Multiple repositories named "${name}" found. Use remoteUrl or localPath to disambiguate.`,
-                  matches: resolveResult.allMatches.map(e => ({
+                  message: `Multiple repositories named "${name}" found. Use url or localPath to disambiguate.`,
+                  matches: resolveResult.allMatches.map((e: RepoIndexEntry) => ({
                     name: e.name,
                     localPath: e.localPath,
                     remoteUrl: e.remoteUrl,
@@ -676,7 +903,7 @@ function buildServer(workspaceRoot: string): Server {
           }
           if (!resolveResult.match) {
             return {
-              content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'REPO_NOT_FOUND', message: 'Repository not found', suggestion: 'Call forge_repo_scan to trigger a rescan, then retry.' }) }],
+              content: [{ type: 'text', text: JSON.stringify({ error: true, code: 'REPO_NOT_FOUND', message: 'Repository not found', suggestion: 'Call forge_repo_register to add it to the registry.' }) }],
               isError: true,
             };
           }
@@ -713,6 +940,8 @@ function buildServer(workspaceRoot: string): Server {
             };
           }
 
+          const deprecationWarning = '⚠️ forge_repo_workflow is deprecated. Use forge_repo_get to retrieve workflow from the registry.\n\n';
+
           // If a confirmed workflow was passed, save it and return the saved result
           if (confirmedWorkflow) {
             const saved = await forge.repoWorkflowSave(
@@ -732,7 +961,7 @@ function buildServer(workspaceRoot: string): Server {
             return {
               content: [{
                 type: 'text',
-                text: JSON.stringify({
+                text: deprecationWarning + JSON.stringify({
                   saved: true,
                   repoName: name,
                   workflow: saved,
@@ -747,7 +976,7 @@ function buildServer(workspaceRoot: string): Server {
           return {
             content: [{
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: deprecationWarning + JSON.stringify(result, null, 2),
             }],
           };
         }
