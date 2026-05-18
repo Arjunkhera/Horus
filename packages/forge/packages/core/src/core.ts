@@ -44,7 +44,8 @@ import { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse } from '
 import { sessionList, type SessionListOptions, type SessionListResult } from './session/session-list.js';
 import { sessionCleanup, type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
 import { ForgeSearchClient } from './search/forge-search-client.js';
-import { RepoRegistryClient } from './repo/repo-registry-client.js';
+import { RepoRegistryClient, type RepoMetadataRecord } from './repo/repo-registry-client.js';
+import { RepoNotFoundError, RepoAmbiguousError } from './repo/repo-errors.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -525,9 +526,24 @@ export class ForgeCore {
   }
 
   /**
-   * List repositories from the index, optionally filtered by query.
+   * List repositories.
+   *
+   * Primary: RepoRegistryClient when an http registry is configured.
+   * Fallback: local repos.json index (with auto-scan if missing).
    */
   async repoList(query?: string): Promise<RepoIndexEntry[]> {
+    // ── Primary: registry service ─────────────────────────────────────────────
+    const client = await this.getRepoRegistryClient();
+    if (client) {
+      try {
+        const result = await client.search(query ? { query } : undefined);
+        return result.repos.map(r => this._registryMetaToIndexEntry(r));
+      } catch {
+        // Registry unreachable — fall through to local index
+      }
+    }
+
+    // ── Fallback: local repos.json index ──────────────────────────────────────
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
     const { index_path, scan_paths, host_repos_path } = globalConfig.repos;
 
@@ -548,14 +564,51 @@ export class ForgeCore {
 
   /**
    * Resolve a repository by name or remote URL.
-   * When resolving by name, tries Typesense fuzzy search first for typo tolerance,
-   * then falls back to exact/substring matching in the local index.
+   *
+   * Primary: RepoRegistryClient when an http registry is configured.
+   * Fallback: local repos.json index with optional Typesense fuzzy search.
    */
   async repoResolve(opts: { name?: string; remoteUrl?: string }): Promise<RepoResolveResult> {
     if (!opts.name && !opts.remoteUrl) {
       throw new Error('Either name or remoteUrl must be provided');
     }
 
+    // ── Primary: registry service ─────────────────────────────────────────────
+    const client = await this.getRepoRegistryClient();
+    if (client) {
+      try {
+        const result = await client.resolve({
+          name: opts.name,
+          url: opts.remoteUrl,
+        });
+        const match = result.match ? this._registryMetaToIndexEntry(result.match) : null;
+        return {
+          match,
+          ambiguous: false,
+          allMatches: match ? [match] : [],
+        };
+      } catch (err) {
+        if (err instanceof RepoAmbiguousError) {
+          return {
+            match: null,
+            ambiguous: true,
+            allMatches: err.candidates.map(c => this._registryMetaToIndexEntry({
+              org: c.org,
+              name: c.name,
+              canonicalUrl: c.canonicalUrl,
+              registeredAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            })),
+          };
+        }
+        if (err instanceof RepoNotFoundError) {
+          return { match: null, ambiguous: false, allMatches: [] };
+        }
+        // Network failure — fall through to local index
+      }
+    }
+
+    // ── Fallback: local repos.json index ──────────────────────────────────────
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
     const { index_path, scan_paths, host_repos_path } = globalConfig.repos;
 
@@ -1076,6 +1129,36 @@ export class ForgeCore {
       }
     }
     return null;
+  }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * Map a RepoMetadataRecord (from the registry service) to a RepoIndexEntry
+   * so the rest of ForgeCore can treat registry results and local index entries
+   * uniformly.  localPath is intentionally left as '' because the registry does
+   * not know where the repo lives on the local filesystem.
+   */
+  private _registryMetaToIndexEntry(meta: RepoMetadataRecord): RepoIndexEntry {
+    return {
+      name: meta.name,
+      remoteUrl: meta.canonicalUrl,
+      localPath: '',
+      defaultBranch: meta.defaultBranch ?? 'main',
+      language: meta.language ?? null,
+      framework: null,
+      lastCommitDate: meta.lastPushedAt ?? meta.updatedAt,
+      lastScannedAt: meta.updatedAt,
+      workflow: meta.workflow ? {
+        type: meta.workflow.type,
+        pushTo: meta.workflow.pushTo,
+        prTarget: meta.workflow.prTarget,
+        branchPattern: meta.workflow.branchPattern,
+        commitFormat: meta.workflow.commitFormat,
+        confirmedAt: new Date().toISOString(),
+        confirmedBy: 'auto' as const,
+      } : undefined,
+    };
   }
 
   // Internal helpers

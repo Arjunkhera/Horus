@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import type { RepoIndexEntry, RepoIndexWorkflow } from '../models/repo-index.js';
 import type { SessionRecord, SessionWorkflow, RepoSource } from '../models/session.js';
 import type { GlobalConfig } from '../models/global-config.js';
+import type { RepoMetadataRecord } from './repo-registry-client.js';
 import { SessionStoreManager } from '../session/session-store.js';
 import { ForgeError } from '../adapters/errors.js';
 import { installEnforcementHooks } from './git-enforcement.js';
@@ -51,6 +52,12 @@ export interface RepoDevelopOptions {
    * Provided by the caller when responding to a needs_repo_disambiguation response.
    */
   localPath?: string;
+  /**
+   * Registry metadata record from RepoRegistryClient.resolve().
+   * When provided, workflow.pushTo from the registry is used as Tier 1 in the
+   * default remote resolution chain (before Vault lookup).
+   */
+  registryMeta?: RepoMetadataRecord;
 }
 
 /** Session created or resumed successfully */
@@ -259,6 +266,7 @@ async function getAvailableRemotes(repoPath: string): Promise<string[]> {
  * Resolve which remote to use as the worktree fetch base.
  *
  * Resolution chain (first match wins):
+ * 0. Registry service metadata — registryMeta.workflow.pushTo (Tier 0)
  * 1. Forge repo registry — repoEntry.default_remote
  * 2. Vault repo profile — workflow.default-remote field
  * 3. Derive from confirmed workflow:
@@ -270,7 +278,11 @@ async function resolveDefaultRemote(
   repoEntry: RepoIndexEntry,
   vaultBaseUrl: string | undefined,
   confirmedWorkflow: RepoIndexWorkflow | WorkflowInput | null,
+  registryMeta?: RepoMetadataRecord,
 ): Promise<string | null> {
+  // 0. Registry service metadata (highest priority)
+  if (registryMeta?.workflow?.pushTo) return registryMeta.workflow.pushTo;
+
   // 1. Forge registry
   if (repoEntry.default_remote) return repoEntry.default_remote;
 
@@ -441,7 +453,7 @@ export async function repoDevelop(
   saveRepoIndexFn: (repos: RepoIndexEntry[]) => Promise<void>,
 ): Promise<RepoDevelopResponse> {
 
-  const { repo: repoName, workItem, branch: requestedBranch, workflow: inlineWorkflow, localPath } = opts;
+  const { repo: repoName, workItem, branch: requestedBranch, workflow: inlineWorkflow, localPath, registryMeta } = opts;
 
   const sessionsPath = globalConfig.workspace.sessions_path;
   const managedReposPath = globalConfig.workspace.managed_repos_path;
@@ -642,7 +654,7 @@ export async function repoDevelop(
   // forks added for code review). The resolved remote is used both to verify
   // the tracking ref exists and as the worktree base.
   const vaultBaseUrl = globalConfig.mcp_endpoints?.vault?.url;
-  let resolvedRemote = await resolveDefaultRemote(repoEntry, vaultBaseUrl, effectiveWorkflow);
+  let resolvedRemote = await resolveDefaultRemote(repoEntry, vaultBaseUrl, effectiveWorkflow, registryMeta);
 
   if (resolvedRemote === null) {
     if (opts.defaultRemote) {
