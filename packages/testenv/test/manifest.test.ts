@@ -18,6 +18,7 @@ import {
   assertManifest,
   formatValidationErrors,
 } from '../src/validator.js';
+import { RunStatusSchema } from '../src/schema.js';
 import type { Manifest, RunResult } from '../src/schema.js';
 
 // ---------------------------------------------------------------------------
@@ -737,6 +738,139 @@ describe('validateRunResult', () => {
       };
       const result = validateRunResult(input);
       expect(result.ok, `phase "${phase}" should be valid`).toBe(true);
+    }
+  });
+
+  it('accepts delegated as a valid verdict', () => {
+    const input = { ...VALID_RESULT, verdict: 'delegated' as const };
+    const result = validateRunResult(input);
+    expect(result.ok, '"delegated" should be a valid RunStatus').toBe(true);
+    if (result.ok) {
+      expect(result.data.verdict).toBe('delegated');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Connections block + connection reference tests
+// ---------------------------------------------------------------------------
+
+describe('validateManifest — connections block', () => {
+  const MANIFEST_WITH_CONNECTIONS: unknown = {
+    ...(MINIMAL_MANIFEST as object),
+    connections: {
+      shadow: {
+        anvil: { transport: 'sse', url: 'http://localhost:{port_anvil_dev}/sse' },
+        vault: { transport: 'sse', url: 'http://localhost:{port_vault_dev}/sse' },
+      },
+      live: {
+        anvil: { transport: 'sse', url: 'http://localhost:3001/sse' },
+      },
+    },
+  };
+
+  it('accepts a valid manifest with a connections block', () => {
+    const result = validateManifest(MANIFEST_WITH_CONNECTIONS);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.connections?.shadow?.anvil?.transport).toBe('sse');
+      expect(result.data.connections?.shadow?.vault?.url).toContain('port_vault_dev');
+    }
+  });
+
+  it('accepts a test action with a valid connection reference', () => {
+    const input = {
+      ...(MANIFEST_WITH_CONNECTIONS as object),
+      phases: {
+        ...((MINIMAL_MANIFEST as Record<string, unknown>).phases as object),
+        test: {
+          actions: [
+            {
+              name: 'anvil-roundtrip',
+              connection: 'shadow.anvil',
+              invoke: { tool: 'anvil_list_types', args: {} },
+              expect: { returns: 'type_registry' },
+            },
+          ],
+        },
+      },
+    };
+    const result = validateManifest(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.phases.test.actions[0].connection).toBe('shadow.anvil');
+    }
+  });
+
+  it('rejects a test action whose connection references an undeclared connection', () => {
+    const input = {
+      ...(MANIFEST_WITH_CONNECTIONS as object),
+      phases: {
+        ...((MINIMAL_MANIFEST as Record<string, unknown>).phases as object),
+        test: {
+          actions: [
+            {
+              name: 'bad-ref',
+              connection: 'nonexistent.service',
+              invoke: { tool: 'some_tool' },
+            },
+          ],
+        },
+      },
+    };
+    const result = validateManifest(input);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const err = result.errors.find((e) => e.message.includes('undeclared connection'));
+      expect(err).toBeDefined();
+    }
+  });
+
+  it('accepts a test action with no connection field (connection is optional)', () => {
+    const input = {
+      ...(MANIFEST_WITH_CONNECTIONS as object),
+      phases: {
+        ...((MINIMAL_MANIFEST as Record<string, unknown>).phases as object),
+        test: {
+          actions: [
+            {
+              name: 'no-connection',
+              invoke: { run: 'echo ok' },
+            },
+          ],
+        },
+      },
+    };
+    const result = validateManifest(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.phases.test.actions[0].connection).toBeUndefined();
+    }
+  });
+
+  it('accepts a manifest without a connections block (connections is optional)', () => {
+    const result = validateManifest(MINIMAL_MANIFEST);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.connections).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RunStatus delegated value test
+// ---------------------------------------------------------------------------
+
+describe('RunStatusSchema — delegated', () => {
+  it('accepts delegated as a valid RunStatus value', () => {
+    const result = RunStatusSchema.safeParse('delegated');
+    expect(result.success).toBe(true);
+  });
+
+  it('still accepts all original RunStatus values', () => {
+    for (const status of ['pass', 'fail', 'skip', 'error', 'delegated']) {
+      const result = RunStatusSchema.safeParse(status);
+      expect(result.success, `status "${status}" should be valid`).toBe(true);
     }
   });
 });

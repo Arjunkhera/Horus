@@ -258,6 +258,34 @@ export const ProbeSchema = z.object({
 export type Probe = z.infer<typeof ProbeSchema>;
 
 // ---------------------------------------------------------------------------
+// MCP connection topology — declared in manifest preamble
+// ---------------------------------------------------------------------------
+
+/**
+ * A single MCP connection endpoint.
+ */
+export const ConnectionSchema = z.object({
+  /** Transport protocol. */
+  transport: z.enum(['sse']),
+  /** Endpoint URL (supports template vars like {port_anvil_dev}). */
+  url: z.string().min(1),
+});
+
+export type Connection = z.infer<typeof ConnectionSchema>;
+
+/**
+ * Named connection groups (e.g., shadow.anvil, live.anvil).
+ * Top level = group name (shadow, live, etc.)
+ * Second level = service name (anvil, vault, forge, etc.)
+ */
+export const ConnectionsSchema = z.record(
+  z.string(),
+  z.record(z.string(), ConnectionSchema),
+);
+
+export type Connections = z.infer<typeof ConnectionsSchema>;
+
+// ---------------------------------------------------------------------------
 // Test action — the do/check/proof unit
 // ---------------------------------------------------------------------------
 
@@ -342,6 +370,8 @@ const SequenceInvokeSchema = z.object({
 export const TestActionSchema = z.object({
   /** Human-readable name for the action (used in logs and reports). */
   name: Identifier,
+  /** Optional MCP connection reference (dot-notation, e.g., "shadow.anvil"). */
+  connection: z.string().regex(/^\w+\.\w+$/).optional(),
   /**
    * What to invoke. Three flavors:
    * 1. `{ run: "command" }` — shell command
@@ -588,12 +618,28 @@ export const ManifestSchema = z.object({
    */
   repo: z.string().min(1),
   requires: RequiresSchema,
+  /**
+   * Declared MCP connection topology.
+   * Keys are group names (e.g., "shadow", "live"), values are maps from
+   * service name to connection endpoint.
+   */
+  connections: ConnectionsSchema.optional(),
   phases: PhasesSchema,
   /**
    * Manifest-level metadata. Arbitrary key/value pairs for tooling integration.
    */
   meta: z.record(z.unknown()).optional(),
-});
+}).refine((manifest) => {
+  if (!manifest.phases?.test?.actions) return true;
+  const connections = manifest.connections ?? {};
+  for (const action of manifest.phases.test.actions) {
+    if (action.connection) {
+      const [group, service] = action.connection.split('.');
+      if (!connections[group]?.[service]) return false;
+    }
+  }
+  return true;
+}, { message: 'Test action references an undeclared connection' });
 
 export type Manifest = z.infer<typeof ManifestSchema>;
 
@@ -623,7 +669,7 @@ export type PhaseId = z.infer<typeof PhaseIdSchema>;
 /**
  * Status of a phase or action.
  */
-export const RunStatusSchema = z.enum(['pass', 'fail', 'skip', 'error']);
+export const RunStatusSchema = z.enum(['pass', 'fail', 'skip', 'error', 'delegated']);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
 /**

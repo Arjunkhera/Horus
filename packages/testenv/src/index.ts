@@ -18,6 +18,9 @@ export {
   Phase1IsolationChecksSchema,
   Phase2IsolationChecksSchema,
   Phase6IsolationChecksSchema,
+  // Connection topology
+  ConnectionSchema,
+  ConnectionsSchema,
   // Step / probe
   StepSchema,
   ProbeSchema,
@@ -60,6 +63,8 @@ export type {
   Phase1IsolationChecks,
   Phase2IsolationChecks,
   Phase6IsolationChecks,
+  Connection,
+  Connections,
   Step,
   Probe,
   Invoke,
