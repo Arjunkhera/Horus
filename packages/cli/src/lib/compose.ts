@@ -193,6 +193,72 @@ const TYPESENSE_SERVICE = `\
       start_period: 5s
     restart: unless-stopped`;
 
+// ── Registry service (solo-dev git backend) ──────────────────────────────────
+
+/**
+ * Build the forge-registry service block for the solo-dev compose.
+ * Only emitted when `registry_git_url` is set in the CLI config.
+ *
+ * Env var mapping (registry-service/src/config.ts):
+ *   FORGE_REGISTRY_STORAGE_BACKEND  → storageBackend: 'git'
+ *   FORGE_REGISTRY_GIT_URL          → gitConfig.url
+ *   FORGE_REGISTRY_GIT_LOCAL_PATH   → gitConfig.localPath
+ *   FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH → gitConfig.deployKeyPath (optional)
+ */
+function buildRegistryService(config: Config): string | null {
+  const gitUrl = config.registry_git_url;
+  if (!gitUrl) return null;
+
+  const deployKey = config.registry_deploy_key;
+  const deployKeyMount = deployKey
+    ? `\n      - ${deployKey}:/run/secrets/registry-deploy-key:ro`
+    : '';
+  const deployKeyEnv = deployKey
+    ? `\n      - FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH=/run/secrets/registry-deploy-key`
+    : '';
+
+  return `\
+  # ── Forge Registry ─────────────────────────────────────────────────────────
+  # Personal package registry backed by a git repository (GitStorageBackend).
+  # Activated when registry_git_url is set in ~/Horus/config.yaml.
+  forge-registry:
+    image: ghcr.io/arjunkhera/horus/forge-registry:latest
+    ports:
+      - "\${FORGE_REGISTRY_PORT:-8744}:8744"
+    volumes:
+      - \${HORUS_DATA_PATH}/registry:/data/registry:rw${deployKeyMount}
+    environment:
+      - FORGE_REGISTRY_HOST=0.0.0.0
+      - FORGE_REGISTRY_PORT=8744
+      - FORGE_REGISTRY_LOG_LEVEL=\${LOG_LEVEL:-info}
+      - FORGE_REGISTRY_DB_PATH=/data/registry/forge-registry.db
+      - FORGE_REGISTRY_STORAGE_BACKEND=git
+      - FORGE_REGISTRY_GIT_URL=${gitUrl}
+      - FORGE_REGISTRY_GIT_LOCAL_PATH=/data/registry/git-store${deployKeyEnv}
+      - FORGE_REGISTRY_TYPESENSE_HOST=typesense
+      - FORGE_REGISTRY_TYPESENSE_PORT=8108
+      - FORGE_REGISTRY_TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
+    depends_on:
+      typesense:
+        condition: service_healthy
+    networks:
+      - horus-net
+    restart: unless-stopped
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3`;
+}
+
 const READER_SERVICE = `\
   # ── Reader ─────────────────────────────────────────────────────────────────
   # Horus Reader — Express server + NLP agent search at port 8400.
@@ -304,7 +370,13 @@ services:
     volumes:
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/neo4j-data:/data"
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/neo4j-logs:/logs"
-`;
+${config.registry_git_url ? `
+  forge-registry:
+    ports:
+      - "\${TEST_PORT_FORGE_REGISTRY:-9270}:8744"
+    volumes:
+      - "\${TEST_DATA_PATH:-/tmp/horus-test}/registry:/data/registry:rw"
+` : ''}`;
 }
 
 // ── Dynamic compose generation ───────────────────────────────────────────────
@@ -452,6 +524,8 @@ ${vaultRouterDependsOn}
     '  neo4j-logs:',
   ].join('\n');
 
+  const registryService = buildRegistryService(config);
+
   const sections: string[] = [
     '# ─────────────────────────────────────────────────────────────────────────────',
     '# Horus — Generated Docker Compose',
@@ -470,6 +544,7 @@ ${vaultRouterDependsOn}
     '',
     FORGE_SERVICE,
     '',
+    ...(registryService ? [registryService, ''] : []),
     NEO4J_SERVICE,
     '',
     TYPESENSE_SERVICE,
