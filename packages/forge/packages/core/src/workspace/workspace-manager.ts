@@ -23,10 +23,10 @@ target: claude-code
 
 registries:
   # Personal local registry service (writable, highest priority)
-  # Run: forge registry start --port 4873
+  # Run: forge registry start --port 8744
   - type: http
     name: local
-    url: http://localhost:4873
+    url: http://localhost:8744
     writable: true
   # Public global registry (read-only fallback, served via CloudFront CDN)
   # NOTE: CloudFront blocks POST — use EC2 direct (http://34.234.40.171:8744) for writes
