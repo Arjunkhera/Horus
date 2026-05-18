@@ -1,0 +1,30 @@
+apiVersion: testenv/v1
+repo: fixture-delegated-tool
+requires:
+  secrets: []
+phases:
+  setup:
+    steps:
+      - run: "echo 'setup step'"
+  launch:
+    provisioner: "echo 'launch provisioner'"
+  await_ready:
+    poll:
+      - probe: "GET :9999/health"
+        expect: "http_200"
+    timeout: 2
+    interval: 1
+  connection:
+    emit: "/tmp/testenv-runner-delegated-tool-settings.json"
+  test:
+    policy: run-all
+    actions:
+      - name: tool-action
+        invoke:
+          tool: anvil_search
+          args:
+            query: "find {slot} items"
+            filter: "{workdir}"
+        needsStack: false
+  teardown:
+    provisioner: "echo 'teardown provisioner'"

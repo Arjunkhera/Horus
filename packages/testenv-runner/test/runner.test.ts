@@ -22,7 +22,7 @@ import type { Manifest } from '@akhera-horus/testenv';
 import { run } from '../src/runner.js';
 import { loadManifest } from '../src/loader.js';
 import { buildRedactor, redactValue } from '../src/redact.js';
-import { renderTemplate } from '../src/template.js';
+import { renderTemplate, templateExpandArgs } from '../src/template.js';
 import {
   evaluateAssertions,
   evaluatePhase1IsolationChecks,
@@ -431,6 +431,114 @@ describe('runner — runClass', () => {
 });
 
 // ---------------------------------------------------------------------------
+// templateExpandArgs tests
+// ---------------------------------------------------------------------------
+
+describe('templateExpandArgs', () => {
+  it('expands string values', () => {
+    const result = templateExpandArgs({ query: 'find {slot} items' }, { slot: 'slot-42' });
+    expect(result['query']).toBe('find slot-42 items');
+  });
+
+  it('passes through non-string values unchanged', () => {
+    const result = templateExpandArgs({ count: 5, flag: true, items: [1, 2] }, { slot: 'x' });
+    expect(result['count']).toBe(5);
+    expect(result['flag']).toBe(true);
+    expect(result['items']).toEqual([1, 2]);
+  });
+
+  it('recursively expands nested objects', () => {
+    const result = templateExpandArgs(
+      { nested: { path: '{workdir}/data' } },
+      { workdir: '/home/test' },
+    );
+    expect((result['nested'] as Record<string, unknown>)['path']).toBe('/home/test/data');
+  });
+
+  it('leaves unknown vars as-is', () => {
+    const result = templateExpandArgs({ q: '{unknown}/path' }, {});
+    expect(result['q']).toBe('{unknown}/path');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Runner — delegated tool status tests
+// ---------------------------------------------------------------------------
+
+describe('runner — delegated tool actions', () => {
+  it('tool action returns status: delegated (not pass)', async () => {
+    const manifest = fixtureManifest('delegated-tool.manifest.yaml');
+    const result = await run(manifest, { stream: false, slot: 'test-delegated-1' });
+
+    const toolAction = result.actions?.find((a) => a.name === 'tool-action');
+    expect(toolAction).toBeDefined();
+    expect(toolAction?.status).toBe('delegated');
+  }, 30_000);
+
+  it('tool action actual field includes expanded template args', async () => {
+    const manifest = fixtureManifest('delegated-tool.manifest.yaml');
+    const result = await run(manifest, { stream: false, slot: 'test-delegated-args-1' });
+
+    const toolAction = result.actions?.find((a) => a.name === 'tool-action');
+    expect(toolAction).toBeDefined();
+    expect(toolAction?.actual).toContain('tool:anvil_search');
+    // slot should be expanded in the args
+    expect(toolAction?.actual).toContain('test-delegated-args-1');
+  }, 30_000);
+
+  it('tool action reason reflects delegation', async () => {
+    const manifest = fixtureManifest('delegated-tool.manifest.yaml');
+    const result = await run(manifest, { stream: false, slot: 'test-delegated-reason-1' });
+
+    const toolAction = result.actions?.find((a) => a.name === 'tool-action');
+    expect(toolAction?.reason).toBe('MCP tool call — requires agent executor');
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Runner — HTTP URL template expansion tests
+// ---------------------------------------------------------------------------
+
+describe('runner — HTTP invoke URL template expansion', () => {
+  it('expands {slot} in HTTP URL before building request URL', async () => {
+    // We use the simple fixture and manually construct a minimal manifest
+    // with an HTTP action that has {slot} in the URL. The request will fail
+    // (no server listening) but we can check the actual field for the expanded URL.
+    const manifest: Manifest = {
+      apiVersion: 'testenv/v1',
+      repo: 'fixture-http-template',
+      requires: { secrets: [] },
+      phases: {
+        setup: { steps: [{ run: 'echo ok' }] },
+        launch: { provisioner: 'echo ok' },
+        await_ready: { poll: [{ probe: 'GET :9999/health', expect: 'http_200' }], timeout: 1, interval: 1 },
+        connection: { emit: '/tmp/testenv-runner-http-template-settings.json' },
+        test: {
+          policy: 'run-all',
+          actions: [
+            {
+              name: 'http-template-action',
+              invoke: { http: ':9991/{slot}/status' },
+              needsStack: false,
+            },
+          ],
+        },
+        teardown: { provisioner: 'echo ok' },
+      },
+    };
+
+    const result = await run(manifest, { stream: false, slot: 'my-slot-99' });
+    const action = result.actions?.find((a) => a.name === 'http-template-action');
+    expect(action).toBeDefined();
+    // The URL should have been expanded — slot 'my-slot-99' replaces {slot}
+    // The action either passed or failed (no server), but the event log should show the expanded URL
+    const events = result.events.filter((e) => e.message?.includes('http-template-action'));
+    const allMessages = events.map((e) => e.message).join('\n');
+    expect(allMessages).toContain('my-slot-99');
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
 // Validate schema of all fixture manifests
 // ---------------------------------------------------------------------------
 
@@ -440,6 +548,7 @@ describe('fixture manifests — schema validation', () => {
     'needsstack-false.manifest.yaml',
     'failfast.manifest.yaml',
     'with-secrets.manifest.yaml',
+    'delegated-tool.manifest.yaml',
   ];
 
   for (const fixture of fixtures) {

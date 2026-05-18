@@ -26,7 +26,7 @@ import type {
 import { allSecretNames, resolveRequiredSecrets } from '@akhera-horus/testenv';
 import { EventLog } from './event-log.js';
 import { buildRedactor } from './redact.js';
-import { renderTemplate, type TemplateContext } from './template.js';
+import { renderTemplate, templateExpandArgs, type TemplateContext } from './template.js';
 import { execCommand } from './exec.js';
 import {
   evaluateAssertions,
@@ -586,23 +586,25 @@ async function runTestAction(
     if ('tool' in invoke) {
       // Flavor 2: tool call — runner-core records but does not execute tool calls
       // (tool execution is the sdlc-testenv agent's responsibility)
-      log.info('test', `[action:${action.name}] tool call recorded: ${invoke.tool}`, { action: action.name });
+      const expandedArgs = invoke.args ? templateExpandArgs(invoke.args, ctx) : undefined;
+      log.info('test', `[action:${action.name}] tool call delegated: ${invoke.tool}`, { action: action.name });
       return {
         name: action.name,
-        status: 'pass',
+        status: 'delegated',
         durationMs: elapsed(startMs),
-        actual: `tool:${invoke.tool}`,
-        reason: 'Tool call recorded — execution delegated to sdlc-testenv agent',
+        actual: `tool:${invoke.tool}${expandedArgs ? ` args:${JSON.stringify(expandedArgs)}` : ''}`,
+        reason: 'MCP tool call — requires agent executor',
       };
     }
 
     if ('http' in invoke) {
       // Flavor 3: HTTP call
-      const url = invoke.http.startsWith(':')
-        ? `http://localhost${invoke.http}`
-        : invoke.http.startsWith('http')
-        ? invoke.http
-        : `http://${invoke.http}`;
+      const expandedHttp = renderTemplate(invoke.http, ctx);
+      const url = expandedHttp.startsWith(':')
+        ? `http://localhost${expandedHttp}`
+        : expandedHttp.startsWith('http')
+        ? expandedHttp
+        : `http://${expandedHttp}`;
 
       const result = await execCommand(`curl -sf --max-time 30 "${url}"`, { cwd: ctx.workdir });
       const rawOutput = redact(result.stdout.trim());
