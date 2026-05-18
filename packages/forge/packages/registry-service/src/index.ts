@@ -8,6 +8,7 @@ import { BuiltinAuthStrategy } from './auth/builtin.js';
 import { AuditLog } from './audit/audit-log.js';
 import { PublishPipeline } from './pipeline/publish-pipeline.js';
 import { RegistrySearchClient } from './search/registry-search.js';
+import { RepoSearchClient } from './search/repo-search.js';
 import { createApp } from './app.js';
 
 async function main(): Promise<void> {
@@ -33,8 +34,17 @@ async function main(): Promise<void> {
     bootstrapLogger as never, // pino is compatible with FastifyBaseLogger
   );
 
-  // 6. Create search client (optional — disabled when Typesense not configured)
+  // 6. Create search clients (optional — disabled when Typesense not configured)
   const search = RegistrySearchClient.create(config);
+  const tsConfig = config.typesense;
+  const repoSearch = tsConfig
+    ? RepoSearchClient.create({
+        host: tsConfig.host,
+        port: tsConfig.port,
+        protocol: tsConfig.protocol,
+        apiKey: tsConfig.apiKey,
+      })
+    : null;
   if (search) {
     bootstrapLogger.info('Typesense search is enabled');
   } else {
@@ -62,12 +72,27 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 10. Cold rebuild search index if empty
+  // 10. Cold rebuild artifact search index if empty
   if (search) {
     void search
       .rebuild(storage, {
         info: (msg) => app.log.info(msg),
         warn: (obj, msg) => app.log.warn(obj, msg),
+      })
+      .catch(() => {
+        // rebuild is best-effort; startup continues regardless
+      });
+  }
+
+  // 10b. Cold rebuild repo search index if empty
+  // Note: repoStorage (RR-4) is not yet available — will be wired when implemented.
+  // For now we ensure the collection exists; rebuild will index 0 docs until
+  // repo storage is connected.
+  if (repoSearch) {
+    void repoSearch
+      .rebuildFromStorage([])
+      .then((count) => {
+        app.log.info(`Repo search cold rebuild complete: indexed ${count} repos`);
       })
       .catch(() => {
         // rebuild is best-effort; startup continues regardless
