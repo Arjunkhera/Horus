@@ -331,6 +331,9 @@ export function generateEnv(config: Config): string {
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
     `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
     '',
+    '# Enterprise registry (air-gapped mode — empty means solo-dev local registry is used)',
+    `ENTERPRISE_REGISTRY_URL=${config.enterprise_registry_url ?? ''}`,
+    '',
   ];
 
   return lines.join('\n');
