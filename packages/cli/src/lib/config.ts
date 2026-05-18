@@ -43,6 +43,12 @@ export interface Config {
     anvil_notes: string;
     forge_registry: string;
   };
+  /** Solo-dev: the git repo that backs the personal registry-service (GitStorageBackend). */
+  registry_git_url?: string;
+  /** Solo-dev: optional path to a deploy key for the registry git repo (SSH private key). */
+  registry_deploy_key?: string;
+  /** Enterprise: URL of the company registry service. When set, the git repo prompt is skipped. */
+  enterprise_registry_url?: string;
   search: {
     api_key: string;
   };
@@ -163,6 +169,9 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
     host_repos_path: (parsed.host_repos_path as string | undefined) ?? defaults.host_repos_path,
     host_repos_extra_scan_dirs: (parsed.host_repos_extra_scan_dirs as string[] | undefined) ?? defaults.host_repos_extra_scan_dirs,
     enable_ui: (parsed.enable_ui as boolean | undefined) ?? defaults.enable_ui,
+    registry_git_url: (parsed.registry_git_url as string | undefined),
+    registry_deploy_key: (parsed.registry_deploy_key as string | undefined),
+    enterprise_registry_url: (parsed.enterprise_registry_url as string | undefined),
   };
 }
 
