@@ -269,6 +269,10 @@ if grep -q '^HOST_REPOS_PATH=$' ~/Horus/.env 2>/dev/null; then
   sed -i 's|^HOST_REPOS_PATH=$|HOST_REPOS_PATH=/home/ec2-user/horus-repos|' ~/Horus/.env
 fi
 
+# Trust all directories on this ephemeral instance (avoids dubious-ownership errors
+# when provisioner clones repos created by sudo)
+git config --global --add safe.directory '*'
+
 # Initialize git repos for services that need them
 for dir in ~/Horus/data/notes ~/Horus/data/registry; do
   if [ -d "\$dir" ] && [ ! -d "\$dir/.git" ]; then
