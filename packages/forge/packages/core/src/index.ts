@@ -68,3 +68,16 @@ export { ForgeSearchClient, type ForgeSearchHit } from './search/forge-search-cl
 export { SessionStoreManager } from './session/session-store.js';
 export { sessionList, type SessionListOptions, type SessionListItem, type SessionListResult } from './session/session-list.js';
 export { sessionCleanup, type SessionCleanupOptions, type SessionCleanupResult } from './session/session-cleanup.js';
+export {
+  classifyWorktree,
+  isCleanTree,
+  getWorktreeTreeState,
+  worktreeGc,
+  cloneGc,
+  type WorktreeTreeState,
+  type WorktreeGcCandidate,
+  type WorktreeGcOptions,
+  type CloneGcCandidate,
+  type CloneGcOptions,
+  type GcPlan,
+} from './session/gc.js';
