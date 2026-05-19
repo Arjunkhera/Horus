@@ -42,6 +42,19 @@ export {
   worktreePath,
   ensureHorusIgnored,
 } from './repo/clone-layout.js';
+export {
+  isCloneStale,
+  cloneTtlMs,
+  DEFAULT_CLONE_TTL_MS,
+  ensureClone,
+  refreshIfStale,
+  createSessionWorktree,
+  type CloneSemanticsOptions,
+} from './repo/clone-semantics.js';
+export {
+  LocalRepoStateStoreManager,
+  repoStatePath,
+} from './repo/local-repo-state-store.js';
 export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type RepoDevelopResult, type RepoDevelopNeedsConfirmation, type RepoDevelopNeedsRepoDisambiguation, type WorkflowInput } from './repo/repo-develop.js';
 
 // Repo Registry
