@@ -266,6 +266,42 @@ phases:
         needsStack: false
         tags: [unit, scope, F2, AC-4]
 
+      # -----------------------------------------------------------------------
+      # F3 @horus/tenancy — pure unit/type actions (needsStack: false, E3).
+      # Per-user Anvil tenancy contract; validated against F1+F2; no stack.
+      # -----------------------------------------------------------------------
+      - name: tenancy-ac1-contract-scaffolding
+        invoke:
+          run: "pnpm --filter @horus/tenancy exec vitest run test/ac1-contract-scaffolding.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, tenancy, F3, AC-1]
+
+      - name: tenancy-ac2-provisioning-steplist
+        invoke:
+          run: "pnpm --filter @horus/tenancy exec vitest run test/ac2-provisioning-steplist.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, tenancy, F3, AC-2]
+
+      - name: tenancy-ac3-schema-bootstrap-ownership
+        invoke:
+          run: "pnpm --filter @horus/tenancy exec vitest run test/ac3-schema-bootstrap-ownership.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, tenancy, F3, AC-3]
+
+      - name: tenancy-ac4-validated-f1-f2
+        invoke:
+          run: "pnpm --filter @horus/tenancy exec vitest run test/ac4-validated-f1-f2.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, tenancy, F3, AC-4]
+
   # ---------------------------------------------------------------------------
   # Phase 6 — teardown
   # Release the slot discovered at launch, then run detective isolation
