@@ -184,6 +184,52 @@ phases:
           capture: response
           saveTo: evidence/isolation-proof.json
 
+      # -----------------------------------------------------------------------
+      # F1 @horus/auth — pure unit/type actions (needsStack: false, Design E3).
+      # The runner skips setup/launch/await_ready/connection for these and runs
+      # them in-process: a JWT/JWKS library needs no Docker stack. One action
+      # per acceptance criterion; assertions live in packages/auth/test/.
+      # -----------------------------------------------------------------------
+      - name: auth-ac1-surface
+        invoke:
+          run: "pnpm --filter @horus/auth exec vitest run test/ac1-surface.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, auth, F1, AC-1]
+
+      - name: auth-ac2-offline-verify
+        invoke:
+          run: "pnpm --filter @horus/auth exec vitest run test/ac2-offline-verify.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, auth, F1, AC-2]
+
+      - name: auth-ac3-headless-refresh
+        invoke:
+          run: "pnpm --filter @horus/auth exec vitest run test/ac3-headless-refresh.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, auth, F1, AC-3]
+
+      - name: auth-ac4-tenant-floor
+        invoke:
+          run: "pnpm --filter @horus/auth exec vitest run test/ac4-tenant-floor.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, auth, F1, AC-4]
+
+      - name: auth-ac5-shim
+        invoke:
+          run: "pnpm --filter @horus/auth exec vitest run test/ac5-shim.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, auth, F1, AC-5]
+
   # ---------------------------------------------------------------------------
   # Phase 6 — teardown
   # Release the slot discovered at launch, then run detective isolation
