@@ -228,7 +228,7 @@ run_ec2() {
   # Wait for SSH
   log "Waiting for SSH..."
   local retries=30
-  while ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+  while ! ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o ConnectTimeout=5 \
     -i "$key_file" "ec2-user@${public_ip}" echo "ssh ready" 2>/dev/null; do
     retries=$((retries - 1))
     [[ $retries -le 0 ]] && fail "SSH did not become available"
@@ -237,7 +237,7 @@ run_ec2() {
 
   # Bootstrap: install Node, Docker, horus CLI, testenv-runner
   log "Bootstrapping instance..."
-  ssh -o StrictHostKeyChecking=no -i "$key_file" "ec2-user@${public_ip}" bash <<BOOTSTRAP
+  ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$key_file" "ec2-user@${public_ip}" bash <<BOOTSTRAP
 set -euo pipefail
 # Install Node 20 (NodeSource repo)
 curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
@@ -292,14 +292,14 @@ BOOTSTRAP
   log "Uploading repo snapshot..."
   local archive="${TMPDIR:-/tmp}/horus-src-$$.tar.gz"
   git -C "$REPO_ROOT" archive HEAD --format=tar.gz -o "$archive"
-  scp -o StrictHostKeyChecking=no -i "$key_file" \
+  scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$key_file" \
     "$archive" "ec2-user@${public_ip}:/tmp/horus-src.tar.gz"
   rm -f "$archive"
 
   # Run the scenario on EC2
   log "Running scenario on EC2..."
   local remote_exit=0
-  ssh -o StrictHostKeyChecking=no -i "$key_file" "ec2-user@${public_ip}" bash <<RUNSCRIPT || remote_exit=$?
+  ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$key_file" "ec2-user@${public_ip}" bash <<RUNSCRIPT || remote_exit=$?
 set -euo pipefail
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
 
@@ -326,9 +326,9 @@ RUNSCRIPT
 
   # Retrieve evidence
   log "Retrieving evidence..."
-  scp -o StrictHostKeyChecking=no -i "$key_file" \
+  scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$key_file" \
     "ec2-user@${public_ip}:~/testenv-result.json" "$RESULT_FILE" 2>/dev/null || true
-  scp -o StrictHostKeyChecking=no -i "$key_file" \
+  scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$key_file" \
     "ec2-user@${public_ip}:~/testenv-run.log" "${EVIDENCE_DIR}/run.log" 2>/dev/null || true
 
   if [[ $remote_exit -eq 0 ]]; then
