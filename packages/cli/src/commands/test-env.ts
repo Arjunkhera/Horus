@@ -62,6 +62,18 @@ testEnvCommand
       ora({ text, stream: jsonMode ? process.stderr : process.stdout });
     const config = loadConfig();
     const dataDir = config.data_dir;
+
+    // Ensure at least one vault exists for shadow stack provisioning.
+    // On fresh installs (e.g., EC2 bootstrap), horus setup -y creates an empty
+    // vaults config. The shadow stack needs at least one vault for vault-router
+    // to start (VAULT_ENDPOINTS). Create a default vault backed by a local
+    // empty-repo directory inside the slot data path.
+    if (!config.vaults || Object.keys(config.vaults).length === 0) {
+      config.vaults = {
+        default: { repo: '', default: true },
+      };
+    }
+
     const testCfg = loadTestEnvConfig(dataDir);
 
     // Resolve vault names from config for slot dirs and compose env
@@ -238,6 +250,15 @@ testEnvCommand
   .action(async (opts) => {
     const config = loadConfig();
     const dataDir = config.data_dir;
+
+    // Ensure at least one vault exists so vault name resolution below doesn't
+    // produce undefined results when config.vaults is empty (fresh EC2 installs).
+    if (!config.vaults || Object.keys(config.vaults).length === 0) {
+      config.vaults = {
+        default: { repo: '', default: true },
+      };
+    }
+
     const testCfg = loadTestEnvConfig(dataDir);
 
     // Resolve default vault name from config
