@@ -32,7 +32,16 @@ export * from './config/index.js';
 export { scan } from './repo/repo-scanner.js';
 export { saveRepoIndex, loadRepoIndex } from './repo/repo-index-store.js';
 export { RepoIndexQuery } from './repo/repo-index-query.js';
-export { normalizeGitUrl } from './repo/url-utils.js';
+export { normalizeGitUrl, normalizeHost, deriveRepoCoordinate, type RepoCoordinate } from './repo/url-utils.js';
+export {
+  horusDataPath,
+  horusReposRoot,
+  repoClonePath,
+  repoClonePathFromCoordinate,
+  repoWorktreesDir,
+  worktreePath,
+  ensureHorusIgnored,
+} from './repo/clone-layout.js';
 export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type RepoDevelopResult, type RepoDevelopNeedsConfirmation, type RepoDevelopNeedsRepoDisambiguation, type WorkflowInput } from './repo/repo-develop.js';
 
 // Repo Registry
