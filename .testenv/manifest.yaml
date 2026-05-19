@@ -230,6 +230,42 @@ phases:
         needsStack: false
         tags: [unit, auth, F1, AC-5]
 
+      # -----------------------------------------------------------------------
+      # F2 @horus/scope — pure unit/type actions (needsStack: false, Design E3).
+      # Scope-chain resolver + DeploymentProfile config module; no Docker stack.
+      # -----------------------------------------------------------------------
+      - name: scope-ac1-resolver
+        invoke:
+          run: "pnpm --filter @horus/scope exec vitest run test/ac1-resolver.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, scope, F2, AC-1]
+
+      - name: scope-ac2-profile-schema
+        invoke:
+          run: "pnpm --filter @horus/scope exec vitest run test/ac2-profile-schema.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, scope, F2, AC-2]
+
+      - name: scope-ac3-tier-optionality
+        invoke:
+          run: "pnpm --filter @horus/scope exec vitest run test/ac3-tier-optionality.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, scope, F2, AC-3]
+
+      - name: scope-ac4-readme
+        invoke:
+          run: "pnpm --filter @horus/scope exec vitest run test/ac4-readme.test.ts"
+        expect:
+          exitCode: 0
+        needsStack: false
+        tags: [unit, scope, F2, AC-4]
+
   # ---------------------------------------------------------------------------
   # Phase 6 — teardown
   # Release the slot discovered at launch, then run detective isolation
