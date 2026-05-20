@@ -7,7 +7,7 @@ WORKDIR /build
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Copy workspace manifests first for layer caching
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
 COPY services/anvil-router/package.json ./services/anvil-router/
 
 # Install only production deps for the package
