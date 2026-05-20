@@ -1,5 +1,6 @@
 import Fastify from 'fastify'
 import type { FastifyInstance } from 'fastify'
+import replyFrom from '@fastify/reply-from'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -8,6 +9,7 @@ import { RouteResolutionError } from '@horus/router-core'
 import { sendRouteResolutionError } from './errors.js'
 import { authPlugin } from './plugins/index.js'
 import type { AuthPluginOptions } from './plugins/index.js'
+import { registerMcpProxyRoute } from './proxy/index.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -39,6 +41,9 @@ export interface BuildServerOptions {
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
+    // Increase body limit to 10 MB to allow large JSON-RPC payloads
+    // through the MCP proxy without a 413 Content Too Large error.
+    bodyLimit: 10 * 1024 * 1024, // 10 MB
   })
 
   const version = getVersion()
@@ -46,6 +51,16 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Register auth plugin BEFORE any proxy routes.
   // The plugin skips /health internally.
   await app.register(authPlugin, opts.authOptions ?? {})
+
+  // Register @fastify/reply-from — enables reply.from() for transparent proxying.
+  // bodyLimit: 0 disables reply-from's own body limit (Fastify's built-in limit
+  // still applies; we increase it here to allow large JSON-RPC payloads).
+  await app.register(replyFrom, {
+    // Allow up to 10 MB request bodies through the proxy without buffering error.
+    // reply-from streams; this limit is a safety guard, not a buffer.
+    // Disable reply-from's content-length rewrite so upstream gets the original.
+    disableRequestContentLengthCheck: true,
+  } as Parameters<typeof replyFrom>[1])
 
   // ── Registry reader (lazy singleton) ────────────────────────────────────
   let _registry: RegistryReader | null = null
@@ -113,6 +128,18 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       forwardedAuth: request.forwardedAuth,
     }
   })
+
+  // ── TA-5: MCP-over-HTTP proxy ─────────────────────────────────────────────
+  // Registered AFTER auth plugin and reply-from. Uses getRegistry() to resolve
+  // Principal → Anvil instance URL via the lazy registry singleton.
+  // We pass a thin delegating object whose lookup() method wraps the lazy
+  // getRegistry() call so the DB is not opened until the first request.
+  const registryProxy: RegistryReader = {
+    lookup: (tenant: string, user: string) => getRegistry().lookup(tenant, user),
+    invalidate: (tenant: string, user: string) => getRegistry().invalidate(tenant, user),
+    clearCache: () => getRegistry().clearCache(),
+  } as unknown as RegistryReader
+  registerMcpProxyRoute(app, registryProxy)
 
   return app
 }
