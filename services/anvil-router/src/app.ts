@@ -9,7 +9,7 @@ import { RouteResolutionError } from '@horus/router-core'
 import { sendRouteResolutionError } from './errors.js'
 import { authPlugin } from './plugins/index.js'
 import type { AuthPluginOptions } from './plugins/index.js'
-import { registerMcpProxyRoute, registerRestProxyRoute } from './proxy/index.js'
+import { registerMcpProxyRoute, registerSseProxyRoute, registerRestProxyRoute } from './proxy/index.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -141,11 +141,17 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   } as unknown as RegistryReader
   registerMcpProxyRoute(app, registryProxy)
 
+  // ── TA-7: SSE proxy (GET /api/events → per-user Anvil SSE stream) ─────────
+  // MUST be registered BEFORE the wildcard REST proxy (TA-6) so Fastify's
+  // route matching resolves this specific route ahead of the /api/* wildcard.
+  // Preserves text/event-stream semantics: no buffering, headers flushed early,
+  // Cache-Control: no-cache, X-Accel-Buffering: no.
+  registerSseProxyRoute(app, registryProxy)
+
   // ── TA-6: REST proxy (/api/* → per-user Anvil) ────────────────────────────
-  // Registered AFTER MCP proxy. Matches all HTTP methods on /api/* EXCEPT
-  // /api/events (SSE — TA-7 registers its own route for that path and should
-  // be registered BEFORE this handler in TA-7's wiring if needed; this handler
-  // also defends with an explicit /api/events check).
+  // Registered AFTER SSE proxy. Matches all HTTP methods on /api/* EXCEPT
+  // /api/events (guarded both by Fastify route ordering above and by an
+  // explicit URL check inside the handler).
   registerRestProxyRoute(app, registryProxy)
 
   return app
