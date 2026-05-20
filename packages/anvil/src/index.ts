@@ -19,6 +19,9 @@ import type { ToolContext } from './tools/create-note.js';
 import type { TypeWatcher } from './watcher/type-watcher.js';
 import type { TypesenseClient } from '@horus/search';
 import { bootstrapV2, shutdownV2, type V2Context } from './bootstrap-v2.js';
+import { selectSyncStrategy } from './sync/profile-guard.js';
+import type { DeploymentProfile } from '@horus/scope';
+import type { Backup } from './backup/interface.js';
 
 /**
  * Attempt to initialise Typesense: connect, bootstrap collection, return client.
@@ -226,9 +229,44 @@ async function main(): Promise<void> {
     await reindexToTypesense(db, typesenseClient);
   }
 
-  // Initialize GitSyncEngine if this is a git-backed vault
+  // Resolve sync strategy from DeploymentProfile (Q9 locked decision).
+  // If no profile is configured, default to enterprise mode (git-sync on)
+  // so existing single-tenant local deployments are unaffected.
+  const activeProfile: DeploymentProfile | null =
+    (config as any).deploymentProfile ?? null;
+  const syncStrategy = activeProfile
+    ? selectSyncStrategy(activeProfile)
+    : selectSyncStrategy({
+        mode: 'enterprise',
+        tenancy: 'single-user',
+        placement: {
+          anvil: 'shared',
+          vault: 'shared',
+          'forge-registry': 'shared',
+          'forge-artifactory': 'shared',
+        },
+        scale: { replicas: 1, maxConcurrency: 10 },
+        credentialPair: 'es-256',
+        identitySource: 'local',
+        globalForgeLink: 'http://localhost',
+        governancePolicy: 'local-v1',
+      });
+
+  // Log the resolved strategy so operators can verify profile application
+  process.stderr.write(
+    JSON.stringify({
+      level: 'info',
+      message: `Sync strategy resolved: gitSyncEnabled=${syncStrategy.gitSyncEnabled} (profile.mode=${activeProfile?.mode ?? 'none — defaulting to enterprise'})`,
+      timestamp: new Date().toISOString(),
+    }) + '\n',
+  );
+
+  // Attach backup to shutdown scope so we can reference it during cleanup
+  const _backup: Backup = syncStrategy.backup;
+
+  // Initialize GitSyncEngine only if profile permits git-sync (Q9)
   let syncEngine: GitSyncEngine | null = null;
-  if (await isGitRepo(config.vault_path)) {
+  if (syncStrategy.gitSyncEnabled && await isGitRepo(config.vault_path)) {
     syncEngine = new GitSyncEngine({
       notesPath: config.vault_path,
       watcher,
@@ -244,6 +282,14 @@ async function main(): Promise<void> {
       JSON.stringify({
         level: 'info',
         message: 'GitSyncEngine started (in-process sync daemon)',
+        timestamp: new Date().toISOString(),
+      }) + '\n',
+    );
+  } else if (!syncStrategy.gitSyncEnabled) {
+    process.stderr.write(
+      JSON.stringify({
+        level: 'info',
+        message: 'GitSyncEngine skipped — remote DeploymentProfile (saas mode); backup interface attached',
         timestamp: new Date().toISOString(),
       }) + '\n',
     );
