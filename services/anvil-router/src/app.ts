@@ -9,7 +9,7 @@ import { RouteResolutionError } from '@horus/router-core'
 import { sendRouteResolutionError } from './errors.js'
 import { authPlugin } from './plugins/index.js'
 import type { AuthPluginOptions } from './plugins/index.js'
-import { registerMcpProxyRoute } from './proxy/index.js'
+import { registerMcpProxyRoute, registerRestProxyRoute } from './proxy/index.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -140,6 +140,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     clearCache: () => getRegistry().clearCache(),
   } as unknown as RegistryReader
   registerMcpProxyRoute(app, registryProxy)
+
+  // ── TA-6: REST proxy (/api/* → per-user Anvil) ────────────────────────────
+  // Registered AFTER MCP proxy. Matches all HTTP methods on /api/* EXCEPT
+  // /api/events (SSE — TA-7 registers its own route for that path and should
+  // be registered BEFORE this handler in TA-7's wiring if needed; this handler
+  // also defends with an explicit /api/events check).
+  registerRestProxyRoute(app, registryProxy)
 
   return app
 }
