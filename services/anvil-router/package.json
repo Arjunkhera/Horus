@@ -18,7 +18,8 @@
     "@horus/router-core": "workspace:*",
     "fastify": "^4.28.1",
     "fastify-plugin": "^4.5.1",
-    "node-sqlite3-wasm": "^0.8.53"
+    "node-sqlite3-wasm": "^0.8.53",
+    "prom-client": "^15.1.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",

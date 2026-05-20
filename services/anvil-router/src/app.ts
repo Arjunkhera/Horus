@@ -11,6 +11,9 @@ import { authPlugin } from './plugins/index.js'
 import type { AuthPluginOptions } from './plugins/index.js'
 import { registerMcpProxyRoute, registerSseProxyRoute, registerRestProxyRoute } from './proxy/index.js'
 import { loadProfile } from './profiles/single-tenant.js'
+// ── TA-10: Observability ─────────────────────────────────────────────────────
+import { observabilityPlugin, metricsRegistry } from './observability/index.js'
+import type { LogCaptureFn } from './observability/index.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -37,6 +40,13 @@ export interface BuildServerOptions {
   registryDb?: SqliteDb
   /** TTL for the registry cache in ms (default 60 000). */
   registryTtlMs?: number
+  /**
+   * TA-10: Optional log capture function for tests.
+   * When provided, each structured request log entry is passed to this callback
+   * (in addition to the Fastify pino logger). Allows unit tests to assert log
+   * fields without capturing pino output.
+   */
+  logCapture?: LogCaptureFn
 }
 
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
@@ -51,7 +61,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   })
 
   const app = Fastify({
-    logger: false,
+    // TA-10: Enable pino logger. Tests that want silence can set LOG_LEVEL=silent.
+    logger: { level: process.env['LOG_LEVEL'] ?? 'info' },
     // Increase body limit to 10 MB to allow large JSON-RPC payloads
     // through the MCP proxy without a 413 Content Too Large error.
     bodyLimit: 10 * 1024 * 1024, // 10 MB
@@ -59,8 +70,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
   const version = getVersion()
 
+  // ── TA-10: Observability plugin — registered FIRST so request IDs are
+  // generated before the auth plugin preHandler runs. Auth error envelopes
+  // include the request_id field and need it to be set before preHandler fires.
+  await app.register(observabilityPlugin, { logCapture: opts.logCapture })
+
   // Register auth plugin BEFORE any proxy routes.
-  // The plugin skips /health internally.
+  // The plugin skips /health and /metrics (TA-10) internally.
   await app.register(authPlugin, opts.authOptions ?? {})
 
   // Register @fastify/reply-from -- enables reply.from() for transparent proxying.
@@ -83,6 +99,18 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       version,
       mode: profile.name,
     })
+  })
+
+  // ── TA-10: /metrics — Prometheus text format, no auth required ───────────
+  // Returns prom-client registry metrics in Prometheus text exposition format.
+  // Intentionally unauthenticated so Prometheus scrapers can reach it without
+  // a bearer token (same pattern as /health).
+  app.get('/metrics', async (_request, reply) => {
+    const body = await metricsRegistry.metrics()
+    return reply
+      .status(200)
+      .header('content-type', metricsRegistry.contentType)
+      .send(body)
   })
 
   /**
