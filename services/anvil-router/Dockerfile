@@ -4,7 +4,7 @@ FROM node:22-alpine AS builder
 WORKDIR /build
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 # Copy workspace manifests first for layer caching
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
