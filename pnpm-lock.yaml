@@ -17,6 +17,9 @@ importers:
 
   packages/anvil:
     dependencies:
+      '@horus/scope':
+        specifier: workspace:*
+        version: link:../scope
       '@horus/search':
         specifier: workspace:*
         version: link:../search

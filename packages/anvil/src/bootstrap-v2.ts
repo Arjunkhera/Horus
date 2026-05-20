@@ -34,6 +34,9 @@ import {
 } from '@horus/search'
 import type { TypesenseClient } from '@horus/search'
 import type { ServerConfig } from './types/index.js'
+import { selectSyncStrategy } from './sync/profile-guard.js'
+import type { DeploymentProfile } from '@horus/scope'
+import type { Backup } from './backup/interface.js'
 
 // ---------------------------------------------------------------------------
 // V2Context — the bag of initialized subsystems
@@ -50,6 +53,10 @@ export interface V2Context {
   pipeline: IngestPipeline
   neo4jDriver: Driver
   typesenseAvailable: boolean
+  /** Whether GitSyncEngine should be started (Q9 — false in remote/saas mode) */
+  gitSyncEnabled: boolean
+  /** Active backup backend (NoOp by default; replaced by S3Backup in remote mode post-alpha) */
+  backup: Backup
 }
 
 // ---------------------------------------------------------------------------
@@ -99,12 +106,43 @@ function neo4jAuth(): neo4j.AuthToken {
  * 11. IngestPipeline
  * 12. Return V2Context
  */
-export async function bootstrapV2(config: ServerConfig): Promise<V2Context> {
+export async function bootstrapV2(
+  config: ServerConfig,
+  deploymentProfile?: DeploymentProfile,
+): Promise<V2Context> {
   if (!config.vault_path) {
     throw new Error(
       'vault_path not configured. Use --vault, ANVIL_VAULT_PATH env var, or ~/.anvil/server.yaml',
     )
   }
+
+  // -------------------------------------------------------------------------
+  // 0. Resolve sync strategy from DeploymentProfile (Q9 locked decision)
+  //    Default to enterprise/local if no profile is provided, preserving
+  //    backward-compatible behavior for existing single-tenant deployments.
+  // -------------------------------------------------------------------------
+  const syncStrategy = deploymentProfile
+    ? selectSyncStrategy(deploymentProfile)
+    : selectSyncStrategy({
+        mode: 'enterprise',
+        tenancy: 'single-user',
+        placement: {
+          anvil: 'shared',
+          vault: 'shared',
+          'forge-registry': 'shared',
+          'forge-artifactory': 'shared',
+        },
+        scale: { replicas: 1, maxConcurrency: 10 },
+        credentialPair: 'es-256',
+        identitySource: 'local',
+        globalForgeLink: 'http://localhost',
+        governancePolicy: 'local-v1',
+      })
+
+  log(
+    'info',
+    `Sync strategy: gitSyncEnabled=${syncStrategy.gitSyncEnabled} (profile.mode=${deploymentProfile?.mode ?? 'none — defaulting to enterprise'})`,
+  )
 
   const paths = vaultPaths(config.vault_path)
 
@@ -309,6 +347,8 @@ export async function bootstrapV2(config: ServerConfig): Promise<V2Context> {
     pipeline,
     neo4jDriver: driver,
     typesenseAvailable,
+    gitSyncEnabled: syncStrategy.gitSyncEnabled,
+    backup: syncStrategy.backup,
   }
 }
 
