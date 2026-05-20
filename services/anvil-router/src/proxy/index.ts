@@ -3,3 +3,4 @@
  */
 
 export { registerMcpProxyRoute } from './mcp.js'
+export { registerRestProxyRoute } from './rest.js'
