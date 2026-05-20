@@ -13,6 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createRequire } from 'node:module';
+import { createJwtKeyPair, createJwtProvider } from '@horus/auth';
 
 // ---------------------------------------------------------------------------
 // Helpers — create an in-memory SQLite DB pre-seeded for tests
@@ -245,27 +246,55 @@ describe('RegistryReader — schema mismatch', () => {
 
 describe('anvil-router — 425 Too Early response shape', () => {
   it('returns 425 with Retry-After header and JSON body when registry miss occurs', async () => {
-    const { buildServer } = await import('../src/app.js');
-    const db = createMemoryDb(); // empty — all lookups will miss
-    const app = await buildServer({ registryDb: db });
-    await app.ready();
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/lookup?tenant=acme&user=nobody',
+    // Set up auth env vars so the auth plugin can boot.
+    // /api/lookup is protected by auth; we must mint a valid token to reach it.
+    const keyPair = await createJwtKeyPair({ alg: 'RS256' });
+    const TENANT = 'registry-test-tenant';
+    process.env['ANVIL_ROUTER_TENANT'] = TENANT;
+    process.env['ANVIL_ROUTER_JWKS_JSON'] = JSON.stringify({
+      keys: [{ ...keyPair.publicJwk, kid: keyPair.kid, alg: 'RS256' }],
     });
 
-    expect(res.statusCode).toBe(425);
-    expect(res.headers['retry-after']).toBe('30');
-    const body = JSON.parse(res.payload);
-    expect(body).toMatchObject({
-      error: {
-        code: 'REGISTRY_MISS',
-        message: expect.any(String),
-        retryAfter: 30,
-      },
-    });
+    try {
+      const { buildServer } = await import('../src/app.js');
+      const db = createMemoryDb(); // empty — all lookups will miss
+      const app = await buildServer({ registryDb: db });
+      await app.ready();
 
-    await app.close();
+      // Mint a valid token for the expected tenant so auth passes, letting the
+      // registry miss logic return 425 (the AC under test).
+      const provider = createJwtProvider({
+        privateKey: keyPair.privateKey,
+        kid: keyPair.kid,
+        alg: 'RS256',
+        tenant: TENANT,
+        user: 'testuser',
+        role: 'admin',
+        ttlSeconds: 300,
+      });
+      const authHeader = await provider.authorizationHeader();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/lookup?tenant=acme&user=nobody',
+        headers: { authorization: authHeader },
+      });
+
+      expect(res.statusCode).toBe(425);
+      expect(res.headers['retry-after']).toBe('30');
+      const body = JSON.parse(res.payload);
+      expect(body).toMatchObject({
+        error: {
+          code: 'REGISTRY_MISS',
+          message: expect.any(String),
+          retryAfter: 30,
+        },
+      });
+
+      await app.close();
+    } finally {
+      delete process.env['ANVIL_ROUTER_TENANT'];
+      delete process.env['ANVIL_ROUTER_JWKS_JSON'];
+    }
   });
 });

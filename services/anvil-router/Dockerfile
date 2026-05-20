@@ -40,10 +40,23 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV ANVIL_ROUTER_PORT=8200
 
-# Copy built output and package manifest
-COPY --from=builder /build/services/anvil-router/dist ./dist
-COPY --from=builder /build/services/anvil-router/package.json ./package.json
-COPY --from=builder /build/services/anvil-router/node_modules ./node_modules
+# Workspace manifests (needed for pnpm linking)
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
+COPY packages/auth/package.json ./packages/auth/
+COPY packages/scope/package.json ./packages/scope/
+COPY packages/router-core/package.json ./packages/router-core/
+COPY services/anvil-router/package.json ./services/anvil-router/
+
+RUN corepack enable && corepack prepare pnpm@9 --activate && \
+    pnpm install --prod --frozen-lockfile
+
+# Copy pre-built package dists
+COPY --from=builder /build/packages/auth/dist/ ./packages/auth/dist/
+COPY --from=builder /build/packages/scope/dist/ ./packages/scope/dist/
+COPY --from=builder /build/packages/router-core/dist/ ./packages/router-core/dist/
+COPY --from=builder /build/services/anvil-router/dist/ ./services/anvil-router/dist/
+
+WORKDIR /app/services/anvil-router
 
 EXPOSE 8200
 

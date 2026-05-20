@@ -6,6 +6,8 @@ import { dirname, join } from 'path'
 import { RegistryReader, createRegistryReader, type SqliteDb } from './registry/index.js'
 import { RouteResolutionError } from '@horus/router-core'
 import { sendRouteResolutionError } from './errors.js'
+import { authPlugin } from './plugins/index.js'
+import type { AuthPluginOptions } from './plugins/index.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -21,6 +23,8 @@ function getVersion(): string {
 }
 
 export interface BuildServerOptions {
+  /** Inject a custom auth verifier (for testing). */
+  authOptions?: AuthPluginOptions
   /**
    * Inject a pre-opened SQLite DB for testing.
    * When omitted, the server opens the DB from ANVIL_REGISTRY_PATH env var.
@@ -39,6 +43,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
   const version = getVersion()
 
+  // Register auth plugin BEFORE any proxy routes.
+  // The plugin skips /health internally.
+  await app.register(authPlugin, opts.authOptions ?? {})
+
   // ── Registry reader (lazy singleton) ────────────────────────────────────
   let _registry: RegistryReader | null = null
 
@@ -53,6 +61,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
   // ── Routes ───────────────────────────────────────────────────────────────
 
+  // /health — no auth required (the plugin skips it via routerPath check)
   app.get('/health', async (_request, reply) => {
     return reply.status(200).send({
       status: 'ok',
@@ -68,6 +77,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
    * Returns the resolved RegistryEntry on hit, 425 on miss.
    * This route is not part of the proxy surface (TA-5/6/7) — it exists to
    * allow integration tests to verify the registry reader without a proxy stub.
+   * Auth plugin protects this route (token required).
    */
   app.get('/api/lookup', async (request, reply) => {
     const { tenant, user } = request.query as { tenant?: string; user?: string }
@@ -89,6 +99,18 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
         return sendRouteResolutionError(reply, err)
       }
       throw err
+    }
+  })
+
+  // /echo-principal — test-only route used in auth.test.ts to inspect what the
+  // auth plugin attached to the request. This route is safe in production because:
+  // 1. The auth plugin protects it (token required to reach it).
+  // 2. It only echoes what was already authenticated.
+  // Proxy stories TA-5/6/7 will add the real proxy routes alongside this.
+  app.get('/echo-principal', async (request, _reply) => {
+    return {
+      principal: request.principal,
+      forwardedAuth: request.forwardedAuth,
     }
   })
 
