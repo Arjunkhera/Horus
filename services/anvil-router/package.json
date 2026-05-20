@@ -13,6 +13,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@fastify/reply-from": "^9.8.0",
     "@horus/auth": "workspace:*",
     "@horus/router-core": "workspace:*",
     "fastify": "^4.28.1",
@@ -27,6 +28,8 @@
     "vitest": "^1.2.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
