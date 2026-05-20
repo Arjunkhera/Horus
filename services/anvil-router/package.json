@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@horus/router-core": "workspace:*",
-    "fastify": "^4.28.1"
+    "fastify": "^4.28.1",
+    "node-sqlite3-wasm": "^0.8.53"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",
