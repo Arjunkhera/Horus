@@ -426,12 +426,18 @@ importers:
 
   services/anvil-router:
     dependencies:
+      '@horus/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@horus/router-core':
         specifier: workspace:*
         version: link:../../packages/router-core
       fastify:
         specifier: ^4.28.1
         version: 4.29.1
+      fastify-plugin:
+        specifier: ^4.5.1
+        version: 4.5.1
       node-sqlite3-wasm:
         specifier: ^0.8.53
         version: 0.8.55
@@ -439,6 +445,9 @@ importers:
       '@types/node':
         specifier: ^20.11.5
         version: 20.19.37
+      jose:
+        specifier: ^6.2.2
+        version: 6.2.2
       tsx:
         specifier: ^4.7.0
         version: 4.21.0

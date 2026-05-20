@@ -1,17 +1,28 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
+import { createJwtKeyPair, createLocalJwkSet } from '@horus/auth'
 import { buildServer } from '../src/app.js'
 
 describe('anvil-router health endpoint', () => {
   let app: FastifyInstance
 
   beforeAll(async () => {
+    // Set up minimal env vars so the auth plugin can initialize.
+    // The health tests do not exercise auth — they confirm /health bypasses it.
+    const keyPair = await createJwtKeyPair({ alg: 'RS256' })
+    process.env['ANVIL_ROUTER_TENANT'] = 'health-test-tenant'
+    process.env['ANVIL_ROUTER_JWKS_JSON'] = JSON.stringify({
+      keys: [{ ...keyPair.publicJwk, kid: keyPair.kid, alg: 'RS256' }],
+    })
+
     app = await buildServer()
     await app.ready()
   })
 
   afterAll(async () => {
     await app.close()
+    delete process.env['ANVIL_ROUTER_TENANT']
+    delete process.env['ANVIL_ROUTER_JWKS_JSON']
   })
 
   it('GET /health returns 200', async () => {
