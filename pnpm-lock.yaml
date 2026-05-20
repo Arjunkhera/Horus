@@ -432,6 +432,9 @@ importers:
       fastify:
         specifier: ^4.28.1
         version: 4.29.1
+      node-sqlite3-wasm:
+        specifier: ^0.8.53
+        version: 0.8.55
     devDependencies:
       '@types/node':
         specifier: ^20.11.5

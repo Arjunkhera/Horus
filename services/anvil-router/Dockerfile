@@ -1,23 +1,36 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
+# Context: monorepo root (needs packages/router-core + services/anvil-router).
 FROM node:22-alpine AS builder
 
 WORKDIR /build
 
-# Install pnpm
+# Install pnpm — pinned to pnpm@9 (matches workspace convention)
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
 # Copy workspace manifests first for layer caching
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
+
+# Copy dependency package manifests (bottom-up topological order)
+# @horus/auth and @horus/scope are needed by @horus/router-core
+COPY packages/auth/package.json ./packages/auth/
+COPY packages/scope/package.json ./packages/scope/
+COPY packages/router-core/package.json ./packages/router-core/
 COPY services/anvil-router/package.json ./services/anvil-router/
 
-# Install only production deps for the package
-RUN pnpm install --filter @horus/anvil-router --frozen-lockfile
+# Install all workspace deps
+RUN pnpm install --frozen-lockfile
 
-# Copy source
+# Copy source for workspace dependencies (build order: auth → scope → router-core → anvil-router)
+COPY packages/auth/ ./packages/auth/
+COPY packages/scope/ ./packages/scope/
+COPY packages/router-core/ ./packages/router-core/
 COPY services/anvil-router/ ./services/anvil-router/
 
-# Build TypeScript
-RUN pnpm --filter @horus/anvil-router build
+# Build in topological order
+RUN pnpm --filter @horus/auth build \
+ && pnpm --filter @horus/scope build \
+ && pnpm --filter @horus/router-core build \
+ && pnpm --filter @horus/anvil-router build
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
@@ -33,5 +46,8 @@ COPY --from=builder /build/services/anvil-router/package.json ./package.json
 COPY --from=builder /build/services/anvil-router/node_modules ./node_modules
 
 EXPOSE 8200
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -qO- http://localhost:8200/health || exit 1
 
 CMD ["node", "dist/index.js"]
