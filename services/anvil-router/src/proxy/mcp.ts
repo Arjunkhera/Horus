@@ -112,8 +112,10 @@ export function registerMcpProxyRoute(
         },
         onError: (_reply, error) => {
           // Map upstream connection errors to 502 Bad Gateway
-          const msg = (error as Error & { code?: string }).message ?? String(error)
-          const nodeCode = (error as Error & { code?: string }).code
+          // reply-from passes { error: Error } — extract the inner error first
+          const inner = error.error as Error & { code?: string; statusCode?: number }
+          const msg = inner.message ?? String(inner)
+          const nodeCode = inner.code
           const is5xx =
             nodeCode === 'ECONNREFUSED' ||
             nodeCode === 'ECONNRESET' ||
@@ -121,9 +123,9 @@ export function registerMcpProxyRoute(
             nodeCode === 'ENOTFOUND' ||
             nodeCode === 'ERR_GOT_REQUEST_BODY' ||
             // reply-from wraps node errors in a FastifyError; check statusCode
-            (error as { statusCode?: number }).statusCode === 502 ||
-            (error as { statusCode?: number }).statusCode === 503 ||
-            (error as { statusCode?: number }).statusCode === 504
+            inner.statusCode === 502 ||
+            inner.statusCode === 503 ||
+            inner.statusCode === 504
 
           if (is5xx || !reply.sent) {
             void _reply.status(502).send({
