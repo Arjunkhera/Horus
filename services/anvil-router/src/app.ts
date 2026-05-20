@@ -4,12 +4,13 @@ import replyFrom from '@fastify/reply-from'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { RegistryReader, createRegistryReader, type SqliteDb } from './registry/index.js'
+import type { SqliteDb } from './registry/index.js'
 import { RouteResolutionError } from '@horus/router-core'
 import { sendRouteResolutionError } from './errors.js'
 import { authPlugin } from './plugins/index.js'
 import type { AuthPluginOptions } from './plugins/index.js'
 import { registerMcpProxyRoute, registerSseProxyRoute, registerRestProxyRoute } from './proxy/index.js'
+import { loadProfile } from './profiles/single-tenant.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -39,6 +40,16 @@ export interface BuildServerOptions {
 }
 
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
+  // ── Profile selection (boot-time, not per-request) ────────────────────────
+  // Reads ANVIL_DEPLOYMENT_PROFILE + ANVIL_UPSTREAM_URL at startup.
+  // Throws with a clear message on misconfiguration (single-tenant + no URL).
+  // Alpha mode wraps the SQLite registry lazily so /health never requires
+  // ANVIL_REGISTRY_PATH to be set at startup.
+  const profile = await loadProfile({
+    registryDb: opts.registryDb,
+    registryTtlMs: opts.registryTtlMs,
+  })
+
   const app = Fastify({
     logger: false,
     // Increase body limit to 10 MB to allow large JSON-RPC payloads
@@ -52,7 +63,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // The plugin skips /health internally.
   await app.register(authPlugin, opts.authOptions ?? {})
 
-  // Register @fastify/reply-from — enables reply.from() for transparent proxying.
+  // Register @fastify/reply-from -- enables reply.from() for transparent proxying.
   // bodyLimit: 0 disables reply-from's own body limit (Fastify's built-in limit
   // still applies; we increase it here to allow large JSON-RPC payloads).
   await app.register(replyFrom, {
@@ -62,26 +73,15 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     disableRequestContentLengthCheck: true,
   } as Parameters<typeof replyFrom>[1])
 
-  // ── Registry reader (lazy singleton) ────────────────────────────────────
-  let _registry: RegistryReader | null = null
-
-  function getRegistry(): RegistryReader {
-    if (_registry === null) {
-      _registry = opts.registryDb !== undefined
-        ? new RegistryReader(opts.registryDb, opts.registryTtlMs ?? 60_000)
-        : createRegistryReader(opts.registryTtlMs ?? 60_000)
-    }
-    return _registry
-  }
-
   // ── Routes ───────────────────────────────────────────────────────────────
 
-  // /health — no auth required (the plugin skips it via routerPath check)
+  // /health -- no auth required (the plugin skips it via routerPath check)
   app.get('/health', async (_request, reply) => {
     return reply.status(200).send({
       status: 'ok',
       service: 'anvil-router',
       version,
+      mode: profile.name,
     })
   })
 
@@ -90,7 +90,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
    *
    * Diagnostic / test route that exposes the registry reader over HTTP.
    * Returns the resolved RegistryEntry on hit, 425 on miss.
-   * This route is not part of the proxy surface (TA-5/6/7) — it exists to
+   * This route is not part of the proxy surface (TA-5/6/7) -- it exists to
    * allow integration tests to verify the registry reader without a proxy stub.
    * Auth plugin protects this route (token required).
    */
@@ -107,7 +107,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     }
 
     try {
-      const entry = getRegistry().lookup(tenant, user)
+      const entry = profile.registry.lookup(tenant, user)
       return reply.status(200).send(entry)
     } catch (err) {
       if (err instanceof RouteResolutionError) {
@@ -117,7 +117,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     }
   })
 
-  // /echo-principal — test-only route used in auth.test.ts to inspect what the
+  // /echo-principal -- test-only route used in auth.test.ts to inspect what the
   // auth plugin attached to the request. This route is safe in production because:
   // 1. The auth plugin protects it (token required to reach it).
   // 2. It only echoes what was already authenticated.
@@ -130,29 +130,23 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   })
 
   // ── TA-5: MCP-over-HTTP proxy ─────────────────────────────────────────────
-  // Registered AFTER auth plugin and reply-from. Uses getRegistry() to resolve
-  // Principal → Anvil instance URL via the lazy registry singleton.
-  // We pass a thin delegating object whose lookup() method wraps the lazy
-  // getRegistry() call so the DB is not opened until the first request.
-  const registryProxy: RegistryReader = {
-    lookup: (tenant: string, user: string) => getRegistry().lookup(tenant, user),
-    invalidate: (tenant: string, user: string) => getRegistry().invalidate(tenant, user),
-    clearCache: () => getRegistry().clearCache(),
-  } as unknown as RegistryReader
-  registerMcpProxyRoute(app, registryProxy)
+  // profile.registry is a SharedRegistry (single-tenant) or a lazy RegistryReader
+  // (alpha). The proxy handlers call registry.lookup() uniformly -- no per-request
+  // branching on profile.
+  registerMcpProxyRoute(app, profile.registry)
 
-  // ── TA-7: SSE proxy (GET /api/events → per-user Anvil SSE stream) ─────────
+  // ── TA-7: SSE proxy (GET /api/events → per-user or shared Anvil stream) ───
   // MUST be registered BEFORE the wildcard REST proxy (TA-6) so Fastify's
   // route matching resolves this specific route ahead of the /api/* wildcard.
   // Preserves text/event-stream semantics: no buffering, headers flushed early,
   // Cache-Control: no-cache, X-Accel-Buffering: no.
-  registerSseProxyRoute(app, registryProxy)
+  registerSseProxyRoute(app, profile.registry)
 
-  // ── TA-6: REST proxy (/api/* → per-user Anvil) ────────────────────────────
+  // ── TA-6: REST proxy (/api/* → per-user or shared Anvil) ─────────────────
   // Registered AFTER SSE proxy. Matches all HTTP methods on /api/* EXCEPT
   // /api/events (guarded both by Fastify route ordering above and by an
   // explicit URL check inside the handler).
-  registerRestProxyRoute(app, registryProxy)
+  registerRestProxyRoute(app, profile.registry)
 
   return app
 }
