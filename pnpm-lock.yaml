@@ -426,6 +426,9 @@ importers:
 
   services/anvil-router:
     dependencies:
+      '@horus/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@horus/router-core':
         specifier: workspace:*
         version: link:../../packages/router-core
@@ -439,6 +442,9 @@ importers:
       '@types/node':
         specifier: ^20.11.5
         version: 20.19.37
+      jose:
+        specifier: ^6.2.2
+        version: 6.2.2
       tsx:
         specifier: ^4.7.0
         version: 4.21.0
