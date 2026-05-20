@@ -698,18 +698,25 @@ describe('TA-6 REST proxy — /api/events NOT proxied by REST handler', () => {
     delete process.env['ANVIL_ROUTER_JWKS_JSON']
   })
 
-  it('GET /api/events is NOT proxied by the REST handler (returns 404, not 502)', async () => {
-    // The REST handler must NOT match /api/events. Since TA-7 is not yet wired,
-    // a request to /api/events should yield 404 from Fastify (no route matched),
-    // NOT 502 (which would mean the REST proxy attempted to proxy it and failed).
-    // This is the key invariant: the REST proxy leaves /api/events as a hole.
+  it('GET /api/events is handled by the SSE proxy (TA-7), not the REST proxy', async () => {
+    // With TA-7 wired, the SSE route (GET /api/events) is registered BEFORE the
+    // wildcard REST route. Fastify routes /api/events to the SSE handler.
+    // The SSE handler attempts to proxy to the upstream; since 127.0.0.1:9997
+    // is not listening, it returns 502 UPSTREAM_UNAVAILABLE.
+    //
+    // Key invariant: REST proxy did NOT handle this request; SSE proxy did.
+    //   - NOT 404 (Fastify found a route — the SSE route is registered)
+    //   - 502 with UPSTREAM_UNAVAILABLE (SSE handler tried to proxy)
     const res = await app.inject({
       method: 'GET',
       url: '/api/events',
       headers: { authorization: validAuth },
     })
-    expect(res.statusCode).not.toBe(502)
-    // It should be a clean 404 from the router — not a proxy error
-    expect(res.statusCode).toBe(404)
+    // Route was found (SSE handler is registered)
+    expect(res.statusCode).not.toBe(404)
+    // SSE handler tried to proxy → unreachable upstream → 502
+    expect(res.statusCode).toBe(502)
+    const body = JSON.parse(res.payload)
+    expect(body.error?.code).toBe('UPSTREAM_UNAVAILABLE')
   })
 })
