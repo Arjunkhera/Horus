@@ -119,3 +119,14 @@ export {
   type WorkflowStrategy,
   type RepoWorkflow,
 } from './repo-workflow.js';
+
+// Local Repo State (RR-9)
+export {
+  LocalRepoWorktreeSchema,
+  LocalRepoStateEntrySchema,
+  LocalRepoStateStoreSchema,
+  EMPTY_LOCAL_REPO_STATE,
+  type LocalRepoWorktree,
+  type LocalRepoStateEntry,
+  type LocalRepoStateStore,
+} from './local-repo-state.js';
