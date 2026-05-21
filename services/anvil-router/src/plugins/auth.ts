@@ -2,7 +2,7 @@
  * Fastify auth plugin for anvil-router.
  *
  * Registers a preHandler hook that verifies the inbound JWT on every route
- * except /health. Uses hardenedVerifier(createJwtVerifier(...), expectedTenant)
+ * except /health and /metrics. Uses hardenedVerifier(createJwtVerifier(...), expectedTenant)
  * for defense-in-depth double-check on the tenant claim (top-level fork 4).
  *
  * Configuration (env vars):
@@ -13,8 +13,10 @@
  * header to request.forwardedAuth (for downstream proxy stories TA-5/6/7).
  *
  * On failure:
- *   - missing/invalid/expired token → 401 { error: { code: "UNAUTHORIZED", message } }
- *   - tenant mismatch             → 403 { error: { code: "TENANT_MISMATCH", message } }
+ *   - missing/invalid/expired token → 401 { error: { code: "UNAUTHORIZED", message, request_id } }
+ *   - tenant mismatch             → 403 { error: { code: "TENANT_MISMATCH", message, request_id } }
+ *
+ * TA-10: error envelopes include request_id from request.requestId (set by observability plugin).
  */
 
 import fp from 'fastify-plugin'
@@ -81,16 +83,20 @@ const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (fastify, opts) 
   // preHandler hook — runs on every request
   // -------------------------------------------------------------------------
   fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
-    // /health bypasses auth
-    if (request.routeOptions.url === '/health') return
+    // /health and /metrics bypass auth (TA-10: metrics must be unauthenticated)
+    const routeUrl = request.routeOptions.url
+    if (routeUrl === '/health' || routeUrl === '/metrics') return
 
     const authHeader = request.headers['authorization']
+    // TA-10: include request_id in all error envelopes (set by observability plugin's onRequest hook)
+    const requestId = request.requestId ?? (request.headers['x-request-id'] as string | undefined) ?? 'unknown'
 
     if (!authHeader) {
       return reply.status(401).send({
         error: {
           code: 'UNAUTHORIZED',
           message: 'Missing Authorization header',
+          request_id: requestId,
         },
       })
     }
@@ -114,6 +120,7 @@ const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (fastify, opts) 
           error: {
             code: 'TENANT_MISMATCH',
             message,
+            request_id: requestId,
           },
         })
       }
@@ -122,6 +129,7 @@ const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (fastify, opts) 
         error: {
           code: 'UNAUTHORIZED',
           message,
+          request_id: requestId,
         },
       })
     }
