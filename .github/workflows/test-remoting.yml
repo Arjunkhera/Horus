@@ -1,0 +1,76 @@
+name: Test Remoting Profile
+
+# Opt-in remoting integration tests (TA-9).
+# Locked decision Q8: default CI stays single-tenant. This job is NOT included
+# in the standard CI pipeline. Trigger it manually or via the test:remoting label.
+#
+# Runs:
+#   - on workflow_dispatch (manual trigger)
+#   - on pull requests when the label "test:remoting" is applied
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  gate:
+    # Only run for workflow_dispatch or when the test:remoting label is added
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'test:remoting')
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Gate check
+        id: check
+        run: echo "should_run=true" >> "$GITHUB_OUTPUT"
+
+  test-remoting:
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace dependencies
+        run: |
+          pnpm --filter @horus/auth build
+          pnpm --filter @horus/scope build
+          pnpm --filter @horus/router-core build
+          pnpm --filter @horus/anvil-router build
+
+      - name: Run integration tests (remoting profile — no Docker)
+        run: pnpm test:remoting
+        env:
+          # Integration tests are in-process (no Docker needed for the Node mock servers).
+          # These env vars are consumed by the test harness; actual values are generated
+          # dynamically by the test setup (createJwtKeyPair).
+          CI: "true"
+          NODE_ENV: "test"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remoting-test-results
+          path: services/anvil-router/test/integration/
+          retention-days: 7

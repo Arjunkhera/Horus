@@ -1,0 +1,107 @@
+# .testenv/profiles/remoting/docker-compose.remoting.yml
+#
+# Opt-in remoting compose fragment for the .testenv test environment.
+# Locked decision Q8: Default CI stays single-tenant. This profile is
+# activated by `pnpm test:remoting` (or `horus test-env acquire --profile=remoting`).
+#
+# Services added by this profile:
+#   anvil-router    — per-user routing proxy (port 8200)
+#   anvil-user-a    — mock Anvil instance for user-a (port 8201)
+#   anvil-user-b    — mock Anvil instance for user-b (port 8202)
+#
+# The mock Anvil instances are lightweight Node HTTP servers defined by
+# .testenv/profiles/remoting/mock-anvil.mjs. They echo which "tenant" was
+# reached so integration tests can assert routing correctness.
+#
+# Usage (overlay merge with base compose):
+#   docker compose -f <base>.yml -f docker-compose.remoting.yml up
+#
+# The seed script seeds the SQLite registry used by anvil-router:
+#   node .testenv/profiles/remoting/seed-remoting-registry.mjs
+#
+# Aligned with AC:
+#   - 1 anvil-router + 2 mock Anvil instances
+#   - SQLite registry pre-populated with user-a and user-b → respective URLs
+#   - Health checks on all three services
+
+version: "3.9"
+
+services:
+  # ── Mock Anvil for user-a ───────────────────────────────────────────────────
+  anvil-user-a:
+    image: node:22-alpine
+    command: >
+      sh -c "node /app/mock-anvil.mjs"
+    environment:
+      MOCK_ANVIL_USER_LABEL: "user-a"
+      MOCK_ANVIL_PORT: "8201"
+    ports:
+      - "8201:8201"
+    volumes:
+      - ./.testenv/profiles/remoting/mock-anvil.mjs:/app/mock-anvil.mjs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8201/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - horus-remoting-test
+
+  # ── Mock Anvil for user-b ───────────────────────────────────────────────────
+  anvil-user-b:
+    image: node:22-alpine
+    command: >
+      sh -c "node /app/mock-anvil.mjs"
+    environment:
+      MOCK_ANVIL_USER_LABEL: "user-b"
+      MOCK_ANVIL_PORT: "8202"
+    ports:
+      - "8202:8202"
+    volumes:
+      - ./.testenv/profiles/remoting/mock-anvil.mjs:/app/mock-anvil.mjs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8202/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - horus-remoting-test
+
+  # ── anvil-router ────────────────────────────────────────────────────────────
+  anvil-router:
+    image: ghcr.io/arjunkhera/horus/anvil-router:latest
+    ports:
+      - "8200:8200"
+    environment:
+      ANVIL_ROUTER_PORT: "8200"
+      ANVIL_DEPLOYMENT_PROFILE: "alpha"
+      ANVIL_REGISTRY_PATH: "/data/registry.db"
+      # ANVIL_ROUTER_TENANT and ANVIL_ROUTER_JWKS_JSON must be provided at
+      # test runtime (injected by the test:remoting script after key generation).
+      ANVIL_ROUTER_TENANT: "${ANVIL_ROUTER_TENANT}"
+      ANVIL_ROUTER_JWKS_JSON: "${ANVIL_ROUTER_JWKS_JSON}"
+    volumes:
+      # Registry DB file is seeded by seed-remoting-registry.mjs before tests run.
+      - remoting-registry:/data
+    depends_on:
+      anvil-user-a:
+        condition: service_healthy
+      anvil-user-b:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8200/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    networks:
+      - horus-remoting-test
+
+networks:
+  horus-remoting-test:
+    driver: bridge
+
+volumes:
+  remoting-registry:
