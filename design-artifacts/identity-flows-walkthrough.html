@@ -666,24 +666,24 @@ sequenceDiagram
   participant FR as ForgeRegistry
   participant S3 as S3
 
-  Note over C: forge_workspace_create runs locally<br/>Creates ~/Horus/workspaces/my-ws/ on disk<br/>No network call needed.
+  Note over C: forge_workspace_create runs locally<br/>creates ~/Horus/workspaces/my-ws/ on disk<br/>no network call needed
 
   C->>C: create workspace dir on local FS
-  C->>C: write workspace config (mcp.json, skills list)
+  C->>C: write workspace config - mcp.json and skills list
 
   Note over C,FR: Installing an artifact from the registry
-  C->>FR: GET /artifacts/resolve?name=horus-anvil&version=latest
-  FR->>FR: AuthStrategy.authorize(request)
-  Note over FR: Phase 1: anonymous read allowed.<br/>Admin key required for write/publish.
-  FR-->>C: artifact metadata + download URL
+  C->>FR: GET artifact resolve - name horus-anvil version latest
+  FR->>FR: AuthStrategy authorize the request
+  Note over FR: Phase 1 anonymous read allowed<br/>admin key required for write or publish
+  FR-->>C: artifact metadata and download URL
 
-  C->>FR: GET /artifacts/download/horus-anvil@0.4.0
-  FR->>S3: getObject(key=artifacts/horus-anvil/0.4.0.tar.gz)
+  C->>FR: GET artifact download for horus-anvil at version 0.4.0
+  FR->>S3: getObject for horus-anvil 0.4.0 tarball
   S3-->>FR: artifact bytes
   FR-->>C: artifact stream
 
   C->>C: install artifact into workspace dir
-  C-->>C: workspace ready; artifact usable
+  C-->>C: workspace ready and artifact usable
     </div>
   </div>
 
@@ -706,14 +706,14 @@ sequenceDiagram
   participant FR as ForgeRegistry
   participant S3 as S3
 
-  C->>FR: POST /artifacts/publish (artifact tarball + metadata) Authorization: Admin-Key &lt;key&gt;
-  FR->>FR: AuthStrategy.authorize(request)
-  alt Not authorized (missing or wrong admin key)
+  C->>FR: POST publish - tarball plus metadata plus admin key in Authorization
+  FR->>FR: AuthStrategy authorize the request
+  alt Not authorized - missing or wrong admin key
     FR-->>C: 403 Forbidden
   else Authorized
-    FR->>S3: putObject(key=artifacts/name/version.tar.gz, body=tarball)
+    FR->>S3: putObject artifact tarball at artifacts name version key
     S3-->>FR: etag confirmed
-    FR->>FR: update registry index (name, version, sha256, manifest)
+    FR->>FR: update registry index - name version sha256 manifest
     FR-->>C: 201 Created with artifact URL
   end
     </div>
