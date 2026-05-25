@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Horus — Identity &amp; Request Flows</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    .page-wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 32px 80px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #e6edf3;
+      border-bottom: 2px solid #21262d;
+      padding-bottom: 16px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #8b949e;
+      font-size: 0.9rem;
+      margin-bottom: 48px;
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: #e6edf3;
+      margin: 56px 0 12px;
+      padding-left: 12px;
+      border-left: 4px solid #388bfd;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #cdd9e5;
+      margin: 32px 0 10px;
+    }
+
+    p {
+      margin: 10px 0 16px;
+      color: #b1bac4;
+    }
+
+    .diagram-wrap {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 24px 16px;
+      margin: 20px 0 28px;
+      overflow-x: auto;
+    }
+
+    ol, ul {
+      padding-left: 24px;
+      margin: 10px 0 20px;
+    }
+
+    li {
+      margin: 6px 0;
+      color: #b1bac4;
+    }
+
+    li strong {
+      color: #e6edf3;
+    }
+
+    /* Step-by-step numbered walkthrough */
+    .walkthrough {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin: 16px 0 28px;
+    }
+
+    .walkthrough ol {
+      margin: 0;
+    }
+
+    .walkthrough li {
+      margin: 8px 0;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 28px;
+      font-size: 0.88rem;
+    }
+
+    th {
+      background: #21262d;
+      color: #e6edf3;
+      font-weight: 600;
+      text-align: left;
+      padding: 10px 14px;
+      border: 1px solid #30363d;
+    }
+
+    td {
+      padding: 9px 14px;
+      border: 1px solid #30363d;
+      color: #b1bac4;
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td { background: #161b22; }
+
+    /* Legend */
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+      margin: 20px 0 32px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+
+    .legend-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      margin-top: 3px;
+    }
+
+    .legend-label {
+      font-weight: 600;
+      color: #e6edf3;
+      font-size: 0.88rem;
+    }
+
+    .legend-desc {
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-top: 2px;
+    }
+
+    .plane-header {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #58a6ff;
+      margin: 24px 0 8px;
+    }
+
+    /* Note / callout box */
+    .callout {
+      border-left: 4px solid #f0883e;
+      background: #1c1a14;
+      border-radius: 0 6px 6px 0;
+      padding: 12px 16px;
+      margin: 16px 0;
+      font-size: 0.88rem;
+      color: #c9a227;
+    }
+
+    .callout.info {
+      border-color: #388bfd;
+      background: #0d1d30;
+      color: #79c0ff;
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      background: #21262d;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.84em;
+      color: #a5d6ff;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid #21262d;
+      margin: 48px 0;
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <h1>Horus — Identity &amp; Request Flows</h1>
+  <p class="subtitle">A traced walkthrough of every identity decision in the system, from bootstrap through live request routing. Reflects Phase 1 shipped code plus the proposed Track A / PrincipalStore design.</p>
+
+  <!-- ================================================================ -->
+  <!-- SECTION 0: LEGEND                                                 -->
+  <!-- ================================================================ -->
+  <h2>Section 0 — Participant Legend</h2>
+  <p>Every actor that appears in the diagrams below, grouped by the plane it belongs to. Colors are used consistently across all diagrams.</p>
+
+  <div class="plane-header">Execution Plane — runs on the user's machine</div>
+  <div class="legend-grid">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#58a6ff;"></div>
+      <div>
+        <div class="legend-label">Client</div>
+        <div class="legend-desc">A user's agent, Horus CLI, or browser session that initiates requests.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#79c0ff;"></div>
+      <div>
+        <div class="legend-label">Operator</div>
+        <div class="legend-desc">Human operator running <code>horus</code> CLI admin commands; manages infra lifecycle.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="plane-header">Control Plane — identity, tenancy, governance</div>
+  <div class="legend-grid">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#f78166;"></div>
+      <div>
+        <div class="legend-label">HorusControlPlane</div>
+        <div class="legend-desc">The orchestrating CLI sub-system that drives bootstrap and onboarding commands.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#ffa657;"></div>
+      <div>
+        <div class="legend-label">AuthLib</div>
+        <div class="legend-desc"><code>@horus/auth</code> — JWT sign/verify library. Stateless; called inline by every router.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#ffab70;"></div>
+      <div>
+        <div class="legend-label">PrincipalStore</div>
+        <div class="legend-desc">Proposed new layer. Reads <code>principals.yaml</code> + <code>resources.yaml</code> (file-watched) or a SQLite table. Used only for shared-resource authorization, not per-user routing.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#d2a8ff;"></div>
+      <div>
+        <div class="legend-label">ServiceRegistry</div>
+        <div class="legend-desc">SQLite table keyed <code>(tenant, user) → backend URL</code>. Consulted by routers to find the physical service endpoint for a given principal.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="plane-header">Service Plane — hosted backends and routers</div>
+  <div class="legend-grid">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#3fb950;"></div>
+      <div>
+        <div class="legend-label">AnvilRouter</div>
+        <div class="legend-desc">HTTP router sitting in front of all per-user Anvil backends. Verifies JWT, looks up backend, proxies request.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#56d364;"></div>
+      <div>
+        <div class="legend-label">AnvilBackend</div>
+        <div class="legend-desc">Per-user Anvil MCP server instance (Typesense collection + Neo4j database). Only the router can address it directly.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#a371f7;"></div>
+      <div>
+        <div class="legend-label">VaultRouter</div>
+        <div class="legend-desc">Multi-vault proxy. Resolves the requested vault slug(s) to physical backend URLs, fan-outs on <code>**</code> wildcard queries.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#bc8cff;"></div>
+      <div>
+        <div class="legend-label">VaultBackend</div>
+        <div class="legend-desc">Individual Vault REST service (Python/FastAPI). Owns one Markdown repository + one Typesense collection.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#e3b341;"></div>
+      <div>
+        <div class="legend-label">ForgeRegistry</div>
+        <div class="legend-desc">Forge artifact registry (S3-backed). Binary auth strategy: <code>admin</code> or <code>anonymous</code>. No per-tenant storage keys yet.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#f0883e;"></div>
+      <div>
+        <div class="legend-label">S3</div>
+        <div class="legend-desc">Object storage for Forge artifacts. Accessed exclusively through ForgeRegistry; clients never call S3 directly.</div>
+      </div>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- ================================================================ -->
+  <!-- SECTION 1: BOOTSTRAP                                              -->
+  <!-- ================================================================ -->
+  <h2>Section 1 — Bootstrapping an Enterprise Deployment</h2>
+  <p>
+    Before any user can authenticate, an operator must stand up the Horus control plane and declare the initial topology.
+    This section covers everything that must exist on disk and in the database before the first <code>horus user add</code> can succeed.
+    Critically, the Control Plane does <strong>not</strong> auto-discover service URLs — the operator declares them explicitly in a config file
+    that is loaded during bootstrap.
+  </p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  participant Op as Operator
+  participant HCP as HorusControlPlane
+  participant AuthLib as AuthLib
+  participant PS as PrincipalStore
+  participant SR as ServiceRegistry
+
+  Op->>HCP: horus bootstrap --tenant acme
+  HCP->>AuthLib: generateKeypair()
+  AuthLib-->>HCP: privateKey + publicKey
+  HCP->>HCP: persist keypair to data/keys/acme/
+
+  HCP->>PS: initPrincipalFiles()
+  PS-->>HCP: write principals.yaml (operator entry only)
+  PS-->>HCP: write resources.yaml (empty vault list)
+
+  HCP->>HCP: load service topology from topology.yaml
+  Note over HCP: Operator-declared URLs for<br/>AnvilRouter, VaultRouter, ForgeRegistry.<br/>Control Plane does NOT auto-discover.
+
+  HCP->>SR: initServiceRegistry()
+  SR-->>HCP: SQLite DB created (empty rows)
+
+  HCP->>HCP: start services (docker compose up)
+  HCP->>AnvilRouter: GET /health
+  AnvilRouter-->>HCP: 200 OK
+  HCP->>VaultRouter: GET /health
+  VaultRouter-->>HCP: 200 OK
+  HCP->>ForgeRegistry: GET /health
+  ForgeRegistry-->>HCP: 200 OK
+
+  HCP-->>Op: Bootstrap complete. Keypair at data/keys/acme/. JWT public key distributed to services.
+    </div>
+  </div>
+
+  <div class="walkthrough">
+    <ol>
+      <li><strong>Step 1 — Operator invokes bootstrap.</strong> The human operator runs <code>horus bootstrap --tenant acme</code>. The HorusControlPlane is the orchestrating CLI subsystem that handles the command.</li>
+      <li><strong>Step 2 — Keypair generation.</strong> HorusControlPlane calls <code>AuthLib.generateKeypair()</code>. AuthLib returns an asymmetric keypair (e.g. RS256 or EdDSA). The private key is used to sign JWTs; the public key is distributed to all service routers so they can verify tokens without calling back to the control plane.</li>
+      <li><strong>Step 3 — Persist keypair.</strong> The keypair is written to <code>data/keys/acme/</code> on the operator's host filesystem. The exact location is operator-configured; see Open Questions for rotation concerns.</li>
+      <li><strong>Step 4 — Initialize PrincipalStore files.</strong> <code>principals.yaml</code> is created with a single entry for the operator. <code>resources.yaml</code> starts empty (no shared vaults registered yet). These are the on-disk source-of-truth for the PrincipalStore.</li>
+      <li><strong>Step 5 — Load service topology.</strong> The Control Plane reads a declarative <code>topology.yaml</code> (operator-authored) that maps logical service names to physical URLs. This is a deliberate design choice: there is no service discovery protocol — URLs are declared, not auto-discovered. This prevents misconfigured services from silently routing to wrong backends.</li>
+      <li><strong>Step 6 — Initialize ServiceRegistry.</strong> The SQLite database file is created with an empty <code>service_registry</code> table. No user rows exist yet; they are inserted during onboarding.</li>
+      <li><strong>Step 7 — Start services.</strong> Docker Compose brings up AnvilRouter, VaultRouter, ForgeRegistry, and their dependent services (Typesense, Neo4j). Each service receives the JWT public key as an environment variable or mounted file.</li>
+      <li><strong>Step 8 — Health checks.</strong> The Control Plane polls each service's <code>/health</code> endpoint and fails the bootstrap if any service is unresponsive.</li>
+      <li><strong>Step 9 — Bootstrap complete.</strong> The operator is informed of the keypair location. At this point the system is live but has no end-users; all backend routing tables are empty.</li>
+    </ol>
+  </div>
+
+  <h3>What is persisted by the end of bootstrap</h3>
+  <ul>
+    <li><strong>JWT keypair</strong> — private key + public key at <code>data/keys/&lt;tenant&gt;/</code>.</li>
+    <li><strong>principals.yaml</strong> — one entry for the operator principal, no users yet.</li>
+    <li><strong>resources.yaml</strong> — empty; no shared vaults or other shared resources declared.</li>
+    <li><strong>topology.yaml</strong> — operator-authored; read-only at runtime. Contains physical URLs for all routers and registries.</li>
+    <li><strong>ServiceRegistry SQLite DB</strong> — schema initialized, zero data rows.</li>
+    <li><strong>Running service processes</strong> — AnvilRouter, VaultRouter, ForgeRegistry, Typesense, Neo4j, all healthy.</li>
+  </ul>
+
+  <hr />
+
+  <!-- ================================================================ -->
+  <!-- SECTION 2: ONBOARDING                                             -->
+  <!-- ================================================================ -->
+  <h2>Section 2 — Onboarding a User (Enterprise Mode)</h2>
+  <p>
+    In enterprise mode, users are provisioned by an operator, not by self-signup (SaaS signup is deferred post-alpha).
+    Onboarding is a multi-step pipeline: validate the slug, provision the Anvil backend, register the backend URL,
+    then issue and deliver a JWT. Each step is idempotent — re-running <code>horus user add</code> for an existing
+    user should be safe.
+  </p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  participant Op as Operator
+  participant HCP as HorusControlPlane
+  participant PS as PrincipalStore
+  participant SR as ServiceRegistry
+  participant AnvilBackend as AnvilBackend
+  participant AuthLib as AuthLib
+
+  Op->>HCP: horus user add --tenant acme --user alice
+  HCP->>HCP: validate slug is DNS-safe (alphanum + hyphens only)
+
+  HCP->>PS: addPrincipal(tenant=acme, user=alice, role=user)
+  PS-->>HCP: principals.yaml updated
+
+  HCP->>AnvilBackend: provisionUser(tenant=acme, user=alice)
+  Note over AnvilBackend: Create Typesense collection acme_alice<br/>Create Neo4j database acme_alice<br/>Apply base schema (default types)
+  AnvilBackend-->>HCP: backend URL returned (e.g. http://anvil-alice:3001)
+
+  HCP->>SR: registerBackend(tenant=acme, user=alice, url=http://anvil-alice:3001)
+  SR-->>HCP: row inserted
+
+  HCP->>AuthLib: issueJWT(sub=alice, tenant=acme, ttl=long)
+  AuthLib-->>HCP: signed JWT token
+
+  HCP-->>Op: User provisioned. JWT (deliver out-of-band to alice).
+    </div>
+  </div>
+
+  <div class="walkthrough">
+    <ol>
+      <li><strong>Step 1 — Operator command.</strong> The operator runs <code>horus user add --tenant acme --user alice</code>. The username <code>alice</code> will appear as part of routing keys and resource identifiers.</li>
+      <li><strong>Step 2 — Slug validation.</strong> The Control Plane validates that the username is DNS-safe: lowercase alphanumeric characters and hyphens only, no underscores or dots. This is enforced because the slug is used to construct Typesense collection names, Neo4j database names, and possibly subdomain routing in future.</li>
+      <li><strong>Step 3 — PrincipalStore write.</strong> A new entry is appended to <code>principals.yaml</code> with <code>tenant: acme</code>, <code>user: alice</code>, and <code>role: user</code>. The file-watcher in PrincipalStore picks up the change without a restart. This record gates shared-resource access (Vault); it is NOT used for Anvil routing.</li>
+      <li><strong>Step 4 — Provision Anvil backend.</strong> The Control Plane calls the Anvil provisioning API, which creates a dedicated Typesense collection named <code>acme_alice</code> and a Neo4j database named <code>acme_alice</code>. The base schema (built-in default types from <code>packages/anvil/defaults/</code>) is applied. Provisioning returns the physical URL of this backend.</li>
+      <li><strong>Step 5 — ServiceRegistry registration.</strong> The returned backend URL is written to the ServiceRegistry as a new row: <code>(tenant=acme, user=alice) → http://anvil-alice:3001</code>. This is the only thing AnvilRouter needs to route requests for Alice.</li>
+      <li><strong>Step 6 — JWT issuance.</strong> AuthLib signs a JWT with claims <code>sub=alice</code>, <code>tenant=acme</code>, and a long TTL (e.g. 1 year for personal deployments; shorter for enterprise). The private key used is the one generated during bootstrap.</li>
+      <li><strong>Step 7 — Out-of-band delivery.</strong> The operator receives the JWT and delivers it to Alice through a secure channel (email, password manager share, etc.). Horus has no in-band delivery mechanism in Phase 1.</li>
+    </ol>
+  </div>
+
+  <h3>Data persisted during onboarding</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>What</th>
+        <th>Where</th>
+        <th>Format</th>
+        <th>Mutable?</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Principal record</td>
+        <td><code>principals.yaml</code> on disk</td>
+        <td>YAML entry: tenant, user, role</td>
+        <td>Yes — operator edits file; file-watcher reloads</td>
+      </tr>
+      <tr>
+        <td>ServiceRegistry row</td>
+        <td>SQLite DB (<code>service_registry</code> table)</td>
+        <td>Row: tenant, user, url, created_at</td>
+        <td>Yes — operator can update via CLI or direct SQL</td>
+      </tr>
+      <tr>
+        <td>Typesense collection</td>
+        <td>Typesense server (in-memory + RocksDB)</td>
+        <td>Collection named <code>acme_alice</code> with schema</td>
+        <td>Schema is versioned; data accumulates at runtime</td>
+      </tr>
+      <tr>
+        <td>Neo4j database</td>
+        <td>Neo4j server</td>
+        <td>Database named <code>acme_alice</code>, empty graph</td>
+        <td>Data accumulates at runtime; structure is immutable at provision time</td>
+      </tr>
+      <tr>
+        <td>JWT</td>
+        <td>Operator clipboard / delivery channel</td>
+        <td>Signed JWT string</td>
+        <td>No — JWTs are issued and cannot be revoked in Phase 1 (see Open Questions)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <hr />
+
+  <!-- ================================================================ -->
+  <!-- SECTION 3: ANVIL ACCESS                                           -->
+  <!-- ================================================================ -->
+  <h2>Section 3 — User Accessing Their Anvil Data (Private)</h2>
+  <p>
+    Every user's Anvil backend is <strong>private</strong> — no other user can access it, and there are no shared Anvil resources in Phase 1.
+    This means the PrincipalStore is <strong>not involved</strong> in this flow: once the JWT is verified and the routing key is extracted,
+    the only question is "what is Alice's backend URL?" — a pure ServiceRegistry lookup.
+    If the ServiceRegistry has no entry for the user (cold-start or missed onboarding step), the router returns 404 rather than silently
+    proxying to a wrong backend.
+  </p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant AR as AnvilRouter
+  participant AL as AuthLib
+  participant SR as ServiceRegistry
+  participant AB as AnvilBackend
+
+  C->>AR: POST /mcp/tools/invoke Authorization: Bearer &lt;jwt&gt;
+  AR->>AL: verifyJWT(token)
+  alt JWT invalid or expired
+    AL-->>AR: error
+    AR-->>C: 401 Unauthorized
+  else JWT valid
+    AL-->>AR: claims (sub=alice, tenant=acme)
+    AR->>SR: lookup(tenant=acme, user=alice)
+    alt No entry found
+      SR-->>AR: null
+      AR-->>C: 404 No backend registered for this principal
+    else Entry found
+      SR-->>AR: http://anvil-alice:3001
+      AR->>AB: proxy POST /mcp/tools/invoke Authorization: Bearer &lt;jwt&gt;
+      Note over AB: AnvilBackend trusts forwarded JWT.<br/>No second verification needed<br/>(router is the trust boundary).
+      AB-->>AR: MCP response payload
+      AR-->>C: response (transparent proxy)
+    end
+  end
+    </div>
+  </div>
+
+  <div class="walkthrough">
+    <ol>
+      <li><strong>Step 1 — Client sends request.</strong> The Client (agent, CLI, or browser) sends an MCP call to the AnvilRouter's address, including the JWT in the <code>Authorization: Bearer</code> header.</li>
+      <li><strong>Step 2 — JWT verification.</strong> AnvilRouter calls <code>AuthLib.verifyJWT()</code>. AuthLib checks the signature against the tenant's public key and confirms the token has not expired. This is a pure in-process call — no network round-trip to the Control Plane.</li>
+      <li><strong>Step 3 — Invalid JWT path.</strong> If verification fails (bad signature, expired, wrong issuer), the router immediately returns <code>401 Unauthorized</code> and does not consult the ServiceRegistry at all.</li>
+      <li><strong>Step 4 — Extract routing key.</strong> From the verified claims, AnvilRouter extracts <code>(tenant=acme, user=alice)</code>. This pair is the ServiceRegistry lookup key.</li>
+      <li><strong>Step 5 — ServiceRegistry lookup.</strong> The router queries the SQLite table for a row matching <code>(acme, alice)</code>. If no row exists — because the user was not onboarded or onboarding failed — the router returns <code>404</code> (not a 401; authentication succeeded but provisioning did not).</li>
+      <li><strong>Step 6 — Transparent proxy.</strong> The router forwards the original request verbatim to the discovered backend URL, preserving the <code>Authorization</code> header. The AnvilBackend does not re-verify the JWT; it trusts that the router is the ingress trust boundary. This keeps backend code simple.</li>
+      <li><strong>Step 7 — Response passthrough.</strong> The AnvilBackend returns its MCP response. The router passes it back to the client with no modification.</li>
+    </ol>
+  </div>
+
+  <div class="callout info">
+    Cold-start note: if AnvilRouter starts before onboarding completes (race condition), lookups return 404. The client should retry with exponential backoff. The router must never fall back to a default backend.
+  </div>
+
+  <hr />
+
+  <!-- ================================================================ -->
+  <!-- SECTION 4: VAULT ACCESS                                           -->
+  <!-- ================================================================ -->
+  <h2>Section 4 — User Accessing Vault Data (Shared)</h2>
+  <p>
+    Vault namespaces like <code>acme/engineering</code> are shared across tenant members — this is where the PrincipalStore
+    matters. After JWT verification, VaultRouter consults PrincipalStore to retrieve the list of vault namespaces the
+    caller may access, then checks whether the requested namespace is in that list before resolving the physical backend URL.
+  </p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant VR as VaultRouter
+  participant AL as AuthLib
+  participant PS as PrincipalStore
+  participant VB as VaultBackend
+
+  C->>VR: GET /vault/acme/engineering/knowledge/search Authorization: Bearer &lt;jwt&gt;
+  VR->>AL: verifyJWT(token)
+  alt JWT invalid
+    AL-->>VR: error
+    VR-->>C: 401 Unauthorized
+  else JWT valid
+    AL-->>VR: claims (sub=alice, tenant=acme)
+    VR->>PS: resolvePrincipal(tenant=acme, user=alice)
+    PS-->>VR: allowedVaults list (e.g. acme/engineering, acme/docs)
+    alt Requested vault not in allowedVaults
+      VR-->>C: 403 Forbidden (vault not accessible to this principal)
+    else Vault is accessible
+      VR->>VR: locate backend URL for acme/engineering (from topology.yaml)
+      VR->>VB: proxy GET /knowledge/search Authorization: Bearer &lt;jwt&gt;
+      VB-->>VR: search results
+      VR-->>C: merged response
+    end
+  end
+    </div>
+  </div>
+
+  <div class="walkthrough">
+    <ol>
+      <li><strong>Step 1 — Client request.</strong> The client calls the VaultRouter with a path that encodes the vault namespace (<code>acme/engineering</code>) and the operation (<code>/knowledge/search</code>).</li>
+      <li><strong>Step 2 — JWT verification.</strong> Identical to the Anvil flow: AuthLib verifies the token in-process; invalid tokens short-circuit with 401.</li>
+      <li><strong>Step 3 — PrincipalStore resolve.</strong> VaultRouter calls <code>PrincipalStore.resolvePrincipal(tenant, user)</code>. The store checks <code>principals.yaml</code> to confirm the principal exists, then reads <code>resources.yaml</code> to build the allowed-vault list for that principal. This is the key step absent from the Anvil flow.</li>
+      <li><strong>Step 4 — Authorization check.</strong> If the requested vault namespace is not in the allowed list, the router returns <code>403 Forbidden</code>. Authentication succeeded but authorization failed.</li>
+      <li><strong>Step 5 — Backend URL resolution.</strong> VaultRouter looks up the physical URL for <code>acme/engineering</code> from <code>topology.yaml</code> (the same operator-declared topology loaded at bootstrap). The PrincipalStore does not know about URLs — it only knows about which namespaces a principal may access.</li>
+      <li><strong>Step 6 — Proxy and return.</strong> The request is forwarded to the VaultBackend; the response is passed back to the client.</li>
+    </ol>
+  </div>
+
+  <h3>Wildcard fan-out: searching across all accessible vaults (<code>**</code>)</h3>
+  <p>
+    When a client requests the special <code>**</code> vault path, VaultRouter fans the query out to all vaults in the
+    caller's allowed list, collects results, and merges them before returning. This is how cross-vault search works.
+  </p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant VR as VaultRouter
+  participant AL as AuthLib
+  participant PS as PrincipalStore
+  participant VB1 as VaultBackend
+  participant VB2 as VaultBackend
+
+  C->>VR: GET /vault/**/knowledge/search?q=anvil Authorization: Bearer &lt;jwt&gt;
+  VR->>AL: verifyJWT(token)
+  AL-->>VR: claims (sub=alice, tenant=acme)
+  VR->>PS: resolvePrincipal(tenant=acme, user=alice)
+  PS-->>VR: allowedVaults (acme/engineering, acme/docs)
+
+  par Fan-out to each allowed vault
+    VR->>VB1: GET /knowledge/search?q=anvil (acme/engineering)
+    VB1-->>VR: results (scored)
+  and
+    VR->>VB2: GET /knowledge/search?q=anvil (acme/docs)
+    VB2-->>VR: results (scored)
+  end
+
+  VR->>VR: merge + re-rank results by score
+  VR-->>C: merged results with vault source labels
+    </div>
+  </div>
+
+  <div class="walkthrough">
+    <ol>
+      <li><strong>Step 1-3 — Auth and PrincipalStore.</strong> Identical to the single-vault flow: verify JWT, resolve principal to allowed-vault list.</li>
+      <li><strong>Step 4 — Fan-out.</strong> VaultRouter issues concurrent requests to every backend in the allowed list. Each request carries the original query string and the forwarded Authorization header.</li>
+      <li><strong>Step 5 — Collect results.</strong> VaultRouter waits for all backends to respond (or times out individually). Each backend returns scored results in its own namespace.</li>
+      <li><strong>Step 6 — Merge and re-rank.</strong> Results from all vaults are merged into a single list and re-ranked by relevance score. Each result is labeled with its source vault namespace so the client can show provenance.</li>
+      <li><strong>Step 7 — Return.</strong> The merged, labeled result set is returned to the client as a single response.</li>
+    </ol>
+  </div>
+
+  <hr />
+
+  <!-- ================================================================ -->
+  <!-- SECTION 5: FORGE ACCESS                                           -->
+  <!-- ================================================================ -->
+  <h2>Section 5 — User Creating Workspace Artifacts in Forge through Horus</h2>
+  <p>
+    Forge has two distinct layers that are easily confused: the <strong>local workspace</strong> (a directory at
+    <code>~/Horus/workspaces/&lt;name&gt;/</code> on the user's machine, holding config and installed artifacts)
+    and the <strong>remote Forge Registry</strong> (an S3-backed artifact store running as a hosted service).
+    The CLI mediates between them. Workspaces are an execution-plane concept; the registry is a service-plane concept.
+  </p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant FR as ForgeRegistry
+  participant S3 as S3
+
+  Note over C: forge_workspace_create runs locally<br/>Creates ~/Horus/workspaces/my-ws/ on disk<br/>No network call needed.
+
+  C->>C: create workspace dir on local FS
+  C->>C: write workspace config (mcp.json, skills list)
+
+  Note over C,FR: Installing an artifact from the registry
+  C->>FR: GET /artifacts/resolve?name=horus-anvil&version=latest
+  FR->>FR: AuthStrategy.authorize(request)
+  Note over FR: Phase 1: anonymous read allowed.<br/>Admin key required for write/publish.
+  FR-->>C: artifact metadata + download URL
+
+  C->>FR: GET /artifacts/download/horus-anvil@0.4.0
+  FR->>S3: getObject(key=artifacts/horus-anvil/0.4.0.tar.gz)
+  S3-->>FR: artifact bytes
+  FR-->>C: artifact stream
+
+  C->>C: install artifact into workspace dir
+  C-->>C: workspace ready; artifact usable
+    </div>
+  </div>
+
+  <div class="walkthrough">
+    <ol>
+      <li><strong>Step 1 — Workspace creation (local only).</strong> <code>forge_workspace_create</code> creates a directory on the user's local filesystem at <code>~/Horus/workspaces/&lt;name&gt;/</code>. It writes config files (<code>mcp.json</code>, skills list, permissions). This is a pure filesystem operation — no network call is made to any Horus service. Workspaces do NOT clone repos.</li>
+      <li><strong>Step 2 — Artifact resolution.</strong> When the user adds an artifact (skill, plugin, tool), the CLI calls the ForgeRegistry's resolve endpoint to find the latest matching version and obtain a download URL.</li>
+      <li><strong>Step 3 — AuthStrategy check.</strong> ForgeRegistry evaluates the request through its AuthStrategy. In Phase 1, reads are anonymous (no JWT required). This is a known gap — see the post-alpha note below.</li>
+      <li><strong>Step 4 — S3 retrieval.</strong> ForgeRegistry fetches the artifact bytes from S3 using the internal storage key. Clients never call S3 directly — ForgeRegistry owns all S3 access.</li>
+      <li><strong>Step 5 — Install.</strong> The CLI writes the downloaded artifact into the workspace directory. The workspace is now ready to use.</li>
+    </ol>
+  </div>
+
+  <h3>Publishing a new artifact</h3>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant FR as ForgeRegistry
+  participant S3 as S3
+
+  C->>FR: POST /artifacts/publish (artifact tarball + metadata) Authorization: Admin-Key &lt;key&gt;
+  FR->>FR: AuthStrategy.authorize(request)
+  alt Not authorized (missing or wrong admin key)
+    FR-->>C: 403 Forbidden
+  else Authorized
+    FR->>S3: putObject(key=artifacts/name/version.tar.gz, body=tarball)
+    S3-->>FR: etag confirmed
+    FR->>FR: update registry index (name, version, sha256, manifest)
+    FR-->>C: 201 Created with artifact URL
+  end
+    </div>
+  </div>
+
+  <div class="walkthrough">
+    <ol>
+      <li><strong>Step 1 — Publish request.</strong> The publisher (operator or CI) sends the artifact tarball and metadata to ForgeRegistry's publish endpoint, including an admin API key in the Authorization header.</li>
+      <li><strong>Step 2 — Authorization.</strong> ForgeRegistry's AuthStrategy checks the admin key. If absent or invalid, the request is rejected with 403. Anonymous callers cannot publish.</li>
+      <li><strong>Step 3 — S3 write.</strong> The tarball is written to S3 under a key structured as <code>artifacts/&lt;name&gt;/&lt;version&gt;.tar.gz</code>. Note: keys are NOT scoped by tenant — all tenants share the same key namespace in Phase 1.</li>
+      <li><strong>Step 4 — Index update.</strong> ForgeRegistry updates its in-memory and/or SQLite index with the new artifact's name, version, SHA-256 checksum, and manifest. Future resolve calls will find this version.</li>
+      <li><strong>Step 5 — Confirmation.</strong> A 201 response with the artifact URL is returned to the publisher.</li>
+    </ol>
+  </div>
+
+  <div class="callout">
+    Post-alpha note — Forge Registry tenant gap: S3 storage keys are not namespaced by tenant. All tenants share the artifact namespace. A tenant with an admin key can overwrite another tenant's artifact at the same name+version. True multi-tenancy in Forge Registry requires either key-prefix scoping per tenant or a separate registry instance per tenant. This is a known deferred item.
+  </div>
+
+  <hr />
+
+  <!-- ================================================================ -->
+  <!-- SECTION 6: SUMMARY TABLE                                          -->
+  <!-- ================================================================ -->
+  <h2>Section 6 — Summary Table</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Flow</th>
+        <th>Who initiates?</th>
+        <th>Auth touched?</th>
+        <th>PrincipalStore touched?</th>
+        <th>ServiceRegistry touched?</th>
+        <th>Persists what?</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Bootstrap</strong></td>
+        <td>Operator (CLI)</td>
+        <td>Yes — keypair generated and stored</td>
+        <td>Yes — principals.yaml + resources.yaml initialized</td>
+        <td>Yes — SQLite DB schema created (empty)</td>
+        <td>Keypair, principals.yaml, resources.yaml, topology config, empty ServiceRegistry</td>
+      </tr>
+      <tr>
+        <td><strong>Onboard user</strong></td>
+        <td>Operator (CLI)</td>
+        <td>Yes — JWT signed and issued</td>
+        <td>Yes — new principal entry appended</td>
+        <td>Yes — new backend row inserted</td>
+        <td>Principal record, ServiceRegistry row, Typesense collection, Neo4j database, JWT token</td>
+      </tr>
+      <tr>
+        <td><strong>Anvil access</strong></td>
+        <td>Client (user agent)</td>
+        <td>Yes — JWT verified by AuthLib</td>
+        <td>No — Anvil is private, no shared-resource check needed</td>
+        <td>Yes — lookup backend URL by (tenant, user)</td>
+        <td>Nothing new persisted; request proxied transparently</td>
+      </tr>
+      <tr>
+        <td><strong>Vault access</strong></td>
+        <td>Client (user agent)</td>
+        <td>Yes — JWT verified by AuthLib</td>
+        <td>Yes — resolve principal to allowed-vault list</td>
+        <td>No — vault URLs come from topology.yaml, not ServiceRegistry</td>
+        <td>Nothing new persisted; response is read-only query result</td>
+      </tr>
+      <tr>
+        <td><strong>Forge access</strong></td>
+        <td>Client via Horus CLI</td>
+        <td>Partial — reads are anonymous; publish requires admin key (not JWT)</td>
+        <td>No</td>
+        <td>No</td>
+        <td>Artifact bytes written to local workspace dir; registry index updated on publish</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <hr />
+
+  <!-- ================================================================ -->
+  <!-- SECTION 7: OPEN QUESTIONS                                         -->
+  <!-- ================================================================ -->
+  <h2>Section 7 — Open Questions</h2>
+  <ol>
+    <li>
+      <strong>Operator keypair location and rotation.</strong>
+      Where exactly should the private key live — on the operator's local filesystem, in a secrets manager, or in a Docker secret? More importantly: what is the rotation procedure? Rotating the private key means all existing JWTs (which are long-lived) become invalid simultaneously, forcing re-issuance for every user. A key-versioning scheme (keep N previous keys valid) is needed before rotation is operationally safe.
+    </li>
+    <li>
+      <strong>Offboarding flow.</strong>
+      There is no <code>horus user remove</code> procedure defined. Offboarding needs to: (a) remove the principal from <code>principals.yaml</code>, (b) delete the ServiceRegistry row, (c) optionally archive or destroy the Typesense collection and Neo4j database, and (d) invalidate the user's JWT. Step (d) is impossible without a token revocation list, since JWTs are self-contained and cannot be un-signed.
+    </li>
+    <li>
+      <strong>Forge Registry tenant scoping.</strong>
+      As noted in Section 5, all tenants share a flat S3 key namespace. The decision to defer tenant scoping in Forge storage means a multi-tenant Forge deployment has no isolation guarantees. The open question is: does Horus ever become a shared-registry SaaS, or does each enterprise deployment get its own ForgeRegistry instance (which would naturally provide isolation through separate S3 buckets)?
+    </li>
+    <li>
+      <strong>Is <code>principals.yaml</code> git-tracked or runtime-only?</strong>
+      If <code>principals.yaml</code> is committed to a git repository, adding a user creates a git commit — which is auditable but requires git credentials at runtime and creates a branch-management concern. If it is runtime-only (on-disk, not git-tracked), it can be edited freely but loses the audit trail and is not automatically backed up. The choice also affects how PrincipalStore's file-watcher interacts with concurrent writes.
+    </li>
+    <li>
+      <strong>Cold-start ordering between onboarding steps.</strong>
+      Onboarding has a dependency chain: PrincipalStore write → Anvil provision → ServiceRegistry write → JWT issue. If the Anvil provisioning call fails (e.g. Typesense is temporarily unavailable), the principal is already in <code>principals.yaml</code> but the ServiceRegistry has no row — the user exists as a principal but cannot access Anvil. A saga/compensating-transaction pattern or a two-phase commit approach is needed to ensure all steps succeed or all roll back atomically.
+    </li>
+  </ol>
+
+  <hr />
+  <p style="font-size:0.8rem; color:#484f58; text-align:center; margin-top: 40px;">
+    Generated 2026-05-22 — Horus identity flow walkthrough — Phase 1 + Track A proposed design
+  </p>
+
+</div>
+</body>
+</html>
