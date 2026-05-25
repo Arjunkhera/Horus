@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Horus — Sample Kubernetes Alpha Topology</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #30363d;
+      --accent:   #58a6ff;
+      --accent2:  #3fb950;
+      --warn:     #d29922;
+      --text:     #c9d1d9;
+      --muted:    #8b949e;
+      --head-bg:  #21262d;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+      padding: 40px 20px 80px;
+    }
+
+    .page {
+      max-width: 1150px;
+      margin: 0 auto;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 48px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+
+    header .subtitle {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+
+    .badge {
+      display: inline-block;
+      background: var(--warn);
+      color: #000;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 20px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      vertical-align: middle;
+      margin-left: 10px;
+    }
+
+    section {
+      margin-bottom: 56px;
+    }
+
+    h2 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #fff;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      margin-bottom: 20px;
+      counter-increment: section;
+    }
+
+    h2::before {
+      content: counter(section) ". ";
+      color: var(--accent);
+    }
+
+    body { counter-reset: section; }
+
+    p { margin-bottom: 12px; color: var(--text); }
+
+    .diagram-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 28px 20px;
+      overflow-x: auto;
+    }
+
+    .diagram-caption {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    /* Tables */
+    .tbl-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    thead tr {
+      background: var(--head-bg);
+    }
+
+    th, td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tbody tr:last-child td { border-bottom: none; }
+
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+
+    code {
+      background: var(--head-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.85em;
+      color: var(--accent);
+    }
+
+    /* Open design forks */
+    .fork-list {
+      list-style: none;
+      display: grid;
+      gap: 18px;
+    }
+
+    .fork-list li {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      padding: 16px 18px;
+    }
+
+    .fork-list li strong {
+      display: block;
+      color: #fff;
+      margin-bottom: 6px;
+      font-size: 0.97rem;
+    }
+
+    .fork-list li span.tag {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 20px;
+      margin-right: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .tag-current { background: var(--accent2); color: #000; }
+    .tag-alt     { background: var(--warn);    color: #000; }
+
+    .fork-text { color: var(--text); font-size: 0.9rem; line-height: 1.6; }
+
+    .note-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--muted);
+      border-radius: 6px;
+      padding: 16px 18px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>Horus Platform <span class="badge">Alpha</span></h1>
+    <div class="subtitle">Sample Kubernetes Deployment Topology &mdash; Namespace <code>horus</code> &mdash; Single cluster, single company</div>
+  </header>
+
+  <!-- ─── Section 1 ─── -->
+  <section>
+    <h2>Introduction</h2>
+    <p>
+      This is a sample alpha topology, deliberately simple: one cluster, one company, every component at minimum viable replica count.
+      The primary goal is to make the object inventory and traffic boundaries explicit so that later design forks can be evaluated against a concrete baseline.
+      Per-component choices — gateway co-location, pod-per-user vs multi-tenant backends, HA strategy — are all open; the rationale for each current choice and its leading alternative is catalogued in Section 5.
+    </p>
+  </section>
+
+  <!-- ─── Section 2 ─── -->
+  <section>
+    <h2>Cluster Topology</h2>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+flowchart TB
+    ExtClient["External Client"]
+    AWSS3["AWS S3 (external)"]
+
+    ExtClient -->|"HTTPS"| ING
+
+    subgraph CLUSTER["Kubernetes Cluster"]
+      ING["Ingress\n(LoadBalancer)"]
+
+      subgraph NS["namespace: horus"]
+
+        subgraph GW["horus-gateway pod (Deployment, 1 replica)"]
+          CP["control-plane"]
+          AR["anvil-router"]
+          VR["vault-router"]
+        end
+
+        subgraph ABG["anvil-backend (StatefulSet, N pods)"]
+          AB0["anvil-backend-0\n(user A)"]
+          AB1["anvil-backend-1\n(user B)"]
+          ABN["..."]
+        end
+
+        subgraph VBG["vault-backend (StatefulSet, N pods)"]
+          VB0["vault-backend-0\n(vault 0)"]
+          VB1["vault-backend-1\n(vault 1)"]
+          VBN["..."]
+        end
+
+        FR["forge-registry\n(Deployment, 1 replica)"]
+        TS["typesense\n(StatefulSet, 1 replica)"]
+        NEO["neo4j\n(StatefulSet, 1 replica)"]
+
+        CM["ConfigMap:\nhorus-topology"]
+        SJWT["Secret:\nhorus-jwt-keys"]
+        SS3["Secret:\nhorus-s3-creds"]
+        SDB["Secret:\nhorus-db-creds"]
+      end
+    end
+
+    ING -->|"route all"| GW
+    AR -->|"ClusterIP"| ABG
+    VR -->|"ClusterIP"| VBG
+    CP -->|"ClusterIP"| FR
+
+    ABG -->|"Typesense API"| TS
+    ABG -->|"Bolt"| NEO
+    VBG -->|"Typesense API"| TS
+    VBG -->|"Bolt"| NEO
+
+    FR -.->|"s3 API"| AWSS3
+
+    CM -.->|"env mount"| GW
+    SJWT -.->|"env mount"| GW
+    SS3 -.->|"env mount"| FR
+    SDB -.->|"env mount"| ABG
+    SDB -.->|"env mount"| VBG
+      </div>
+    </div>
+    <p class="diagram-caption">
+      Solid arrows = request traffic. Dashed arrows = config/secret injection at pod start. All internal services are ClusterIP only.
+    </p>
+  </section>
+
+  <!-- ─── Section 3 ─── -->
+  <section>
+    <h2>Config &amp; Secret Flow at Boot</h2>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+flowchart LR
+    CM["ConfigMap\nhorus-topology"]
+    SJWT["Secret\nhorus-jwt-keys"]
+    SS3["Secret\nhorus-s3-creds"]
+    SDB["Secret\nhorus-db-creds"]
+
+    GW["horus-gateway\n(control-plane + routers)"]
+    AB["anvil-backend pods"]
+    VB["vault-backend pods"]
+    FR["forge-registry"]
+
+    CM  --> GW
+    SJWT --> GW
+    SS3  --> FR
+    SDB  --> AB
+    SDB  --> VB
+      </div>
+    </div>
+    <br />
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Object</th>
+            <th>Holds</th>
+            <th>Consumed by</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ConfigMap: horus-topology</code></td>
+            <td>Internal service URLs (ClusterIP DNS), deployment profile flag</td>
+            <td><code>horus-gateway</code> (all three containers)</td>
+          </tr>
+          <tr>
+            <td><code>Secret: horus-jwt-keys</code></td>
+            <td>JWT signing keypair (private key for control-plane, public key for routers)</td>
+            <td><code>control-plane</code> (sign), <code>anvil-router</code> + <code>vault-router</code> (verify)</td>
+          </tr>
+          <tr>
+            <td><code>Secret: horus-s3-creds</code></td>
+            <td>AWS access key + secret for Forge artifact bucket</td>
+            <td><code>forge-registry</code></td>
+          </tr>
+          <tr>
+            <td><code>Secret: horus-db-creds</code></td>
+            <td>Typesense API key + Neo4j username/password</td>
+            <td><code>anvil-backend</code> pods, <code>vault-backend</code> pods</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─── Section 4 ─── -->
+  <section>
+    <h2>Object Inventory</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Object</th>
+            <th>Kind</th>
+            <th>Count (alpha)</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>horus-gateway</code></td>
+            <td>Deployment</td>
+            <td>1 pod (3 containers)</td>
+            <td>Single external entry point; hosts control-plane, anvil-router, vault-router</td>
+          </tr>
+          <tr>
+            <td><code>anvil-backend</code></td>
+            <td>StatefulSet</td>
+            <td>N pods (1 per user)</td>
+            <td>Per-user Anvil service; stable network identity for gateway registry mapping</td>
+          </tr>
+          <tr>
+            <td><code>vault-backend</code></td>
+            <td>StatefulSet</td>
+            <td>N pods (1 per vault)</td>
+            <td>Per-vault Vault REST service; stable network identity for routing</td>
+          </tr>
+          <tr>
+            <td><code>forge-registry</code></td>
+            <td>Deployment</td>
+            <td>1 pod</td>
+            <td>Forge artifact registry; stateless (all persistence on S3)</td>
+          </tr>
+          <tr>
+            <td><code>typesense</code></td>
+            <td>StatefulSet</td>
+            <td>1 pod</td>
+            <td>Shared full-text search engine; per-user logical isolation via collection naming</td>
+          </tr>
+          <tr>
+            <td><code>neo4j</code></td>
+            <td>StatefulSet</td>
+            <td>1 pod</td>
+            <td>Shared graph database; per-user logical isolation via database naming</td>
+          </tr>
+          <tr>
+            <td><code>horus-gateway</code></td>
+            <td>Service (ClusterIP)</td>
+            <td>1</td>
+            <td>Stable in-cluster address for the gateway pod; Ingress backend</td>
+          </tr>
+          <tr>
+            <td><code>anvil-backend</code></td>
+            <td>Service (Headless ClusterIP)</td>
+            <td>1</td>
+            <td>DNS-based pod discovery for StatefulSet; enables stable per-pod DNS</td>
+          </tr>
+          <tr>
+            <td><code>vault-backend</code></td>
+            <td>Service (Headless ClusterIP)</td>
+            <td>1</td>
+            <td>DNS-based pod discovery for StatefulSet; enables stable per-pod DNS</td>
+          </tr>
+          <tr>
+            <td><code>forge-registry</code></td>
+            <td>Service (ClusterIP)</td>
+            <td>1</td>
+            <td>Internal access to forge-registry from control-plane</td>
+          </tr>
+          <tr>
+            <td><code>typesense</code></td>
+            <td>Service (ClusterIP)</td>
+            <td>1</td>
+            <td>Internal access to Typesense from backends</td>
+          </tr>
+          <tr>
+            <td><code>neo4j</code></td>
+            <td>Service (ClusterIP)</td>
+            <td>1</td>
+            <td>Internal access to Neo4j (Bolt + HTTP) from backends</td>
+          </tr>
+          <tr>
+            <td><code>horus-ingress</code></td>
+            <td>Ingress</td>
+            <td>1</td>
+            <td>External LoadBalancer; sole public entry point; routes all traffic to horus-gateway</td>
+          </tr>
+          <tr>
+            <td><code>horus-topology</code></td>
+            <td>ConfigMap</td>
+            <td>1</td>
+            <td>Internal service URLs + deployment profile for gateway containers</td>
+          </tr>
+          <tr>
+            <td><code>horus-jwt-keys</code></td>
+            <td>Secret</td>
+            <td>1</td>
+            <td>JWT signing keypair for auth across gateway containers</td>
+          </tr>
+          <tr>
+            <td><code>horus-s3-creds</code></td>
+            <td>Secret</td>
+            <td>1</td>
+            <td>AWS S3 credentials for forge-registry</td>
+          </tr>
+          <tr>
+            <td><code>horus-db-creds</code></td>
+            <td>Secret</td>
+            <td>1</td>
+            <td>Typesense API key + Neo4j auth consumed by all backend pods</td>
+          </tr>
+          <tr>
+            <td><code>anvil-backend-pvc-N</code></td>
+            <td>PersistentVolumeClaim</td>
+            <td>N (one per anvil pod)</td>
+            <td>User note files on disk for each anvil-backend pod</td>
+          </tr>
+          <tr>
+            <td><code>vault-backend-pvc-N</code></td>
+            <td>PersistentVolumeClaim</td>
+            <td>N (one per vault pod)</td>
+            <td>Vault content (markdown files, git history) per vault pod</td>
+          </tr>
+          <tr>
+            <td><code>typesense-pvc</code></td>
+            <td>PersistentVolumeClaim</td>
+            <td>1</td>
+            <td>Typesense on-disk search index</td>
+          </tr>
+          <tr>
+            <td><code>neo4j-pvc</code></td>
+            <td>PersistentVolumeClaim</td>
+            <td>1</td>
+            <td>Neo4j graph data + transaction logs</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─── Section 5 ─── -->
+  <section>
+    <h2>Open Design Forks</h2>
+    <ul class="fork-list">
+      <li>
+        <strong>1. Pod-per-user vs multi-tenant Anvil backend</strong>
+        <p class="fork-text">
+          <span class="tag tag-current">Current</span> One <code>anvil-backend</code> pod per <code>(tenant, user)</code> pair.
+          The gateway registry maps <code>(tenant, user) → ClusterIP DNS name</code> deterministically, matching Track A's routing contract.
+          Each pod gets its own resource limits and PVC; a crashed pod affects only one user.
+        </p>
+        <p class="fork-text">
+          <span class="tag tag-alt">Alternative</span> A single multi-tenant <code>anvil-backend</code> Deployment, isolating users via Typesense collection naming
+          (<code>anvil_&lt;tenant&gt;_&lt;user&gt;</code>) and Neo4j database naming. This collapses N pods to 1–3, trivialises the gateway registry,
+          and dramatically reduces K8s object count — but increases blast radius, eliminates per-user resource limits, and requires application-level multi-tenancy to be bulletproof.
+        </p>
+      </li>
+      <li>
+        <strong>2. Routers co-located in gateway pod vs separate Deployments</strong>
+        <p class="fork-text">
+          <span class="tag tag-current">Current</span> <code>control-plane</code>, <code>anvil-router</code>, and <code>vault-router</code> share one pod.
+          They scale together as a single unit; inter-container communication is localhost with no network hop.
+        </p>
+        <p class="fork-text">
+          <span class="tag tag-alt">Alternative</span> Deploy each router as an independent Deployment.
+          This allows independent horizontal scaling (e.g., vault traffic spikes without scaling anvil-router)
+          and independent rollouts, at the cost of extra Services, inter-pod latency, and more YAML surface area.
+        </p>
+      </li>
+      <li>
+        <strong>3. Shared vs per-service Typesense and Neo4j</strong>
+        <p class="fork-text">
+          <span class="tag tag-current">Current</span> One <code>typesense</code> StatefulSet and one <code>neo4j</code> StatefulSet shared by all backends.
+          Logical isolation is enforced via naming conventions: Typesense collection <code>anvil_&lt;tenant&gt;_&lt;user&gt;</code>,
+          Neo4j database <code>anvil-&lt;tenant&gt;-&lt;user&gt;</code>.
+        </p>
+        <p class="fork-text">
+          <span class="tag tag-alt">Alternative</span> Separate Typesense or Neo4j instances per backend group (or even per tenant).
+          Stronger isolation and independent tuning, but multiplies infra cost and operational complexity.
+          The Horus vision document explicitly marks this as open.
+        </p>
+      </li>
+      <li>
+        <strong>4. StatefulSet vs Deployment+PVC for backends</strong>
+        <p class="fork-text">
+          <span class="tag tag-current">Current</span> StatefulSet for <code>anvil-backend</code> and <code>vault-backend</code>.
+          StatefulSets provide stable, predictable pod DNS names (<code>anvil-backend-0.anvil-backend.horus.svc.cluster.local</code>),
+          which is what the gateway's <code>(tenant, user) → URL</code> registry relies on.
+          PVCs are automatically bound per-ordinal by the StatefulSet VolumeClaimTemplate.
+        </p>
+        <p class="fork-text">
+          <span class="tag tag-alt">Alternative</span> Deployment + manually managed PVCs + a sidecar or init-container that binds the correct PVC at runtime.
+          This unlocks the Deployment's rescheduling flexibility, but requires custom pod-identity logic to recreate what StatefulSets provide for free.
+        </p>
+      </li>
+      <li>
+        <strong>5. No HA in alpha (known limitation)</strong>
+        <p class="fork-text">
+          <span class="tag tag-current">Current</span> <code>horus-gateway</code>, <code>typesense</code>, and <code>neo4j</code> are all single-replica.
+          Any pod restart causes a brief outage for all users.
+        </p>
+        <p class="fork-text">
+          <span class="tag tag-alt">Roadmap</span> gateway scales horizontally (stateless).
+          Typesense HA requires its Raft-based clustering mode (3-node minimum).
+          Neo4j HA requires Enterprise Edition causal clustering.
+          Both are deferred to post-alpha given their cost and complexity.
+        </p>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ─── Section 6 ─── -->
+  <section>
+    <h2>What This Does NOT Show</h2>
+    <div class="note-box">
+      The execution plane — user workspaces and Forge code sessions — runs on user machines (or user-provisioned compute), not in this cluster.
+      Each user's Claude Code instance connects to <code>horus-gateway</code> over the public Ingress; the gateway then fans out to the appropriate backend pod.
+      Forge sessions (git worktrees) are local to the user's machine and managed by the Forge MCP server running there.
+      Additionally, SaaS multi-cluster federation, cross-region replication, and any form of multi-cluster service mesh are explicitly post-alpha concerns and are not modelled here.
+    </div>
+  </section>
+
+  <footer>
+    Horus Platform &mdash; Sample Alpha Topology &mdash; Generated 2026-05-22
+  </footer>
+
+</div>
+</body>
+</html>
