@@ -12,6 +12,7 @@ import {
   CONFIG_KEYS,
   type ConfigKey,
 } from '../lib/config.js';
+import { installComposeFile } from '../lib/compose.js';
 
 // ── Config command ──────────────────────────────────────────────────────────
 
@@ -122,11 +123,14 @@ configCommand
       process.exit(1);
     }
 
-    // Save config and regenerate .env
+    // Save config, regenerate .env, and regenerate the compose file so the
+    // running stack and the on-disk docker-compose.yml never silently drift
+    // (bug 89d38c95 — config/compose desync).
     saveConfig(config);
     writeEnvFile(config);
+    installComposeFile(config, config.runtime === 'podman' ? 'podman' : 'docker');
 
-    console.log(chalk.green(`Set ${key} and regenerated .env file.`));
+    console.log(chalk.green(`Set ${key} and regenerated .env + docker-compose.yml.`));
 
     // Prompt to restart if services might be affected
     const needsRestart = [

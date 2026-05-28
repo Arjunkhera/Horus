@@ -152,6 +152,14 @@ describe('installComposeFile', () => {
     expect(doc.services['horus-ui'].image).toBe('ghcr.io/arjunkhera/horus/ui:latest');
   });
 
+  it('never bakes a literal GITHUB_TOKEN into the generated compose (sources from .env)', () => {
+    // makeConfig sets github_hosts.default.token = 'test-token'
+    const content = generateComposeFile(makeConfig());
+    expect(content).not.toContain('test-token');
+    // Anvil sources the token by reference from .env, not as a literal value
+    expect(content).toMatch(/GITHUB_TOKEN=\$\{GITHUB_TOKEN/);
+  });
+
   it('writes docker-compose.test.yml to the target directory', () => {
     const config = makeConfig();
     installComposeFile(config);
