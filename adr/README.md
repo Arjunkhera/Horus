@@ -16,6 +16,12 @@ Deployment (SaaS-grade)"). They are records, not justifications.
 | [0004](0004-layered-control-plane-operator-separate.md) | Layered control plane; Horus = client + control plane; Operator is a separate service | `8c6a5b5a`, `d59dc593`, `b506e4e4` | accepted |
 | [0005](0005-single-edge-aggregation-api-agent-first.md) | Single Edge/Aggregation API; agent-first north star | `a1a984f9` | accepted |
 | [0006](0006-global-tenant-user-scope-chain.md) | One canonical Global→Tenant→User scope chain; Principal is the resolver | `c417915a` | accepted |
+| [0007](0007-kubernetes-argocd-deployment.md) | Kubernetes + ArgoCD + Kustomize deployment; pinned server image tags | conv-state `03619fa6` (Phase 2, §D+G) | accepted |
+| [0008](0008-principal-normalization-two-key.md) | Principal normalization at the gateway; two-key JWT model; X-Horus-Principal | conv-state `03619fa6` (Phase 2, §E+H) | accepted |
+
+> ADRs 0007–0008 are sourced from the Horus Phase 2 design session (conversation-state
+> `03619fa6`) rather than the original `eee11da4` proposal journals. ADR-0004 carries a
+> 2026-05-28 amendment (federation point moved to the client) from the same session.
 
 ## Status lifecycle
 
