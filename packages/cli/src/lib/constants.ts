@@ -51,11 +51,10 @@ export const DEFAULT_REPOS = {
 export const DEFAULT_DATA_DIR = join(homedir(), 'Horus', 'data');
 
 // ── Service names (as they appear in docker-compose.yml) ────────────────────
+// Alpha client topology (§C): four local containers. Vault and Forge are
+// remote behind the control plane and are not part of the local service set.
 export const SERVICES = [
   'anvil',
-  'vault-router',  // replaces 'vault'
-  'vault-mcp',
-  'forge',
   'horus-ui',
   'typesense',
   'neo4j',
@@ -66,9 +65,6 @@ export type ServiceName = (typeof SERVICES)[number];
 // ── Health check endpoints ──────────────────────────────────────────────────
 export const HEALTH_ENDPOINTS: Record<ServiceName, { port: number; path: string }> = {
   'anvil': { port: 8100, path: '/health' },
-  'vault-router': { port: 8050, path: '/health' },
-  'vault-mcp': { port: 8300, path: '/health' },
-  'forge': { port: 8200, path: '/health' },
   'horus-ui': { port: 8400, path: '/health' },
   'typesense': { port: 8108, path: '/health' },
   'neo4j': { port: 7474, path: '/' },
