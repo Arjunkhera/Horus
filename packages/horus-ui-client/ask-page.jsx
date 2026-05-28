@@ -528,6 +528,25 @@
       ? `var(--side-w) 1fr 4px ${previewWidth}px`
       : 'var(--side-w) 1fr';
 
+    // Agent chat is gated: disabled when the server has no Anthropic key.
+    if (window.HORUS_AI_ENABLED === false) {
+      return (
+        <div className="ask-layout" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="chat-empty" style={{ textAlign: 'center', maxWidth: 460 }}>
+            <div className="chat-empty-icon">✦</div>
+            <div className="chat-empty-title">Agent chat is not configured</div>
+            <div className="chat-empty-sub">
+              Set an Anthropic API key to enable the ✦ Ask agent — run
+              {' '}<code>horus config set ai.anthropic-key &lt;key&gt;</code>{' '}then{' '}<code>horus up</code>.
+            </div>
+            <button className="ask-bar-btn" style={{ marginTop: 16 }} onClick={() => onNavigate({ kind: 'home' })}>
+              Back to notes
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className={`ask-layout${previewState ? ' preview-open' : ''}${sideCollapsed ? ' side-collapsed' : ''}`} style={{ height: '100%', display: 'grid', gridTemplateColumns: sideCollapsed ? (previewState ? `1fr 4px ${previewWidth}px` : '1fr') : gridCols }}>
         {/* Sidebar with tab switcher */}

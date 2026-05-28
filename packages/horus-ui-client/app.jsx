@@ -60,6 +60,11 @@ function App() {
         setBootstrapError(true);
       }
     });
+    // Agent chat gate: disabled when the server has no Anthropic key.
+    fetch('/api/ai/enabled')
+      .then(r => r.json())
+      .then(j => { window.HORUS_AI_ENABLED = j.enabled !== false; setDataVersion(v => v + 1); })
+      .catch(() => { window.HORUS_AI_ENABLED = true; });
     return () => data.disconnectSSE();
   }, []);
 

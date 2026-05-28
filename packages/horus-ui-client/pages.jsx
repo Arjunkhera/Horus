@@ -315,7 +315,8 @@ function HomePage({ onNavigate }) {
         <div className="sub">{today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} · {data.notes.length} notes</div>
       </div>
 
-      {/* NLP Ask Bar */}
+      {/* NLP Ask Bar — hidden when the agent chat is disabled (no Anthropic key) */}
+      {window.HORUS_AI_ENABLED !== false && (
       <div className="ask-bar-wrap">
         <div className="ask-bar">
           <span className="ask-bar-icon">✦</span>
@@ -350,6 +351,7 @@ function HomePage({ onNavigate }) {
           ))}
         </div>
       </div>
+      )}
 
       {/* Collapsible Browse by type */}
       <div className="home-section">

@@ -2,13 +2,24 @@ import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import { sseHeaders, sseEvent } from './sse.js';
-import { getOrCreateAgent, buildFirstMessage, buildResumeMessage, describeToolCall } from './agent-service.js';
+import {
+  chatEnabled,
+  getAnthropicClient,
+  agentModel,
+  describeToolCall,
+  runAgentTurn,
+  SYSTEM,
+} from './agent-service.js';
+import { listAnvilTools, callAnvilTool } from './mcp-config.js';
+import { getCachedHistory, setCachedHistory } from './agent-cache.js';
 import { parseCitations } from './citation-parser.js';
 
-if (!process.env.CURSOR_API_KEY) {
-  console.error('FATAL: CURSOR_API_KEY environment variable is required');
-  process.exit(1);
+// The agent chat surface is gated, not fatal: without an Anthropic key the
+// server still serves the UI and proxies Anvil — only /api/ai/ask is disabled.
+if (!chatEnabled()) {
+  console.warn('HORUS_ANTHROPIC_API_KEY is not set — agent chat is disabled (UI and Anvil proxy still run).');
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -91,82 +102,79 @@ app.use('/api', (req, res, next) => {
   })(req, res, next);
 });
 
-// POST /api/ai/ask — NLP agent search with SSE streaming
+// GET /api/ai/enabled — UI gate. The client disables the Ask surface when false.
+app.get('/api/ai/enabled', (_req, res) => {
+  res.json({ enabled: chatEnabled() });
+});
+
+// POST /api/ai/ask — NLP agent search with SSE streaming (Anthropic + Anvil MCP)
 app.post('/api/ai/ask', async (req, res) => {
-  const { question, sessionId, agentId, sessionMessages = [] } = req.body;
+  const { question, agentId: reqAgentId } = req.body;
 
   if (!question) {
     return res.status(400).json({ error: 'question is required' });
   }
+  if (!chatEnabled()) {
+    return res.status(503).json({ error: 'Agent chat is disabled. Set HORUS_ANTHROPIC_API_KEY to enable it.' });
+  }
 
   res.writeHead(200, sseHeaders());
 
+  const agentId = reqAgentId || randomUUID();
   const toolCallLog = [];
   const TIMEOUT_MS = 90000;
   let timedOut = false;
-  let run;
   let accumulatedText = '';
 
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    res.write(sseEvent({ type: 'error', text: 'Search took too long. Please try again.' }));
+    res.end();
+  }, TIMEOUT_MS);
+
   try {
-    const { agent, isNew } = await getOrCreateAgent(agentId, sessionMessages);
+    const client = await getAnthropicClient();
+    const tools = await listAnvilTools();
 
-    // Build message: first turn gets system prompt, follow-ups just get the question
-    let message;
-    if (isNew && !agentId) {
-      message = buildFirstMessage(question);
-    } else if (isNew && agentId) {
-      // Resume failed — new agent with history context
-      message = buildResumeMessage(question, sessionMessages);
-    } else {
-      message = question;
-    }
+    // Resume prior history if the client supplied a known agentId.
+    const messages = getCachedHistory(agentId) || [];
+    messages.push({ role: 'user', content: question });
 
-    run = await agent.send(message);
+    res.write(sseEvent({ type: 'status', text: 'thinking…' }));
 
-    const timeout = setTimeout(async () => {
-      timedOut = true;
-      try { await run.cancel(); } catch {}
-      res.write(sseEvent({ type: 'error', text: 'Search took too long. Please try again.' }));
-      res.end();
-    }, TIMEOUT_MS);
-
-    for await (const event of run.stream()) {
+    for await (const event of runAgentTurn({
+      client,
+      model: agentModel(),
+      system: SYSTEM,
+      messages,
+      tools,
+      callTool: callAnvilTool,
+    })) {
       if (timedOut) break;
-      if (event.type === 'status') {
-        res.write(sseEvent({ type: 'status', text: event.status }));
+      if (event.type === 'token') {
+        accumulatedText += event.text;
+        res.write(sseEvent({ type: 'token', text: event.text }));
       } else if (event.type === 'tool_call') {
-        toolCallLog.push(event);
-        res.write(sseEvent({ type: 'status', text: describeToolCall(event) }));
-      } else if (event.type === 'assistant') {
-        // SDK emits text at event.message.content[0].text, not event.content
-        const text = event.message?.content?.[0]?.text ?? '';
-        if (text) {
-          accumulatedText += text;
-          res.write(sseEvent({ type: 'token', text }));
-        }
+        res.write(sseEvent({ type: 'status', text: describeToolCall(event.name) }));
+      } else if (event.type === 'tool_result') {
+        // Logged for the citation fallback (extractNoteMetadata reads .result).
+        toolCallLog.push({ name: event.name, result: event.text });
       }
-      // suppress 'thinking' events
     }
 
     clearTimeout(timeout);
 
     if (!timedOut) {
-      // Use accumulated stream text for citations; fall back to run.wait() result
-      let finalText = accumulatedText;
-      if (!finalText) {
-        try {
-          const result = await run.wait();
-          finalText = result.result || '';
-        } catch {}
-      }
-      const parsed = parseCitations(finalText, toolCallLog);
+      setCachedHistory(agentId, messages);
+      const parsed = parseCitations(accumulatedText, toolCallLog);
       res.write(sseEvent({ type: 'references', items: parsed.references }));
       res.write(sseEvent({ type: 'followups', items: parsed.followups }));
-      res.write(sseEvent({ type: 'done', agentId: agent.agentId, answerText: parsed.answerText }));
+      res.write(sseEvent({ type: 'done', agentId, answerText: parsed.answerText }));
     }
   } catch (err) {
+    clearTimeout(timeout);
     const msg = err?.message || 'Agent temporarily unavailable.';
-    res.write(sseEvent({ type: 'error', text: msg }));
+    if (!timedOut) res.write(sseEvent({ type: 'error', text: msg }));
   }
 
   if (!timedOut) res.end();
