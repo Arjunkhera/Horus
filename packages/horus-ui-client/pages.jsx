@@ -42,6 +42,69 @@ function SyncFooter({ lastSyncedAt, onRefresh }) {
   );
 }
 
+// ── System status ────────────────────────────────────────────────
+// Per-service health from GET /api/system/status. horus-ui boots independently,
+// so this surfaces backing-service state and gates remote tabs in local-only.
+function SystemStatus() {
+  const [status, setStatus] = uSp(null);
+  const [loading, setLoading] = uSp(true);
+
+  uEp(() => {
+    let alive = true;
+    function load() {
+      fetch('/api/system/status')
+        .then(r => r.json())
+        .then(s => { if (alive) { setStatus(s); setLoading(false); } })
+        .catch(() => { if (alive) setLoading(false); });
+    }
+    load();
+    const t = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  function dotClass(st) {
+    if (st === 'connected') return 'ok';
+    if (st === 'degraded' || st === 'unknown') return 'warn';
+    if (st === 'not_configured') return 'muted';
+    return 'err';
+  }
+  function Row({ st, label, note }) {
+    return (
+      <div className="side-status-row">
+        <span className={`status-dot ${dotClass(st)}`} />
+        <span className="ss-label">{label}</span>
+        {note && <span className="ss-note">{note}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="side-status">
+      <div className="side-status-head">
+        System{status ? <span className="ss-mode"> · {status.mode}</span> : ''}
+      </div>
+      {loading && !status && <div className="side-status-row muted">checking services…</div>}
+      {status && (
+        <>
+          <Row st={status.services.anvil.status} label="Anvil" note={status.services.anvil.detail} />
+          <Row st={status.services.typesense.status} label="Typesense" />
+          <Row st={status.services.neo4j.status} label="Neo4j" />
+          <Row
+            st={status.services.control_plane.status}
+            label="Control plane"
+            note={status.services.control_plane.status === 'not_configured' ? 'not configured' : null}
+          />
+          {status.mode === 'local-only' && (
+            <div className="side-status-row muted" title="Configure a control plane in Settings to enable these">
+              Vault · Forge · Admin — not configured
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // Generic overflow/context menu — items: [{ label, onClick, danger?, separator? }]
 function OverflowMenu({ items, onClose }) {
   const ref = uRp();
@@ -237,6 +300,7 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
           })}
       </SideSection>
 
+      <SystemStatus />
       <SyncFooter lastSyncedAt={lastSyncedAt} onRefresh={onRefresh} />
       {deleteTarget && (
         <window.ConfirmDeleteModal

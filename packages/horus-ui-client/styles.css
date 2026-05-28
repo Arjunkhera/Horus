@@ -1851,3 +1851,39 @@ article.md.editable { cursor: text; }
 .modal-delete-btn:hover:not(:disabled) { opacity: 0.88; }
 .modal-delete-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .modal-delete-btn.loading { opacity: 0.7; cursor: not-allowed; }
+
+/* ── System status (sidebar) ─────────────────────────────────────── */
+.side-status {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.side-status-head {
+  font-weight: 600;
+  color: var(--fg-2);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10.5px;
+}
+.side-status-head .ss-mode { color: var(--fg-3); font-weight: 500; text-transform: none; }
+.side-status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+  color: var(--fg-2);
+}
+.side-status-row.muted { color: var(--fg-3); }
+.side-status-row .ss-note { color: var(--fg-3); font-size: 11px; }
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--fg-3);
+}
+.status-dot.ok    { background: oklch(0.72 0.16 150); }
+.status-dot.warn  { background: oklch(0.78 0.15 75); }
+.status-dot.err   { background: var(--red); }
+.status-dot.muted { background: var(--fg-3); opacity: 0.5; }

@@ -14,6 +14,7 @@ import {
 } from './agent-service.js';
 import { listAnvilTools, callAnvilTool } from './mcp-config.js';
 import { getCachedHistory, setCachedHistory } from './agent-cache.js';
+import { buildSystemStatus } from './system-status.js';
 import { parseCitations } from './citation-parser.js';
 
 // The agent chat surface is gated, not fatal: without an Anthropic key the
@@ -93,9 +94,10 @@ app.patch('/api/notes/:id', async (req, res) => {
   }
 });
 
-// Proxy /api/* → Anvil (except /api/ai/ask which we handle ourselves)
+// Proxy /api/* → Anvil (except the routes horus-ui handles itself)
+const LOCAL_API_PATHS = new Set(['/ai/ask', '/ai/enabled', '/system/status']);
 app.use('/api', (req, res, next) => {
-  if (req.path === '/ai/ask') return next();
+  if (LOCAL_API_PATHS.has(req.path)) return next();
   createProxyMiddleware({
     target: `http://${ANVIL_HOST}:${ANVIL_PORT}`,
     changeOrigin: true,
@@ -105,6 +107,39 @@ app.use('/api', (req, res, next) => {
 // GET /api/ai/enabled — UI gate. The client disables the Ask surface when false.
 app.get('/api/ai/enabled', (_req, res) => {
   res.json({ enabled: chatEnabled() });
+});
+
+// Probe a /health endpoint, capturing reachability, status, and JSON body.
+async function probeHealth(baseUrl, timeoutMs = 5000) {
+  try {
+    const resp = await fetch(baseUrl.replace(/\/$/, '') + '/health', { signal: AbortSignal.timeout(timeoutMs) });
+    let body = null;
+    try { body = await resp.json(); } catch { /* non-JSON health body is fine */ }
+    return { reachable: true, httpStatus: resp.status, body };
+  } catch {
+    return { reachable: false };
+  }
+}
+
+// GET /api/system/status — backing-service health for the UI. horus-ui boots
+// independently (no depends_on), so this surfaces per-service state.
+app.get('/api/system/status', async (_req, res) => {
+  const controlPlaneUrl = (process.env.HORUS_CONTROL_PLANE_URL || '').trim();
+  const controlPlaneConfigured = !!controlPlaneUrl;
+
+  const [anvilProbe, controlPlaneProbe] = await Promise.all([
+    probeHealth(`http://${ANVIL_HOST}:${ANVIL_PORT}`),
+    controlPlaneConfigured ? probeHealth(controlPlaneUrl) : Promise.resolve(null),
+  ]);
+
+  res.json(
+    buildSystemStatus({
+      anvilProbe,
+      controlPlaneConfigured,
+      controlPlaneProbe,
+      agentEnabled: chatEnabled(),
+    }),
+  );
 });
 
 // POST /api/ai/ask — NLP agent search with SSE streaming (Anthropic + Anvil MCP)
