@@ -208,7 +208,7 @@
     <h1>Horus Platform <span class="badge">Alpha</span></h1>
     <div class="subtitle">
       Kubernetes Infrastructure Topology &mdash; Namespace <code>horus</code> &mdash;
-      Single tenant per deployment &mdash; Locked decisions as of 2026-05-25
+      Single tenant per deployment &mdash; Two-service control plane (ADR-0004) &mdash; Updated 2026-05-28
     </div>
   </header>
 
@@ -221,9 +221,18 @@
       <strong>not</strong> run Anvil.
     </p>
     <p>
-      Anvil is a local-first system. Every user runs Anvil on their own machine inside Docker or Podman, pointed at a
-      local Typesense and Neo4j. The cluster has no <code>anvil-router</code>, no <code>anvil-backend</code>, and no
-      Anvil-specific storage. This is a fundamental architectural shift from the previous topology.
+      Anvil is a local-first system. Every user runs Anvil on their own machine inside Docker or Podman (managed by the
+      <code>@arkhera/horus</code> NPM CLI as part of a 4-container local stack: horus-ui, anvil, typesense, neo4j),
+      pointed at a local Typesense and Neo4j. The cluster has no <code>anvil-router</code>, no <code>anvil-backend</code>,
+      and no Anvil-specific storage. Anvil data is synced across devices via the GitSyncEngine (git push/pull to the user's private remote).
+    </p>
+    <p>
+      The control plane is split into <strong>two separate services</strong> per ADR-0004:
+      <strong>horus-service</strong> is the ONLY public ingress — it handles Edge/Identity (principal normalization,
+      <code>X-Horus-Principal</code> minting via a pluggable TokenVerifier) and Aggregation (federated reads over remote
+      Vault + Forge domains). <strong>operator-service</strong> is a separate privileged service on ClusterIP only
+      (no public ingress) — it handles user management, the tenant registry, and the idempotent Provisioner.
+      Operators access it via <code>kubectl port-forward</code> only.
     </p>
     <p>
       Within the cluster, the Vault service is split into two separate workloads: a stateless
@@ -236,6 +245,10 @@
       Typesense collection <code>vault_&lt;name&gt;</code>, Neo4j database <code>vault_&lt;name&gt;</code>.
       There is no per-tenant routing logic and no PrincipalStore.
     </p>
+    <p>
+      Deployment is managed by Kubernetes + ArgoCD (app-of-apps) + Kustomize. Server images use pinned version tags;
+      rollback = git revert in the deploy repo.
+    </p>
   </section>
 
   <!-- ═══ Section 2 ═══ -->
@@ -244,46 +257,49 @@
     <div class="diagram-wrap">
       <div class="mermaid">
 flowchart TB
-    ExtClient["External Client"]
+    ExtClient["External Client / horus-ui"]
     AWSS3["AWS S3"]
     RemoteGit["Remote Git"]
+    OpCLI["Operator CLI\nkubectl port-forward"]
 
     ExtClient -->|"HTTPS"| ING
+    OpCLI -->|"port-forward"| SvcOp
 
-    subgraph CLUSTER["Kubernetes Cluster"]
+    subgraph CLUSTER["Kubernetes Cluster — namespace: horus"]
       ING["Ingress"]
+      HSvc["horus-service\nEdge/Identity+Aggregation\nONLY public ingress"]
+      OpSvc["operator-service\nUser mgmt + Provisioner\nClusterIP only - no ingress"]
+      SvcOp["Svc: operator-service\nClusterIP"]
+      VRouter["vault-router"]
 
-      subgraph NS["namespace: horus"]
-
-        subgraph GW["horus-gateway pod"]
-          CP["control-plane container"]
-          VRouter["vault-router container"]
-        end
-
-        subgraph VRD["vault-reader Deployment"]
-          VR0["vault-reader pod 0"]
-          VR1["vault-reader pod 1"]
-          VR2["vault-reader pod 2"]
-        end
-
-        subgraph VWD["vault-writer Deployment"]
-          VW0["vault-writer pod"]
-        end
-
-        FRD["forge-registry pod"]
-        TS["typesense StatefulSet"]
-        NEO["neo4j StatefulSet"]
-
-        SvcReader["Service: vault-reader ClusterIP"]
-        SvcWriter["Service: vault-writer ClusterIP"]
-        SvcForge["Service: forge-registry ClusterIP"]
+      subgraph VRD["vault-reader Deployment x2-3"]
+        VR0["vault-reader 0"]
+        VR1["vault-reader 1"]
+        VR2["vault-reader 2"]
       end
+
+      subgraph VWD["vault-writer StatefulSet x1"]
+        VW0["vault-writer + PVC"]
+      end
+
+      FRD["forge-registry + PVC SQLite"]
+      TS["typesense StatefulSet + PVC"]
+      NEO["neo4j StatefulSet + PVC"]
+
+      SvcRouter["Svc: vault-router ClusterIP"]
+      SvcReader["Svc: vault-reader ClusterIP"]
+      SvcWriter["Svc: vault-writer ClusterIP"]
+      SvcForge["Svc: forge-registry ClusterIP"]
     end
 
-    ING -->|"routes"| GW
+    ING -->|"routes"| HSvc
+    HSvc -->|"vault via X-Horus-Principal"| SvcRouter
+    HSvc -->|"forge via X-Horus-Principal"| SvcForge
+    SvcOp --> OpSvc
+
+    SvcRouter --> VRouter
     VRouter -->|"reads"| SvcReader
     VRouter -->|"writes"| SvcWriter
-    CP -->|"forge requests"| SvcForge
 
     SvcReader --> VR0
     SvcReader --> VR1
@@ -298,45 +314,51 @@ flowchart TB
     VR2 -->|"search"| TS
     VR2 -->|"graph"| NEO
 
-    VW0 -->|"search index"| TS
-    VW0 -->|"graph write"| NEO
+    VW0 -->|"index"| TS
+    VW0 -->|"graph"| NEO
     VW0 -->|"git push"| RemoteGit
 
-    FRD -->|"S3 read/write"| AWSS3
+    FRD -->|"S3 r/w"| AWSS3
       </div>
     </div>
     <p class="diagram-caption">
-      Solid arrows = request traffic. All non-gateway services are internal ClusterIP only. The only external entry
-      point is the Ingress. Anvil is not present in this cluster.
+      Solid arrows = request traffic. horus-service is the only external entry point (via Ingress). operator-service is ClusterIP + port-forward only (admin zone — no public ingress). All internal backends are ClusterIP + NetworkPolicy. horus-service injects <code>X-Horus-Principal</code> (60s internal JWT) into all downstream calls — internal services never see the raw client token. Anvil is not present in this cluster.
     </p>
   </section>
 
   <!-- ═══ Section 3 ═══ -->
   <section>
-    <h2>Where Anvil Actually Runs</h2>
+    <h2>What Runs on the User's Machine (4-Container Local Stack)</h2>
     <div class="note-box warn">
-      Anvil has zero presence in the cluster. The diagram below shows what runs on each user's machine,
-      completely separate from the Kubernetes deployment.
+      Anvil has zero presence in the cluster. The 4-container local stack below is managed by the <code>@arkhera/horus</code>
+      NPM CLI on the user's machine, completely separate from the Kubernetes deployment.
+      Client = NPM CLI + 4 local containers: horus-ui, anvil, typesense, neo4j.
     </div>
     <div class="diagram-wrap">
       <div class="mermaid">
 flowchart LR
-    subgraph LAPTOP["User laptop — local Docker or Podman"]
-      ANV["Anvil MCP server"]
-      LTS["Typesense local"]
-      LNEO["Neo4j local"]
-      LGIT["git working dir"]
+    subgraph LAPTOP["User laptop — 4 Docker containers managed by the horus CLI"]
+      HUI["horus-ui\nport 8400\nimage: ghcr.io/arjunkhera/horus/ui\nformerly reader-server"]
+      ANV["Anvil MCP server\nlocal-only"]
+      LTS["Typesense local\nAnvil-only"]
+      LNEO["Neo4j local\nAnvil-only"]
+      LGIT["git working dir\nGitSyncEngine"]
+      HUI -->|"/api/anvil/* direct"| ANV
       ANV --> LTS
       ANV --> LNEO
       ANV --> LGIT
     end
 
-    LGIT -->|"git push/pull"| UGIT["User git remote\ne.g. personal GitHub"]
+    HUI -->|"/api/v1/vault + forge + events + Auth header"| CLUSTER["horus-service\nhorus.company.com"]
+    LGIT -->|"git push/pull via GitSyncEngine"| UGIT["User private git remote\ne.g. personal GitHub"]
       </div>
     </div>
     <p class="diagram-caption">
-      Everything in the dashed box runs on the user's machine. The cluster shown in Section 2 has no connection
-      to this local Anvil stack.
+      The 4-container stack runs on the user's machine. horus-ui (port 8400) is the browser entry point and proxy.
+      It routes <code>/api/anvil/*</code> local-direct to Anvil (no auth header) and routes
+      <code>/api/v1/vault/*</code>, <code>/api/v1/forge/*</code>, <code>/api/v1/events</code> (SSE) to horus-service
+      with an Authorization header. <code>/api/admin/*</code> is deferred (CLI-only admin in alpha).
+      The cluster shown in Section 2 has no connection to the local Anvil stack.
     </p>
   </section>
 
@@ -347,20 +369,23 @@ flowchart LR
       <div class="mermaid">
 flowchart LR
     CM["ConfigMap\nhorus-topology"]
-    SJWT["Secret\nhorus-jwt-keys"]
+    SJWT["Secret\nhorus-jwt-keys\nclient-facing verify key +\ninternal signing key"]
     SS3["Secret\nhorus-s3-creds"]
     SDB["Secret\nhorus-db-creds"]
     SGIT["Secret\nhorus-git-creds"]
 
-    GW["horus-gateway\ncontrol-plane + vault-router"]
+    HS["horus-service\nEdge/Identity + Aggregation"]
+    OP["operator-service\nUser mgmt + Provisioner"]
     VR["vault-reader pods"]
     VW["vault-writer pod"]
     FR["forge-registry"]
 
-    CM --> GW
+    CM --> HS
+    CM --> OP
     CM --> VR
     CM --> VW
-    SJWT --> GW
+    SJWT --> HS
+    SJWT --> OP
     SS3 --> FR
     SDB --> VR
     SDB --> VW
@@ -381,12 +406,12 @@ flowchart LR
           <tr>
             <td><code>ConfigMap: horus-topology</code></td>
             <td>Internal service URLs, single-tenant name, vault remote git URLs, Typesense and Neo4j endpoints</td>
-            <td><code>horus-gateway</code>, <code>vault-writer</code>, <code>vault-reader</code></td>
+            <td><code>horus-service</code>, <code>operator-service</code>, <code>vault-writer</code>, <code>vault-reader</code></td>
           </tr>
           <tr>
             <td><code>Secret: horus-jwt-keys</code></td>
-            <td>JWT signing keypair: private key for control-plane to sign tokens, public key for vault-router to verify</td>
-            <td><code>control-plane</code> (sign), <code>vault-router</code> (verify)</td>
+            <td>Two asymmetric keys: (1) client-facing verify key — validates external client tokens in horus-service's TokenVerifier; (2) internal signing key — signs 60s <code>X-Horus-Principal</code> JWTs injected by horus-service into backend calls. Generated by operator-service on first boot.</td>
+            <td><code>horus-service</code> (verify client + mint X-Horus-Principal), <code>operator-service</code> (generates + owns), internal backends verify X-Horus-Principal signature</td>
           </tr>
           <tr>
             <td><code>Secret: horus-s3-creds</code></td>
@@ -416,15 +441,17 @@ flowchart LR
         <div class="diagram-wrap">
           <div class="mermaid">
 flowchart LR
-    EC["External Client"]
-    GW["horus-gateway"]
+    EC["horus-ui / External Client"]
+    GW["horus-service\nverifies token\nmints X-Horus-Principal"]
+    VRtr["vault-router\nverifies X-Horus-Principal"]
     SvcR["vault-reader Service"]
     VR["vault-reader pod"]
     TS["Typesense"]
     NEO["Neo4j"]
 
-    EC -->|"read request"| GW
-    GW -->|"routes read"| SvcR
+    EC -->|"read request + Authorization"| GW
+    GW -->|"X-Horus-Principal injected"| VRtr
+    VRtr -->|"routes read"| SvcR
     SvcR -->|"round-robin"| VR
     VR -->|"full-text search"| TS
     VR -->|"graph query"| NEO
@@ -436,8 +463,9 @@ flowchart LR
         <div class="diagram-wrap">
           <div class="mermaid">
 flowchart LR
-    EC2["External Client"]
-    GW2["horus-gateway"]
+    EC2["horus-ui / External Client"]
+    GW2["horus-service\nverifies token\nmints X-Horus-Principal"]
+    VRtr2["vault-router\nverifies X-Horus-Principal"]
     SvcW["vault-writer Service"]
     VW["vault-writer pod"]
     PVC["PVC git working copies"]
@@ -445,8 +473,9 @@ flowchart LR
     NEO2["Neo4j"]
     RG["Remote Git"]
 
-    EC2 -->|"write request"| GW2
-    GW2 -->|"routes write"| SvcW
+    EC2 -->|"write request + Authorization"| GW2
+    GW2 -->|"X-Horus-Principal injected"| VRtr2
+    VRtr2 -->|"routes write"| SvcW
     SvcW --> VW
     VW -->|"file write"| PVC
     VW -->|"index update"| TS2
@@ -479,10 +508,16 @@ flowchart LR
         </thead>
         <tbody>
           <tr>
-            <td><code>horus-gateway</code></td>
+            <td><code>horus-service</code></td>
             <td>Deployment</td>
-            <td>1&ndash;2 pods, 2 containers each</td>
-            <td>Single external entry point; hosts control-plane and vault-router containers in one pod</td>
+            <td>1&ndash;2 pods</td>
+            <td>The ONLY public ingress. Edge/Identity (TokenVerifier, principal normalization, X-Horus-Principal minting) + Aggregation (federated reads over Vault + Forge). Stateless — scales freely.</td>
+          </tr>
+          <tr>
+            <td><code>operator-service</code></td>
+            <td>Deployment</td>
+            <td>1 pod</td>
+            <td>Privileged admin service (ADR-0004). User management, tenant registry, idempotent Provisioner (create vault, attach forge). ClusterIP + kubectl port-forward only — NO public ingress. Generates JWT keypairs on first boot.</td>
           </tr>
           <tr>
             <td><code>vault-reader</code></td>
@@ -518,13 +553,25 @@ flowchart LR
             <td><code>horus-ingress</code></td>
             <td>Ingress</td>
             <td>1</td>
-            <td>Only external entry point; routes all traffic to horus-gateway Service</td>
+            <td>Only external entry point; routes all traffic to horus-service Service</td>
           </tr>
           <tr>
-            <td><code>horus-gateway</code></td>
+            <td><code>horus-service</code></td>
             <td>Service (ClusterIP)</td>
             <td>1</td>
-            <td>Stable in-cluster address for gateway pods; backend for Ingress</td>
+            <td>Stable in-cluster address for horus-service pods; backend for Ingress</td>
+          </tr>
+          <tr>
+            <td><code>operator-service</code></td>
+            <td>Service (ClusterIP)</td>
+            <td>1</td>
+            <td>Internal-only address for operator-service; accessed via kubectl port-forward by operators</td>
+          </tr>
+          <tr>
+            <td><code>vault-router</code></td>
+            <td>Service (ClusterIP)</td>
+            <td>1</td>
+            <td>Internal address for vault-router; horus-service routes all vault traffic here</td>
           </tr>
           <tr>
             <td><code>vault-reader</code></td>
@@ -542,7 +589,7 @@ flowchart LR
             <td><code>forge-registry</code></td>
             <td>Service (ClusterIP)</td>
             <td>1</td>
-            <td>Internal access to forge-registry from control-plane</td>
+            <td>Internal access to forge-registry from horus-service</td>
           </tr>
           <tr>
             <td><code>typesense</code></td>
@@ -566,7 +613,7 @@ flowchart LR
             <td><code>horus-jwt-keys</code></td>
             <td>Secret</td>
             <td>1</td>
-            <td>JWT keypair for auth across gateway containers</td>
+            <td>Two asymmetric keys: client-facing verify key (horus-service TokenVerifier) + internal signing key (X-Horus-Principal JWTs). Generated by operator-service on first boot; never re-created.</td>
           </tr>
           <tr>
             <td><code>horus-s3-creds</code></td>
@@ -624,16 +671,22 @@ flowchart LR
         </thead>
         <tbody>
           <tr>
-            <td><code>control-plane</code> container (in gateway)</td>
+            <td><code>horus-service</code> (public ingress)</td>
             <td>1&ndash;2</td>
-            <td>250 MB ea</td>
+            <td>300 MB ea</td>
             <td>0.5 ea</td>
           </tr>
           <tr>
-            <td><code>vault-router</code> container (in gateway)</td>
-            <td>1&ndash;2 (co-located)</td>
-            <td>250 MB ea</td>
-            <td>0.5 ea</td>
+            <td><code>operator-service</code> (admin ClusterIP)</td>
+            <td>1</td>
+            <td>200 MB</td>
+            <td>0.25</td>
+          </tr>
+          <tr>
+            <td><code>vault-router</code></td>
+            <td>1</td>
+            <td>200 MB</td>
+            <td>0.25</td>
           </tr>
           <tr>
             <td><code>vault-writer</code></td>
@@ -660,7 +713,7 @@ flowchart LR
             <td>2</td>
           </tr>
           <tr style="font-weight:600;">
-            <td>Total at 3 readers, 1 gateway pod</td>
+            <td>Total at 3 readers, 1 horus-service pod, 1 operator-service pod</td>
             <td>&mdash;</td>
             <td>~8 GB</td>
             <td>~9 vCPU</td>
@@ -714,8 +767,8 @@ flowchart LR
             <td>Resize EBS volume (online resize supported on gp3). Audit vault counts and prune stale remotes.</td>
           </tr>
           <tr>
-            <td>Gateway pod CPU or memory saturates</td>
-            <td>Gateway is stateless — scale the Deployment to 2 replicas. Both containers (control-plane and vault-router) scale together.</td>
+            <td>horus-service CPU or memory saturates</td>
+            <td>horus-service is stateless — scale the Deployment to 2 replicas. vault-router is a separate ClusterIP Deployment and scales independently.</td>
           </tr>
           <tr>
             <td>Single-node cluster risk intolerable for production</td>
@@ -785,15 +838,27 @@ flowchart LR
         <tbody>
           <tr>
             <td><strong>Removed</strong></td>
-            <td><code>anvil-router</code> container from the gateway pod. The gateway now contains only <code>control-plane</code> and <code>vault-router</code>.</td>
+            <td><code>anvil-router</code> container from the gateway pod. Anvil is entirely local.</td>
           </tr>
           <tr>
             <td><strong>Removed</strong></td>
-            <td><code>anvil-backend</code> StatefulSet and all associated Services, PVCs, and Secret mounts. Anvil is entirely local.</td>
+            <td><code>anvil-backend</code> StatefulSet and all associated Services, PVCs, and Secret mounts. Anvil is entirely local, managed by the <code>@arkhera/horus</code> NPM CLI as part of the 4-container local stack.</td>
           </tr>
           <tr>
             <td><strong>Removed</strong></td>
             <td><code>vault-backend</code> StatefulSet (the old per-vault pod model). Replaced by the reader/writer split.</td>
+          </tr>
+          <tr>
+            <td><strong>Removed</strong></td>
+            <td>Monolithic <code>horus-gateway</code> pod with co-located <code>control-plane</code> + <code>vault-router</code> containers. Replaced by the two-service control plane (ADR-0004).</td>
+          </tr>
+          <tr>
+            <td><strong>Added</strong></td>
+            <td><code>horus-service</code> Deployment: the ONLY public ingress. Handles Edge/Identity (TokenVerifier, principal normalization, X-Horus-Principal minting) + Aggregation (federated reads over Vault + Forge). Stateless; replaces the old <code>control-plane</code> container.</td>
+          </tr>
+          <tr>
+            <td><strong>Added</strong></td>
+            <td><code>operator-service</code> Deployment: privileged admin service (ADR-0004). User management, tenant registry, idempotent Provisioner. ClusterIP + port-forward only — NO public ingress. Generates JWT keypairs on first boot.</td>
           </tr>
           <tr>
             <td><strong>Added</strong></td>
@@ -801,7 +866,7 @@ flowchart LR
           </tr>
           <tr>
             <td><strong>Added</strong></td>
-            <td><code>vault-writer</code> Deployment: single replica, owns the git working copies PVC, is the only workload that git-pushes.</td>
+            <td><code>vault-writer</code> StatefulSet: single replica, owns the git working copies PVC, is the only workload that git-pushes.</td>
           </tr>
           <tr>
             <td><strong>Added</strong></td>
@@ -809,7 +874,19 @@ flowchart LR
           </tr>
           <tr>
             <td><strong>Changed</strong></td>
-            <td><code>vault-router</code> now differentiates read vs write traffic and routes them to separate Services (<code>vault-reader</code> vs <code>vault-writer</code>). Previously all vault traffic went to a single backend pool.</td>
+            <td>JWT auth model: now uses two separate keys. Client-facing verify key validates external tokens; internal signing key signs 60 s <code>X-Horus-Principal</code> JWTs. Internal backends only verify X-Horus-Principal — they never see the raw client token. Previously: a single keypair, VaultRouter verified the raw JWT directly.</td>
+          </tr>
+          <tr>
+            <td><strong>Changed</strong></td>
+            <td><code>vault-router</code> now differentiates read vs write traffic and routes to separate Services (<code>vault-reader</code> vs <code>vault-writer</code>). Receives <code>X-Horus-Principal</code> from horus-service rather than verifying the raw Authorization header.</td>
+          </tr>
+          <tr>
+            <td><strong>Changed</strong></td>
+            <td>Client is now NPM CLI + 4 local containers: <code>horus-ui</code> (port 8400, formerly <code>reader-server</code>), anvil, typesense, neo4j. horus-ui-client (the browser SPA, formerly <code>reader</code>) performs client-side federation — merges local Anvil and remote horus-service results in the browser.</td>
+          </tr>
+          <tr>
+            <td><strong>Changed</strong></td>
+            <td>Agent chat uses the <strong>Anthropic SDK</strong> (was <code>@cursor/sdk</code>/composer-2). horus-service integrates the Anthropic SDK.</td>
           </tr>
           <tr>
             <td><strong>Resolved: pod-per-user question</strong></td>
@@ -820,8 +897,8 @@ flowchart LR
             <td>Confirmed shared singletons with per-vault logical isolation via naming convention.</td>
           </tr>
           <tr>
-            <td><strong>Resolved: routers co-located</strong></td>
-            <td>Confirmed co-located in gateway pod. Only two containers now: control-plane and vault-router.</td>
+            <td><strong>Resolved: federation location</strong></td>
+            <td>Federation is client-side (horus-ui-client merges local Anvil + remote horus-service results in the browser). horus-service's Aggregation module federates only the remote domains (Vault + Forge). Previously: server-side federation inside the control plane.</td>
           </tr>
         </tbody>
       </table>
@@ -829,7 +906,7 @@ flowchart LR
   </section>
 
   <footer>
-    Horus Platform &mdash; Alpha Kubernetes Topology &mdash; Locked decisions 2026-05-25
+    Horus Platform &mdash; Alpha Kubernetes Topology &mdash; Two-service control plane (ADR-0004) &mdash; Updated 2026-05-28
   </footer>
 
 </div>

@@ -209,8 +209,9 @@
   <h1>Horus — Identity &amp; Request Flows</h1>
   <p class="subtitle">
     Locked alpha design walkthrough. Reflects all finalized Phase 1 decisions:
-    local-only Anvil, single-tenant per deployment, VaultReader/VaultWriter split,
-    Typesense-as-primary-read-store, and local Forge workspaces. Generated 2026-05-25.
+    local-only Anvil, two-service control plane (horus-service + operator-service, ADR-0004),
+    principal normalization via X-Horus-Principal, client-side federation, VaultReader/VaultWriter split,
+    Typesense-as-primary-read-store, and local Forge workspaces. Updated 2026-05-28.
   </p>
 
   <!-- ================================================================ -->
@@ -219,20 +220,34 @@
   <h2>Section 0 — Participant Legend</h2>
   <p>Every actor that appears in the diagrams below, grouped by the plane it belongs to. Colors match the diagram actor labels used throughout.</p>
 
-  <div class="plane-header">Control Plane — deployment orchestration</div>
+  <div class="plane-header">Control Plane — hosted services (Kubernetes cluster, one per company)</div>
   <div class="legend-grid">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#58a6ff;"></div>
+      <div>
+        <div class="legend-label">horus-service</div>
+        <div class="legend-desc">The ONLY public ingress. Handles Edge/Identity (TokenVerifier, principal normalization, X-Horus-Principal minting) and Aggregation (federated reads over Vault + Forge). All end-user requests enter here.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#a371f7;"></div>
+      <div>
+        <div class="legend-label">operator-service</div>
+        <div class="legend-desc">Separate privileged service (ADR-0004). User management, tenant registry, idempotent Provisioner (create vault, attach forge). ClusterIP + kubectl port-forward only — NO public ingress. CLI-only admin in alpha.</div>
+      </div>
+    </div>
     <div class="legend-item">
       <div class="legend-dot" style="background:#f78166;"></div>
       <div>
-        <div class="legend-label">HorusControlPlane</div>
-        <div class="legend-desc">The Horus CLI sub-system that orchestrates bootstrap, onboarding, and vault lifecycle commands. Runs on the operator's machine.</div>
+        <div class="legend-label">HorusControlPlane (CLI)</div>
+        <div class="legend-desc">The <code>@arkhera/horus</code> NPM CLI. Orchestrates bootstrap, onboarding, and vault lifecycle commands. Runs on the operator's machine.</div>
       </div>
     </div>
     <div class="legend-item">
       <div class="legend-dot" style="background:#ffa657;"></div>
       <div>
-        <div class="legend-label">AuthLib</div>
-        <div class="legend-desc"><code>@horus/auth</code> — stateless JWT sign and verify library. Called inline by routers. No network call required.</div>
+        <div class="legend-label">TokenVerifier / AuthLib</div>
+        <div class="legend-desc">Pluggable TokenVerifier inside horus-service that validates client tokens and produces a canonical <code>Principal {tenant, user, role}</code>. horus-service then mints a short-lived (60 s) internal JWT signed with the internal signing key and injects it as <code>X-Horus-Principal</code>.</div>
       </div>
     </div>
   </div>
@@ -283,7 +298,7 @@
     </div>
   </div>
 
-  <div class="plane-header">Execution Plane — runs on the user's own machine</div>
+  <div class="plane-header">Execution Plane — runs on the user's own machine (4 local containers managed by the <code>horus</code> CLI)</div>
   <div class="legend-grid">
     <div class="legend-item">
       <div class="legend-dot" style="background:#58a6ff;"></div>
@@ -293,10 +308,24 @@
       </div>
     </div>
     <div class="legend-item">
+      <div class="legend-dot" style="background:#3fb950;"></div>
+      <div>
+        <div class="legend-label">horus-ui (port 8400)</div>
+        <div class="legend-desc">Unified client UI. Image <code>ghcr.io/arjunkhera/horus/ui</code>. Web UI + proxy. Routes <code>/api/anvil/*</code> local-direct (no auth header); routes <code>/api/v1/vault/*</code>, <code>/api/v1/forge/*</code>, <code>/api/v1/events</code> (SSE) through horus-service with auth header. Formerly called <code>reader-server</code>.</div>
+      </div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#56d364;"></div>
+      <div>
+        <div class="legend-label">horus-ui-client</div>
+        <div class="legend-desc">The browser-side SPA bundled with horus-ui. Formerly called <code>reader</code>. Performs client-side federation: queries local Anvil AND the remote control plane in parallel and merges results.</div>
+      </div>
+    </div>
+    <div class="legend-item">
       <div class="legend-dot" style="background:#79c0ff;"></div>
       <div>
         <div class="legend-label">LocalAnvil</div>
-        <div class="legend-desc">The Anvil MCP server running in a local Docker container on the user's machine. Accessible via localhost MCP socket only.</div>
+        <div class="legend-desc">The Anvil MCP server running in a local Docker container on the user's machine. Accessible via localhost MCP socket only. Git-synced via the GitSyncEngine.</div>
       </div>
     </div>
     <div class="legend-item">
@@ -317,7 +346,7 @@
       <div class="legend-dot" style="background:#0d419d;"></div>
       <div>
         <div class="legend-label">LocalGit</div>
-        <div class="legend-desc">Git working copy on the user's machine. LocalAnvil reads and writes here. Synced to RemoteGit for multi-device.</div>
+        <div class="legend-desc">Git working copy on the user's machine. LocalAnvil reads and writes here. Synced to RemoteGit for multi-device via the GitSyncEngine.</div>
       </div>
     </div>
   </div>
@@ -365,18 +394,24 @@
   <!-- ================================================================ -->
   <h2>Section 1 — Bootstrapping a Company Deployment</h2>
   <p>
-    Before any user can authenticate or any vault can be created, an operator must stand up the Horus service plane.
-    This is a one-time operation per company. The operator provisions infrastructure, generates the JWT keypair,
-    declares the deployment configuration, and starts all services. No multi-tenancy is involved — the deployment
-    itself is the tenancy boundary. Every authenticated user in this deployment has full read and write access.
+    Before any user can authenticate or any vault can be created, an operator must stand up the Horus control plane
+    in a Kubernetes cluster. The cluster runs two control-plane services: <strong>horus-service</strong> (the only
+    public ingress — handles all end-user requests and principal normalization) and <strong>operator-service</strong>
+    (a separate privileged service behind ClusterIP only — handles user management, tenant registry, and provisioning).
+    This split is mandated by ADR-0004. <code>operator-service</code> generates the JWT keypairs on first boot.
+    Internal backends (vault-router, vault-reader, vault-writer, forge-registry, typesense, neo4j) are ClusterIP +
+    NetworkPolicy and are reachable only via horus-service. Deployment is managed by Kubernetes + ArgoCD (app-of-apps) + Kustomize.
+    Server images use pinned version tags; rollback = git revert.
   </p>
 
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
   participant Op as Operator
-  participant HCP as HorusControlPlane
-  participant AL as AuthLib
+  participant HCP as HorusCLI
+  participant Argo as "ArgoCD"
+  participant OpSvc as operator-service
+  participant HSvc as horus-service
   participant VR as VaultRouter
   participant VRd as VaultReader
   participant VW as VaultWriter
@@ -384,56 +419,53 @@ sequenceDiagram
   participant TS as Typesense
   participant NJ as Neo4j
 
-  Op->>HCP: horus bootstrap
-  HCP->>AL: generateKeypair
-  AL-->>HCP: privateKey plus publicKey
-  HCP->>HCP: persist keypair to deployment config dir
+  Op->>HCP: horus operator init
+  HCP->>HCP: prompt for namespace, domain, image tag, admin credentials, git tokens
+  HCP->>HCP: write deploy-repo scaffold with Kustomize base plus prod overlay
+  HCP->>HCP: kubectl apply Secrets to cluster out-of-band
+  HCP-->>Op: deploy-repo scaffold written. Commit and push, then apply root ArgoCD app.
 
-  HCP->>HCP: load deployment config with tenant name, vault git remotes, S3 creds for Forge
-  Note over HCP: Tenant name is hard-coded in the config.<br/>Vault git remote URLs declared here.<br/>S3 bucket and credentials for ForgeRegistry declared here.
+  Op->>Argo: kubectl apply bootstrap/argocd-root-app.yaml
+  Argo->>Argo: sync child apps for all 8 services
+  Argo->>HSvc: deploy horus-service
+  Argo->>OpSvc: deploy operator-service
+  Argo->>VR: deploy vault-router
+  Argo->>VRd: deploy vault-reader x2
+  Argo->>VW: deploy vault-writer x1
+  Argo->>FR: deploy forge-registry
+  Argo->>TS: deploy typesense
+  Argo->>NJ: deploy neo4j
 
-  HCP->>HCP: write config to disk and distribute public key to service env vars
+  OpSvc->>OpSvc: first-boot: generate client-facing verify key plus internal signing key
+  Note over OpSvc: Two key roles. Client-facing verify key: validates external client tokens.<br/>Internal signing key: signs 60s X-Horus-Principal JWTs injected into backend calls.<br/>Keypair stored as a K8s Secret; never re-generated.
+  OpSvc->>OpSvc: seed first admin user if none exists
 
-  HCP->>VR: start VaultRouter with public key
-  HCP->>VRd: start VaultReader replicas x2
-  HCP->>VW: start VaultWriter x1
-  HCP->>FR: start ForgeRegistry with S3 creds and admin key
-  HCP->>TS: start Typesense
-  HCP->>NJ: start Neo4j
-
-  HCP->>VR: GET /health
-  VR-->>HCP: 200 OK
-  HCP->>VRd: GET /health
-  VRd-->>HCP: 200 OK
-  HCP->>VW: GET /health
-  VW-->>HCP: 200 OK
-  HCP->>FR: GET /health
-  FR-->>HCP: 200 OK
-
-  HCP-->>Op: Bootstrap complete. No vaults exist yet. Issue JWTs and create vaults next.
+  Op->>HCP: horus operator login over kubectl port-forward
+  HCP-->>Op: authenticated. Bootstrap complete. No vaults exist yet. Create vaults next.
     </div>
   </div>
 
   <div class="walkthrough">
     <ol>
-      <li><strong>Step 1 — Operator invokes bootstrap.</strong> The human operator runs <code>horus bootstrap</code>. The HorusControlPlane CLI sub-system handles the command.</li>
-      <li><strong>Step 2 — Keypair generation.</strong> HorusControlPlane calls <code>AuthLib.generateKeypair()</code>. AuthLib returns an asymmetric keypair (RS256 or EdDSA). The private key signs JWTs; the public key is distributed to service routers for in-process verification with no network round-trip.</li>
-      <li><strong>Step 3 — Persist keypair.</strong> The keypair is written to the deployment config directory. The public key will be injected into each service's environment at start time.</li>
-      <li><strong>Step 4 — Load deployment config.</strong> The operator-authored deployment config declares the tenant name (hard-coded string), the git remote URLs for each vault, and the S3 bucket and credentials for the Forge Registry. The Control Plane reads this at bootstrap and does not auto-discover anything.</li>
-      <li><strong>Step 5 — Start service plane.</strong> VaultRouter, VaultReader (two replicas), VaultWriter (one replica), ForgeRegistry, Typesense, and Neo4j are all started with the public key injected.</li>
-      <li><strong>Step 6 — Health checks.</strong> The Control Plane polls each service's <code>/health</code> endpoint. Bootstrap fails if any service is unresponsive.</li>
-      <li><strong>Step 7 — Bootstrap complete.</strong> The service plane is live. No vaults exist yet (Typesense and Neo4j are empty, VaultWriter PVC is empty). The operator must now issue user JWTs and create vaults before users can do anything.</li>
+      <li><strong>Step 1 — Operator runs init.</strong> The operator runs <code>horus operator init</code> (the <code>@arkhera/horus</code> NPM CLI). It prompts for namespace, public domain, image tag, admin credentials, and secrets.</li>
+      <li><strong>Step 2 — Write deploy-repo scaffold.</strong> The CLI writes the Kustomize deploy-repo (base + prod overlay) to disk and applies Secrets to the cluster out-of-band. ArgoCD manages everything else from git.</li>
+      <li><strong>Step 3 — Apply root ArgoCD app.</strong> The operator commits and pushes the deploy repo, then applies the root ArgoCD Application with one kubectl command. ArgoCD syncs all 8 child service apps.</li>
+      <li><strong>Step 4 — Services come up.</strong> All 8 services start: horus-service, operator-service, vault-router, vault-reader (2 replicas), vault-writer, forge-registry, typesense, neo4j. Internal services are ClusterIP + NetworkPolicy — not reachable from the internet.</li>
+      <li><strong>Step 5 — operator-service first-boot keypair generation.</strong> operator-service detects no keypair exists and generates two asymmetric keys: a client-facing verify key (validates external tokens from horus-ui's TokenProvider) and an internal signing key (signs short-lived 60 s <code>X-Horus-Principal</code> JWTs injected by horus-service into backend calls). The keypair is stored as a K8s Secret and never re-generated.</li>
+      <li><strong>Step 6 — Seed admin user.</strong> operator-service seeds the first admin user from the bootstrap credential (only if no users exist). First login forces a password rotation.</li>
+      <li><strong>Step 7 — Bootstrap complete.</strong> The control plane is live. No vaults exist yet. The operator must provision vaults before users can do anything (Section 3).</li>
     </ol>
   </div>
 
   <h3>Persisted by end of bootstrap</h3>
   <ul>
-    <li><strong>JWT keypair</strong> — stored in deployment config directory. Public key injected into all service environments.</li>
-    <li><strong>Deployment config</strong> — tenant name, vault git remote URLs, S3 credentials, service addresses. Operator-authored; read-only at runtime.</li>
+    <li><strong>Two JWT keys</strong> — client-facing verify key + internal signing key — stored as a K8s Secret by operator-service. Never re-created.</li>
+    <li><strong>K8s Secrets</strong> — admin credentials, git tokens, S3 creds. Applied out-of-band by <code>horus operator init</code>.</li>
+    <li><strong>Deploy repo</strong> — Kustomize base + prod overlay. ArgoCD watches this for all future config changes.</li>
     <li><strong>Typesense</strong> — running but empty. No per-vault collections yet.</li>
     <li><strong>Neo4j</strong> — running but empty. No per-vault databases yet.</li>
     <li><strong>VaultWriter PVC</strong> — empty. No git working copies cloned yet.</li>
-    <li><strong>No vaults exist yet.</strong> Vault creation is a separate operator action (Section 3).</li>
+    <li><strong>No vaults exist yet.</strong> Vault provisioning is a separate operator action (Section 3).</li>
   </ul>
 
   <hr />
@@ -443,26 +475,30 @@ sequenceDiagram
   <!-- ================================================================ -->
   <h2>Section 2 — Onboarding a User</h2>
   <p>
-    Onboarding has two parts. First, the operator issues a JWT for the user and delivers it out of band.
-    Second, the user runs <code>horus setup</code> on their local machine, which starts the local Anvil stack and
-    connects it to the user's private git remote for cross-device sync. The PrincipalStore does not exist in the
-    locked alpha design — every holder of a valid JWT has full read and write access to the deployment.
+    Onboarding has two parts. First, the operator creates a user account in operator-service (via a port-forwarded
+    CLI call), which issues a credential for the user and delivers it out of band.
+    Second, the user runs <code>horus setup</code> on their local machine, which starts the 4-container local stack
+    (horus-ui, anvil, typesense, neo4j) managed by the <code>@arkhera/horus</code> NPM CLI, and connects Anvil to
+    the user's private git remote for cross-device sync via the GitSyncEngine.
+    The PrincipalStore does not exist in the locked alpha design — every holder of a valid credential has full
+    read and write access to the deployment.
   </p>
 
-  <h3>Part A — Operator side: issuing the JWT</h3>
+  <h3>Part A — Operator side: creating the user account</h3>
 
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
   participant Op as Operator
-  participant HCP as HorusControlPlane
-  participant AL as AuthLib
+  participant HCP as HorusCLI
+  participant OpSvc as operator-service
 
-  Op->>HCP: horus user add --user alice
-  HCP->>HCP: validate slug is DNS-safe lowercase alphanumeric or hyphens
-  HCP->>AL: issueJWT with sub=alice, tenant from config, long TTL
-  AL-->>HCP: signed JWT
-  HCP-->>Op: JWT token - deliver to alice out of band
+  Op->>HCP: horus operator user-add --user alice over kubectl port-forward
+  HCP->>OpSvc: POST /users with slug=alice, role=user
+  OpSvc->>OpSvc: validate slug is DNS-safe lowercase alphanumeric or hyphens
+  OpSvc->>OpSvc: create user record in tenant registry
+  OpSvc-->>HCP: user credential for alice
+  HCP-->>Op: credential - deliver to alice out of band
     </div>
   </div>
 
@@ -472,37 +508,37 @@ sequenceDiagram
     <div class="mermaid">
 sequenceDiagram
   participant U as User
-  participant HCP as HorusControlPlane
+  participant HCP as HorusCLI
+  participant HUI as horus-ui
   participant LA as LocalAnvil
   participant LT as LocalTypesense
   participant LN as LocalNeo4j
   participant LG as LocalGit
   participant RG as RemoteGit
 
-  U->>HCP: horus setup with JWT and deployment URL
-  HCP->>HCP: validate JWT signature using deployment public key
-  HCP->>HCP: write local config - deployment URL, JWT, user slug
+  U->>HCP: horus setup with credential and deployment URL
+  HCP->>HCP: validate credential and write local config with deployment URL and user slug
+  HCP->>HUI: start horus-ui container on port 8400
   HCP->>LA: start local Docker stack: Anvil plus Typesense plus Neo4j plus git dir
   LA->>LT: initialize Typesense collection for user
   LA->>LN: initialize Neo4j database for user
-  LA->>LG: initialize local git working directory
+  LA->>LG: initialize local git working directory via GitSyncEngine
   LA->>RG: git remote add origin for Anvil sync repo
   RG-->>LA: remote configured
   LA-->>HCP: local Anvil stack healthy
-  HCP-->>U: Local Anvil ready. MCP socket at localhost.
+  HCP-->>U: Local stack ready. horus-ui at localhost:8400. Anvil MCP socket at localhost.
     </div>
   </div>
 
   <div class="walkthrough">
     <ol>
-      <li><strong>Part A, Step 1 — Operator issues JWT.</strong> The operator runs <code>horus user add --user alice</code>. The CLI validates that the slug is DNS-safe (lowercase alphanumeric and hyphens only), then calls <code>AuthLib.issueJWT</code> with the user's slug and the deployment's tenant name from the config. A long-TTL JWT is produced.</li>
-      <li><strong>Part A, Step 2 — Out-of-band delivery.</strong> The operator delivers the JWT to Alice through a secure channel (password manager, encrypted email, etc.). Horus has no in-band delivery mechanism in Phase 1.</li>
-      <li><strong>Part B, Step 1 — User runs setup.</strong> Alice runs <code>horus setup</code> on her machine, providing the JWT and the deployment URL. The CLI validates the JWT signature using the deployment public key embedded in the JWT header.</li>
-      <li><strong>Part B, Step 2 — Write local config.</strong> The CLI writes a local config file containing the deployment URL, the JWT, and the resolved user slug. This file is used by subsequent CLI commands and by the local Anvil stack.</li>
-      <li><strong>Part B, Step 3 — Start local Docker stack.</strong> The CLI starts the local Anvil Docker stack: an Anvil MCP server process, a local Typesense instance, a local Neo4j instance, and a git working directory. All components run in Docker containers on Alice's machine.</li>
-      <li><strong>Part B, Step 4 — Initialize local stores.</strong> Anvil initializes a Typesense collection and a Neo4j database for the user, then sets up a git working directory for Anvil data.</li>
-      <li><strong>Part B, Step 5 — Connect to git remote.</strong> Anvil adds the user's private git remote (e.g. a private GitHub repo) as the origin for the Anvil sync repo. This remote is used for cross-device sync via push and pull.</li>
-      <li><strong>Part B, Step 6 — Ready.</strong> The local Anvil MCP socket is available at localhost. Claude Code and other clients can now connect to it.</li>
+      <li><strong>Part A, Step 1 — Operator creates user.</strong> The operator runs <code>horus operator user-add --user alice</code> over a <code>kubectl port-forward</code> to operator-service. operator-service validates the slug (DNS-safe: lowercase alphanumeric and hyphens only) and creates a user record in the tenant registry. A credential is returned.</li>
+      <li><strong>Part A, Step 2 — Out-of-band delivery.</strong> The operator delivers the credential to Alice through a secure channel. Horus has no in-band delivery mechanism in Phase 1.</li>
+      <li><strong>Part B, Step 1 — User runs setup.</strong> Alice runs <code>horus setup</code> on her machine (via the <code>@arkhera/horus</code> NPM CLI), providing the credential and the deployment URL. The CLI validates the credential and writes a local config file.</li>
+      <li><strong>Part B, Step 2 — Start 4-container local stack.</strong> The CLI starts 4 Docker containers: horus-ui (port 8400), Anvil MCP server, local Typesense, and local Neo4j. All are managed by the CLI.</li>
+      <li><strong>Part B, Step 3 — Initialize local Anvil stores.</strong> Anvil initializes a Typesense collection and a Neo4j database for the user, then sets up a git working directory via the GitSyncEngine.</li>
+      <li><strong>Part B, Step 4 — Connect to git remote.</strong> The GitSyncEngine adds the user's private git remote (e.g. a private GitHub repo) as the origin for the Anvil sync repo. This remote is used for cross-device sync via push and pull.</li>
+      <li><strong>Part B, Step 5 — Ready.</strong> horus-ui is available at <code>localhost:8400</code>. The local Anvil MCP socket is available at localhost. Claude Code and other clients can now connect to it.</li>
     </ol>
   </div>
 
@@ -518,28 +554,28 @@ sequenceDiagram
     </thead>
     <tbody>
       <tr>
-        <td>Operator side</td>
-        <td>JWT record (optional audit log)</td>
-        <td>Operator's filesystem or a log file</td>
-        <td>The JWT itself is the credential; no server-side session is created.</td>
+        <td>operator-service (cluster)</td>
+        <td>User record in tenant registry</td>
+        <td>operator-service internal store</td>
+        <td>User slug, role, tenant. The authoritative record for all future auth checks.</td>
       </tr>
       <tr>
         <td>User local side</td>
         <td>Local config file</td>
         <td><code>~/.horus/config.json</code> or equivalent</td>
-        <td>Contains deployment URL, JWT, user slug. Read by CLI on every invocation.</td>
+        <td>Contains deployment URL, credential, user slug. Read by CLI on every invocation.</td>
       </tr>
       <tr>
         <td>User local side</td>
-        <td>Local Anvil Docker volumes</td>
+        <td>Local Docker volumes (4 containers)</td>
         <td>Docker named volumes on user's machine</td>
-        <td>Typesense data, Neo4j data, git working directory. Persist across machine restarts.</td>
+        <td>horus-ui state, Typesense data, Neo4j data, git working directory. Persist across machine restarts.</td>
       </tr>
       <tr>
         <td>User local side</td>
         <td>Local git repo</td>
         <td>Docker volume, git working dir</td>
-        <td>Connected to user's private git remote. Used for Anvil data sync across devices.</td>
+        <td>Connected to user's private git remote via GitSyncEngine. Used for Anvil data sync across devices.</td>
       </tr>
     </tbody>
   </table>
@@ -551,29 +587,32 @@ sequenceDiagram
   <!-- ================================================================ -->
   <h2>Section 3 — Creating a Vault (Operator Only)</h2>
   <p>
-    Vault creation and deletion are out-of-band operator actions. Users cannot create or delete vaults; they
-    can only read and write within vaults that already exist. Each vault has its own git remote (declared in
-    the deployment config), its own Typesense collection, and its own Neo4j database. VaultWriter does the
-    initialization work; VaultReader becomes aware of the new vault once VaultRouter reloads its config.
+    Vault creation and deletion are operator-only actions performed via operator-service (accessed through a
+    kubectl port-forward). Users cannot create or delete vaults; they can only read and write within vaults
+    that already exist. Each vault has its own git remote (declared in the deployment config), its own
+    Typesense collection, and its own Neo4j database. VaultWriter does the initialization work; VaultReader
+    becomes aware of the new vault once VaultRouter reloads its config.
   </p>
 
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
   participant Op as Operator
-  participant HCP as HorusControlPlane
+  participant HCP as HorusCLI
+  participant OpSvc as operator-service
   participant VR as VaultRouter
   participant VW as VaultWriter
   participant TS as Typesense
   participant NJ as Neo4j
   participant RG as RemoteGit
 
-  Op->>HCP: horus vault create engineering
-  HCP->>RG: initialize empty git repo at declared remote URL for engineering vault
-  RG-->>HCP: remote repo ready
+  Op->>HCP: horus operator vault-create engineering over kubectl port-forward
+  HCP->>OpSvc: POST /vaults with name=engineering and git remote URL
+  OpSvc->>OpSvc: idempotent Provisioner registers vault in tenant registry
+  OpSvc->>RG: initialize empty git repo at declared remote URL for engineering vault
+  RG-->>OpSvc: remote repo ready
 
-  HCP->>HCP: add vault to deployment config - name, git remote URL, and vault ID
-  HCP->>VW: notify config reload with new vault entry
+  OpSvc->>VW: provision vault - notify with new vault entry and git remote
   VW->>RG: git clone working copy of engineering vault into PVC
   RG-->>VW: working copy cloned
 
@@ -581,26 +620,27 @@ sequenceDiagram
   TS-->>VW: collection created
   VW->>NJ: create per-vault Neo4j database engineering
   NJ-->>VW: database created
-  VW-->>HCP: vault worker initialized and queue running
+  VW-->>OpSvc: vault worker initialized and queue running
 
-  HCP->>VR: notify config reload - engineering vault now known
-  VR-->>HCP: VaultRouter updated known-vault list
+  OpSvc->>VR: notify config reload - engineering vault now known
+  VR-->>OpSvc: VaultRouter updated known-vault list
 
+  OpSvc-->>HCP: vault engineering ready
   HCP-->>Op: Vault engineering is ready. Users can read and write immediately.
     </div>
   </div>
 
   <div class="walkthrough">
     <ol>
-      <li><strong>Step 1 — Operator command.</strong> The operator runs <code>horus vault create engineering</code>. The vault name must match a git remote URL already declared in the deployment config.</li>
-      <li><strong>Step 2 — Initialize remote git repo.</strong> HorusControlPlane initializes an empty git repository at the declared remote URL. This is the authoritative git store for this vault's markdown files.</li>
-      <li><strong>Step 3 — Update deployment config.</strong> The vault entry (name, git remote URL, internal vault ID) is added to the deployment config on disk. This is the config that VaultRouter and VaultWriter will reload.</li>
-      <li><strong>Step 4 — VaultWriter clones working copy.</strong> After receiving a config reload signal, VaultWriter clones a working copy of the vault's git repo into its PVC (persistent volume). This is the working copy VaultWriter's queue workers will use to write files.</li>
+      <li><strong>Step 1 — Operator command.</strong> The operator runs <code>horus operator vault-create engineering</code> via the CLI (which port-forwards to operator-service). The vault name must match a git remote URL already declared in the deployment config.</li>
+      <li><strong>Step 2 — Idempotent Provisioner registers the vault.</strong> operator-service's idempotent Provisioner records the vault in the tenant registry. Repeated calls with the same name are safe.</li>
+      <li><strong>Step 3 — Initialize remote git repo.</strong> operator-service initializes an empty git repository at the declared remote URL. This is the authoritative git store for this vault's markdown files.</li>
+      <li><strong>Step 4 — VaultWriter clones working copy.</strong> operator-service signals VaultWriter to provision the vault. VaultWriter clones a working copy of the vault's git repo into its PVC. This is the working copy VaultWriter's queue workers will use to write files.</li>
       <li><strong>Step 5 — Create Typesense collection.</strong> VaultWriter creates a per-vault Typesense collection (e.g. <code>horus_engineering</code>) with the standard page schema. All future reads will come from this collection — no separate file-fetch step.</li>
       <li><strong>Step 6 — Create Neo4j database.</strong> VaultWriter creates a per-vault Neo4j database (e.g. <code>engineering</code>). Graph edges between pages will be stored here.</li>
       <li><strong>Step 7 — Start vault worker.</strong> VaultWriter starts a per-vault in-process queue worker. This worker is the sole entity that commits to git and updates Typesense and Neo4j for this vault.</li>
-      <li><strong>Step 8 — VaultRouter config reload.</strong> VaultRouter reloads its known-vault list so that incoming requests for the <code>engineering</code> vault are now routable.</li>
-      <li><strong>Step 9 — Vault ready.</strong> The vault is immediately available for reads and writes by any user holding a valid JWT.</li>
+      <li><strong>Step 8 — VaultRouter config reload.</strong> operator-service notifies VaultRouter to reload its known-vault list so that incoming requests for the <code>engineering</code> vault are now routable.</li>
+      <li><strong>Step 9 — Vault ready.</strong> The vault is immediately available for reads and writes by any user holding a valid credential.</li>
     </ol>
   </div>
 
@@ -714,38 +754,48 @@ sequenceDiagram
   <!-- ================================================================ -->
   <h2>Section 5 — User Reading from Vault</h2>
   <p>
-    The Vault read path is the highest-volume path in the system. VaultReader replicas are stateless — they
-    hold no filesystem state and make no git calls. All reads go to Typesense (for document search and fetch)
-    or Neo4j (for graph queries). Typesense stores the full page body, so there is no secondary file-fetch
-    step. VaultRouter is the only network hop between the client and VaultReader; it also performs JWT
-    verification via AuthLib. Any VaultReader replica can serve any read request.
+    The Vault read path is the highest-volume path in the system. The request enters through horus-service,
+    which is the ONLY public ingress. horus-service verifies the client token via its pluggable TokenVerifier,
+    normalizes the identity into a canonical <code>Principal {tenant, user, role}</code>, mints a short-lived
+    (60 s) internal JWT signed with the internal signing key, and injects it as <code>X-Horus-Principal</code>
+    into the downstream call. This is "principal normalization" — any client token format becomes one
+    canonical internal token. Internal backends (vault-router, vault-reader) only need to verify the
+    <code>X-Horus-Principal</code> signature; they never see the raw client token. VaultReader replicas are
+    stateless — any replica can serve any read request.
   </p>
 
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
-  participant C as Client
+  participant HUI as horus-ui
+  participant HS as horus-service
+  participant TV as TokenVerifier
   participant VR as VaultRouter
-  participant AL as AuthLib
   participant VRd as VaultReader
   participant TS as Typesense
 
-  C->>VR: GET /vault/engineering/knowledge/search with Authorization Bearer token
-  VR->>AL: verifyJWT with token
-  alt JWT invalid or expired
-    AL-->>VR: error
-    VR-->>C: 401 Unauthorized
-  else JWT valid
-    AL-->>VR: claims with principal.user extracted for audit
-    VR->>VR: locate vault engineering in known-vault list
-    alt Vault not found in known-vault list
-      VR-->>C: 404 vault not found
+  HUI->>HS: GET /api/v1/vault/engineering/knowledge/search with Authorization Bearer token
+  Note over HUI,HS: horus-ui routes /api/v1/vault/* to horus-service and adds the auth header.<br/>horus-ui routes /api/anvil/* local-direct with no auth header.
+  HS->>TV: verifyToken with client token
+  alt Token invalid or expired
+    TV-->>HS: error
+    HS-->>HUI: 401 Unauthorized
+  else Token valid
+    TV-->>HS: Principal with tenant plus user plus role
+    HS->>HS: mint 60s internal JWT signed with internal signing key
+    HS->>HS: set X-Horus-Principal header with internal JWT
+    HS->>VR: GET /knowledge/search with X-Horus-Principal replacing raw Authorization
+    VR->>VR: verify X-Horus-Principal signature and locate vault engineering
+    alt Vault not found
+      VR-->>HS: 404 vault not found
+      HS-->>HUI: 404 vault not found
     else Vault found
       VR->>VRd: forward GET /knowledge/search to any VaultReader replica
       VRd->>TS: Typesense search query against horus_engineering collection
       TS-->>VRd: matching documents with full page body and metadata
       VRd-->>VR: search results
-      VR-->>C: 200 with page results
+      VR-->>HS: search results
+      HS-->>HUI: 200 with page results
     end
   end
     </div>
@@ -753,14 +803,15 @@ sequenceDiagram
 
   <div class="walkthrough">
     <ol>
-      <li><strong>Step 1 — Client sends read request.</strong> The Client sends a GET request to VaultRouter with the vault name in the path and the JWT in the Authorization header.</li>
-      <li><strong>Step 2 — JWT verification.</strong> VaultRouter calls <code>AuthLib.verifyJWT</code> in-process. AuthLib checks the signature against the deployment public key and confirms the token is not expired. No network call to a central auth service.</li>
-      <li><strong>Step 3 — Invalid JWT path.</strong> If verification fails, VaultRouter returns 401 and does not contact VaultReader.</li>
-      <li><strong>Step 4 — Principal extraction.</strong> From the verified claims, VaultRouter extracts <code>principal.user</code>. This is used for audit logging only — there is no per-user access control list in alpha. Every valid JWT gives full access to every vault in the deployment.</li>
-      <li><strong>Step 5 — Vault routing.</strong> VaultRouter checks that the requested vault name appears in its known-vault list (loaded from deployment config). If not found, it returns 404.</li>
-      <li><strong>Step 6 — Forward to VaultReader.</strong> VaultRouter forwards the request to any available VaultReader replica (round-robin or least-connections). VaultReader is stateless, so any replica can serve any request.</li>
-      <li><strong>Step 7 — Typesense query.</strong> VaultReader queries the per-vault Typesense collection. Because Typesense stores the full page body, a single query returns everything the client needs. No secondary filesystem read is needed.</li>
-      <li><strong>Step 8 — Return results.</strong> VaultReader returns the result set to VaultRouter, which passes it back to the Client.</li>
+      <li><strong>Step 1 — horus-ui routes the request.</strong> horus-ui (running on the user's machine at port 8400) routes <code>/api/v1/vault/*</code> to horus-service and adds the <code>Authorization</code> header with the client token. (By contrast, <code>/api/anvil/*</code> goes local-direct to LocalAnvil with no auth header.)</li>
+      <li><strong>Step 2 — horus-service verifies the token.</strong> horus-service calls its pluggable TokenVerifier with the client token. The TokenVerifier validates the token (signature, expiry, claims) against the client-facing verify key. Invalid tokens return 401 immediately — no downstream call is made.</li>
+      <li><strong>Step 3 — Principal normalization.</strong> TokenVerifier returns a canonical <code>Principal {tenant, user, role}</code>. Any supported client token format (current: JWT; extensible to other formats) is normalized to this single internal shape.</li>
+      <li><strong>Step 4 — Mint X-Horus-Principal.</strong> horus-service mints a short-lived (60 s) internal JWT containing the Principal, signed with the internal signing key (separate from the client-facing verify key). This is injected as the <code>X-Horus-Principal</code> header, replacing the raw Authorization header in all downstream calls.</li>
+      <li><strong>Step 5 — VaultRouter verifies X-Horus-Principal.</strong> VaultRouter verifies the <code>X-Horus-Principal</code> signature using the internal signing key's public counterpart. It never sees the raw client token.</li>
+      <li><strong>Step 6 — Vault routing.</strong> VaultRouter checks that the requested vault name appears in its known-vault list. If not found, it returns 404.</li>
+      <li><strong>Step 7 — Forward to VaultReader.</strong> VaultRouter forwards the request to any available VaultReader replica (round-robin or least-connections). VaultReader is stateless, so any replica can serve any request.</li>
+      <li><strong>Step 8 — Typesense query.</strong> VaultReader queries the per-vault Typesense collection. Because Typesense stores the full page body, a single query returns everything the client needs. No secondary filesystem read is needed.</li>
+      <li><strong>Step 9 — Return results.</strong> Results flow back through VaultRouter → horus-service → horus-ui.</li>
     </ol>
   </div>
 
@@ -768,42 +819,48 @@ sequenceDiagram
     Typesense holds the full page body. There is no separate file-fetch step on the read path. The git working copy on VaultWriter's PVC is the authoritative source, but clients never read from it directly — Typesense is the read cache and it is always up to date because VaultWriter updates it synchronously on every write.
   </div>
 
+  <div class="callout info">
+    Client-side federation: horus-ui-client (the browser SPA) queries local Anvil AND the remote control plane (horus-service) in parallel and merges results in the browser. horus-service's Aggregation module only federates the REMOTE domains (Vault + Forge). There is no server-side federation of Anvil data.
+  </div>
+
   <h3>Graph query path (related pages and edges)</h3>
   <p>
     When the client issues a graph query such as fetching related pages or traversing edges, VaultReader
     queries Neo4j instead of Typesense for the structural data, then optionally fetches document bodies
-    from Typesense for the referenced pages.
+    from Typesense for the referenced pages. The same principal normalization flow applies.
   </p>
 
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
-  participant C as Client
+  participant HUI as horus-ui
+  participant HS as horus-service
   participant VR as VaultRouter
-  participant AL as AuthLib
   participant VRd as VaultReader
   participant NJ as Neo4j
   participant TS as Typesense
 
-  C->>VR: GET /vault/engineering/knowledge/related with page ID and Authorization Bearer token
-  VR->>AL: verifyJWT with token
-  AL-->>VR: claims valid
+  HUI->>HS: GET /api/v1/vault/engineering/knowledge/related with page ID and Authorization header
+  HS->>HS: verify token, normalize Principal, mint X-Horus-Principal
+  HS->>VR: GET /knowledge/related with X-Horus-Principal
+  VR->>VR: verify X-Horus-Principal, locate vault
   VR->>VRd: forward graph query to VaultReader replica
   VRd->>NJ: Cypher query against engineering database for related page IDs
   NJ-->>VRd: list of related page IDs with edge types
   VRd->>TS: fetch documents by ID list from horus_engineering collection
   TS-->>VRd: page bodies for related pages
   VRd-->>VR: related pages with edge metadata
-  VR-->>C: 200 with related pages
+  VR-->>HS: related pages
+  HS-->>HUI: 200 with related pages
     </div>
   </div>
 
   <div class="walkthrough">
     <ol>
-      <li><strong>Steps 1-3 — Auth and routing.</strong> Identical to the standard read path: JWT verified by AuthLib in-process, vault located in known-vault list, forwarded to VaultReader.</li>
-      <li><strong>Step 4 — Neo4j query.</strong> VaultReader issues a Cypher query against the per-vault Neo4j database to retrieve the IDs and edge types of pages related to the requested page.</li>
-      <li><strong>Step 5 — Typesense fetch by ID.</strong> VaultReader fetches the full document bodies for the related page IDs from Typesense. This is a batch fetch-by-ID operation, not a search query.</li>
-      <li><strong>Step 6 — Return.</strong> VaultReader combines the Neo4j edge metadata with the Typesense document bodies and returns the enriched result to the Client.</li>
+      <li><strong>Steps 1-4 — Auth, normalization, and X-Horus-Principal injection.</strong> Identical to the standard read path: client token verified by TokenVerifier, Principal normalized, 60 s internal JWT minted and injected as X-Horus-Principal.</li>
+      <li><strong>Step 5 — Neo4j query.</strong> VaultReader issues a Cypher query against the per-vault Neo4j database to retrieve the IDs and edge types of pages related to the requested page.</li>
+      <li><strong>Step 6 — Typesense fetch by ID.</strong> VaultReader fetches the full document bodies for the related page IDs from Typesense. This is a batch fetch-by-ID operation, not a search query.</li>
+      <li><strong>Step 7 — Return.</strong> VaultReader combines the Neo4j edge metadata with the Typesense document bodies and returns the enriched result up through VaultRouter and horus-service to horus-ui.</li>
     </ol>
   </div>
 
@@ -814,31 +871,37 @@ sequenceDiagram
   <!-- ================================================================ -->
   <h2>Section 6 — User Writing to Vault</h2>
   <p>
-    All writes to a vault go through VaultWriter — the single replica that owns the per-vault in-process queue,
-    the git working copies, and all mutations to Typesense and Neo4j. The queue serializes writes per vault to
-    prevent concurrent git conflicts. VaultWriter performs an optimistic version check before writing; if the
-    client is working from a stale version, it receives a 409 and must retry with the latest version.
+    All writes to a vault go through horus-service (which does principal normalization and injects
+    <code>X-Horus-Principal</code>), then through VaultRouter, then to VaultWriter — the single replica
+    that owns the per-vault in-process queue, the git working copies, and all mutations to Typesense and Neo4j.
+    The queue serializes writes per vault to prevent concurrent git conflicts. VaultWriter performs an
+    optimistic version check before writing; if the client is working from a stale version, it receives a 409
+    and must retry with the latest version.
   </p>
 
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
-  participant C as Client
+  participant HUI as horus-ui
+  participant HS as horus-service
+  participant TV as TokenVerifier
   participant VR as VaultRouter
-  participant AL as AuthLib
   participant VW as VaultWriter
   participant TS as Typesense
   participant NJ as Neo4j
-  participant LG as LocalGit
+  participant PVC as PVC git working copies
   participant RG as RemoteGit
 
-  C->>VR: POST /vault/engineering/knowledge/pages with Authorization Bearer token and page body and expected version
-  VR->>AL: verifyJWT with token
-  alt JWT invalid
-    AL-->>VR: error
-    VR-->>C: 401 Unauthorized
-  else JWT valid
-    AL-->>VR: claims with principal.user for git author
+  HUI->>HS: POST /api/v1/vault/engineering/knowledge/pages with Authorization Bearer token and page body and expected version
+  HS->>TV: verifyToken with client token
+  alt Token invalid
+    TV-->>HS: error
+    HS-->>HUI: 401 Unauthorized
+  else Token valid
+    TV-->>HS: Principal with tenant plus user plus role
+    HS->>HS: mint 60s internal JWT and set X-Horus-Principal
+    HS->>VR: POST /knowledge/pages with X-Horus-Principal plus page body plus expected version
+    VR->>VR: verify X-Horus-Principal signature and locate vault engineering
     VR->>VW: forward POST to VaultWriter - only one replica exists
     VW->>VW: enqueue task on the engineering vault queue
     Note over VW: Queue ensures one writer at a time per vault.<br/>Tasks processed in FIFO order.
@@ -846,20 +909,22 @@ sequenceDiagram
     VW->>VW: optimistic version check - sha256 of current file vs expected version in request
     alt Version mismatch - stale client
       VW-->>VR: 409 Conflict with current version
-      VR-->>C: 409 Conflict - retry with latest version
+      VR-->>HS: 409 Conflict
+      HS-->>HUI: 409 Conflict - retry with latest version
     else Version matches or new page
-      VW->>LG: write file to git working copy in PVC
-      LG-->>VW: file written
+      VW->>PVC: write file to git working copy
+      PVC-->>VW: file written
       VW->>TS: upsert document with full body into horus_engineering collection
       TS-->>VW: ok
       VW->>NJ: update graph edges for this page in engineering database
       NJ-->>VW: ok
-      VW->>LG: git commit with principal.user as author
-      LG-->>VW: committed
+      VW->>PVC: git commit with Principal.user from X-Horus-Principal as author
+      PVC-->>VW: committed
       VW->>RG: git push to vault remote
       RG-->>VW: pushed
       VW-->>VR: 200 with new version sha256
-      VR-->>C: 200 with updated page and new version
+      VR-->>HS: 200 with new version
+      HS-->>HUI: 200 with updated page and new version
     end
   end
     </div>
@@ -867,10 +932,10 @@ sequenceDiagram
 
   <div class="walkthrough">
     <ol>
-      <li><strong>Step 1 — Client sends write request.</strong> The Client sends a POST or PUT to VaultRouter with the page body, the expected version (sha256 of the content the client last read), and the JWT.</li>
-      <li><strong>Step 2 — JWT verification.</strong> VaultRouter calls <code>AuthLib.verifyJWT</code> in-process. Invalid tokens return 401 immediately.</li>
-      <li><strong>Step 3 — Extract principal.user.</strong> VaultRouter extracts <code>principal.user</code> from the verified JWT claims. This value will be used as the git commit author, providing an audit trail of who made each change.</li>
-      <li><strong>Step 4 — Route to VaultWriter.</strong> VaultRouter forwards the write request to VaultWriter. There is exactly one VaultWriter replica — no load balancing is needed for writes.</li>
+      <li><strong>Step 1 — horus-ui routes the write request.</strong> horus-ui routes <code>/api/v1/vault/*</code> POSTs to horus-service with the Authorization header. The page body and expected version (sha256 of the content the client last read) are included.</li>
+      <li><strong>Step 2 — Token verification and principal normalization.</strong> horus-service calls its TokenVerifier. Invalid tokens return 401 immediately. Valid tokens produce a canonical <code>Principal {tenant, user, role}</code>.</li>
+      <li><strong>Step 3 — Mint X-Horus-Principal.</strong> horus-service mints a 60 s internal JWT from the Principal and injects it as <code>X-Horus-Principal</code>. The raw Authorization header is NOT forwarded downstream.</li>
+      <li><strong>Step 4 — VaultRouter receives with X-Horus-Principal.</strong> VaultRouter verifies the <code>X-Horus-Principal</code> signature, routes to vault engineering, and forwards to VaultWriter (exactly one replica — no load balancing for writes).</li>
       <li><strong>Step 5 — Enqueue task.</strong> VaultWriter enqueues the write task on the per-vault in-process queue for the <code>engineering</code> vault. The queue ensures that only one write executes at a time for this vault, preventing concurrent git conflicts.</li>
       <li><strong>Step 6 — Vault worker picks up task.</strong> The per-vault queue worker dequeues the task and begins processing.</li>
       <li><strong>Step 7 — Optimistic version check.</strong> The worker computes the sha256 of the current file content on disk and compares it to the expected version in the request. If they do not match, the client is working from a stale version.</li>
@@ -878,8 +943,8 @@ sequenceDiagram
       <li><strong>Step 9 — Write to git working copy.</strong> If the version check passes (or this is a new page), the worker writes the file to the git working copy on the PVC.</li>
       <li><strong>Step 10 — Update Typesense.</strong> The worker upserts the full page body and metadata into the per-vault Typesense collection. After this point, read replicas will return the new content.</li>
       <li><strong>Step 11 — Update Neo4j.</strong> If the page has link or edge changes, the worker updates the per-vault Neo4j database.</li>
-      <li><strong>Step 12 — Git commit and push.</strong> The worker commits the change with <code>principal.user</code> as the git commit author and pushes to the vault's remote git repo. This provides a durable, auditable history.</li>
-      <li><strong>Step 13 — Respond.</strong> VaultWriter returns 200 with the new version (sha256 of the written content). VaultRouter passes this back to the Client.</li>
+      <li><strong>Step 12 — Git commit and push.</strong> The worker commits the change with <code>Principal.user</code> (from the X-Horus-Principal JWT) as the git commit author and pushes to the vault's remote git repo. This provides a durable, auditable history.</li>
+      <li><strong>Step 13 — Respond.</strong> VaultWriter returns 200 with the new version (sha256 of the written content). The response flows back through VaultRouter and horus-service to horus-ui.</li>
     </ol>
   </div>
 
@@ -892,49 +957,60 @@ sequenceDiagram
   <!-- ================================================================ -->
   <!-- SECTION 7: FORGE — WORKSPACE AND ARTIFACT INSTALL                  -->
   <!-- ================================================================ -->
-  <h2>Section 7 — User Creating Workspace Artifacts via Forge</h2>
+  <h2>Section 7 — User Installing Workspace Artifacts via Forge</h2>
   <p>
-    Forge has two distinct layers. Workspaces are a local execution-plane concept: directories at
-    <code>~/Horus/workspaces/name/</code> on the user's machine, created by the Horus CLI with no remote
-    service calls. The Forge Registry is a service-plane concept: an S3-backed artifact store that the CLI
-    contacts to resolve and download artifacts. Sessions (<code>forge_develop</code>) are local git worktrees,
-    also separate from workspaces.
+    Forge is a REMOTE service in the locked architecture. The Forge Registry runs inside the Kubernetes cluster
+    (ClusterIP, reachable only via horus-service) — it is not a local service on the user's machine.
+    Workspaces are still a local execution-plane concept: directories on the user's machine created by the
+    <code>@arkhera/horus</code> NPM CLI with no remote service calls. But artifact resolution and download go
+    through horus-service (which applies principal normalization and injects <code>X-Horus-Principal</code>)
+    before reaching forge-registry. Sessions (<code>forge_develop</code>) are local git worktrees, separate from workspaces.
   </p>
 
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
-  participant C as Client
-  participant FR as ForgeRegistry
+  participant HUI as horus-ui
+  participant HS as horus-service
+  participant TV as TokenVerifier
+  participant FR as forge-registry
   participant S3 as S3
 
-  Note over C: forge_workspace_create runs locally.<br/>Creates directory at ~/Horus/workspaces/my-ws/ on disk.<br/>Writes mcp.json and skills list.<br/>No network call needed.
+  Note over HUI: forge_workspace_create runs locally.<br/>Creates directory at ~/Horus/workspaces/my-ws/ on disk.<br/>Writes mcp.json and skills list.<br/>No network call needed.
 
-  C->>C: create workspace directory on local filesystem
-  C->>C: write workspace config with mcp.json and skills list and permissions
+  HUI->>HUI: create workspace directory on local filesystem
+  HUI->>HUI: write workspace config with mcp.json and skills list and permissions
 
-  Note over C,FR: Installing an artifact from the registry
-  C->>FR: GET resolve artifact by name horus-anvil at version latest
-  FR->>FR: AuthStrategy check - read is anonymous in alpha
-  FR-->>C: artifact metadata with resolved version and download URL
+  Note over HUI,FR: Installing an artifact from the remote registry via horus-service
+  HUI->>HS: GET /api/v1/forge/resolve artifact horus-anvil at version latest with Authorization header
+  HS->>TV: verifyToken with client token
+  TV-->>HS: Principal with tenant plus user plus role
+  HS->>HS: mint 60s internal JWT and set X-Horus-Principal
+  HS->>FR: GET /resolve horus-anvil at latest with X-Horus-Principal
+  FR->>FR: verify X-Horus-Principal and check artifact exists
+  FR-->>HS: artifact metadata with resolved version and download URL
+  HS-->>HUI: artifact metadata
 
-  C->>FR: GET download artifact horus-anvil at resolved version
+  HUI->>HS: GET /api/v1/forge/download horus-anvil at resolved version with Authorization header
+  HS->>HS: verify token and mint X-Horus-Principal
+  HS->>FR: GET /download with X-Horus-Principal
   FR->>S3: getObject for artifact tarball from storage key
   S3-->>FR: artifact bytes
-  FR-->>C: artifact stream
+  FR-->>HS: artifact stream
+  HS-->>HUI: artifact stream
 
-  C->>C: extract tarball and install artifact into workspace directory
-  C-->>C: workspace ready with artifact installed
+  HUI->>HUI: extract tarball and install artifact into workspace directory
+  HUI-->>HUI: workspace ready with artifact installed
     </div>
   </div>
 
   <div class="walkthrough">
     <ol>
       <li><strong>Step 1 — Workspace creation (local only).</strong> <code>forge_workspace_create</code> creates a directory on the user's local filesystem at <code>~/Horus/workspaces/name/</code>. It writes config files including <code>mcp.json</code>, a skills list, and permissions. This is a pure filesystem operation — no network call is made to any Horus service. Workspaces do NOT clone repositories.</li>
-      <li><strong>Step 2 — Artifact resolution.</strong> When the user adds an artifact, the CLI calls the ForgeRegistry resolve endpoint with the artifact name and desired version. ForgeRegistry returns the resolved version and a download URL.</li>
-      <li><strong>Step 3 — AuthStrategy check.</strong> ForgeRegistry evaluates the request through its AuthStrategy. In Phase 1, reads are anonymous — no JWT or API key is required to download an artifact. The admin key is only required to publish.</li>
-      <li><strong>Step 4 — S3 retrieval.</strong> ForgeRegistry fetches the artifact tarball from S3 using an internal storage key. Clients never interact with S3 directly.</li>
-      <li><strong>Step 5 — Install locally.</strong> The CLI extracts the tarball and installs the artifact into the workspace directory. The workspace is now ready to use with the artifact available.</li>
+      <li><strong>Step 2 — Artifact resolution via horus-service.</strong> When the user adds an artifact, horus-ui sends the request to horus-service at <code>/api/v1/forge/resolve</code>. horus-service verifies the token, normalizes the Principal, and mints an <code>X-Horus-Principal</code> JWT before forwarding to forge-registry (which is ClusterIP only — not reachable directly).</li>
+      <li><strong>Step 3 — forge-registry resolves the artifact.</strong> forge-registry verifies the <code>X-Horus-Principal</code> and returns artifact metadata with the resolved version and a download URL.</li>
+      <li><strong>Step 4 — Download via horus-service.</strong> horus-ui sends the download request through horus-service, which again applies principal normalization. forge-registry fetches the tarball from S3 using an internal storage key. Clients never interact with S3 directly.</li>
+      <li><strong>Step 5 — Install locally.</strong> horus-ui extracts the tarball and installs the artifact into the workspace directory. The workspace is now ready to use with the artifact available.</li>
     </ol>
   </div>
 
@@ -943,35 +1019,44 @@ sequenceDiagram
   <div class="diagram-wrap">
     <div class="mermaid">
 sequenceDiagram
-  participant C as Client
-  participant FR as ForgeRegistry
+  participant Op as Operator
+  participant HS as horus-service
+  participant TV as TokenVerifier
+  participant FR as forge-registry
   participant S3 as S3
 
-  C->>FR: POST /publish with tarball and metadata and admin key in Authorization header
-  FR->>FR: AuthStrategy check admin key
-  alt Not authorized - missing or invalid admin key
-    FR-->>C: 403 Forbidden
-  else Authorized
+  Op->>HS: POST /api/v1/forge/publish with tarball and metadata and admin credential in Authorization header
+  HS->>TV: verifyToken with admin credential
+  alt Not authorized
+    TV-->>HS: error
+    HS-->>Op: 403 Forbidden
+  else Authorized as admin role
+    TV-->>HS: Principal with role=admin
+    HS->>HS: mint 60s X-Horus-Principal with role=admin
+    HS->>FR: POST /publish with X-Horus-Principal plus tarball
+    FR->>FR: verify X-Horus-Principal and check role=admin
     FR->>S3: putObject tarball at storage key artifacts-name-version
     S3-->>FR: etag confirmed
     FR->>FR: update registry index with name, version, sha256, and manifest entry
-    FR-->>C: 201 Created with artifact download URL
+    FR-->>HS: 201 Created with artifact download URL
+    HS-->>Op: 201 Created with artifact download URL
   end
     </div>
   </div>
 
   <div class="walkthrough">
     <ol>
-      <li><strong>Step 1 — Publish request.</strong> The publisher (operator or CI system) sends the artifact tarball and metadata to ForgeRegistry's publish endpoint, including an admin API key in the Authorization header.</li>
-      <li><strong>Step 2 — Authorization.</strong> ForgeRegistry's AuthStrategy checks the admin key. If absent or invalid, the request is rejected with 403. Anonymous callers cannot publish in any phase.</li>
-      <li><strong>Step 3 — S3 write.</strong> ForgeRegistry writes the tarball to S3 under a storage key structured as <code>artifacts/name/version.tar.gz</code>. Note: keys are not namespaced by tenant in Phase 1 — all tenants share the same S3 key namespace.</li>
-      <li><strong>Step 4 — Index update.</strong> ForgeRegistry updates its registry index with the artifact name, version, sha256 checksum, and manifest. Future resolve calls will find this version.</li>
-      <li><strong>Step 5 — Confirmation.</strong> A 201 response with the artifact download URL is returned to the publisher.</li>
+      <li><strong>Step 1 — Publish request.</strong> The publisher (operator or CI system) sends the artifact tarball and metadata to horus-service's publish endpoint with an admin credential in the Authorization header. forge-registry is ClusterIP only — not reachable directly.</li>
+      <li><strong>Step 2 — Token verification and role check.</strong> horus-service's TokenVerifier verifies the credential and produces a Principal with <code>role=admin</code>. If absent or invalid, the request is rejected with 403.</li>
+      <li><strong>Step 3 — Principal normalization.</strong> horus-service mints an <code>X-Horus-Principal</code> JWT with the admin role and forwards to forge-registry. forge-registry verifies the JWT and checks the role.</li>
+      <li><strong>Step 4 — S3 write.</strong> forge-registry writes the tarball to S3 under a storage key structured as <code>artifacts/name/version.tar.gz</code>. Note: keys are not namespaced by tenant in Phase 1 — all tenants share the same S3 key namespace.</li>
+      <li><strong>Step 5 — Index update.</strong> forge-registry updates its registry index (SQLite on a PVC) with the artifact name, version, sha256 checksum, and manifest. Future resolve calls will find this version.</li>
+      <li><strong>Step 6 — Confirmation.</strong> A 201 response with the artifact download URL flows back through horus-service to the publisher.</li>
     </ol>
   </div>
 
   <div class="callout">
-    Tenant gap (post-alpha): S3 storage keys are not namespaced by tenant. All users sharing a ForgeRegistry deployment share the same artifact namespace. An admin key holder can overwrite any artifact at the same name and version regardless of who published it. True isolation requires either key-prefix scoping per tenant or separate S3 buckets per tenant. This is a known deferred item for post-alpha.
+    Tenant gap (post-alpha): S3 storage keys are not namespaced by tenant. All users sharing a forge-registry deployment share the same artifact namespace. True isolation requires either key-prefix scoping per tenant or separate S3 buckets per tenant. This is a known deferred item for post-alpha.
   </div>
 
   <hr />
@@ -994,67 +1079,67 @@ sequenceDiagram
     <tbody>
       <tr>
         <td><strong>Bootstrap</strong></td>
-        <td>Operator (CLI)</td>
-        <td>Yes — keypair generated, public key distributed to services</td>
-        <td>Yes — services started, health checks polled</td>
+        <td>Operator (CLI: <code>@arkhera/horus</code>)</td>
+        <td>Yes — operator-service generates 2 JWT keys on first boot (client-facing verify + internal signing)</td>
+        <td>Yes — ArgoCD syncs all 8 services; operator-service seeds admin user</td>
         <td>No</td>
-        <td>Deployment config on disk; Typesense and Neo4j started empty</td>
+        <td>K8s Secrets (keypair, admin cred); deploy-repo scaffold; all 8 services running but empty</td>
       </tr>
       <tr>
         <td><strong>Onboard user</strong></td>
-        <td>Operator (Part A), User (Part B)</td>
-        <td>Yes — JWT issued (Part A); JWT validated (Part B)</td>
-        <td>Part B only — git remote configured for Anvil sync</td>
-        <td>Yes — local git repo initialized and connected to RemoteGit</td>
-        <td>Local config file; LocalTypesense collection; LocalNeo4j database; LocalGit repo</td>
+        <td>Operator (Part A via operator-service port-forward), User (Part B)</td>
+        <td>Yes — operator calls operator-service (Part A); user validates credential (Part B)</td>
+        <td>Part A — operator-service port-forward. Part B — git remote configured for Anvil GitSyncEngine</td>
+        <td>Yes — local git repo initialized and connected to RemoteGit via GitSyncEngine</td>
+        <td>operator-service user record; local config file; 4 local Docker containers; LocalTypesense; LocalNeo4j; LocalGit repo</td>
       </tr>
       <tr>
         <td><strong>Create vault</strong></td>
-        <td>Operator (CLI)</td>
-        <td>No — operator action, no JWT involved</td>
-        <td>Yes — VaultWriter clones from RemoteGit; config reload to VaultRouter</td>
+        <td>Operator (CLI via operator-service port-forward)</td>
+        <td>Yes — operator authenticates to operator-service</td>
+        <td>Yes — operator-service triggers provisioning; VaultWriter clones from RemoteGit</td>
         <td>Yes — remote git repo initialized; VaultWriter clones working copy</td>
         <td>Typesense per-vault collection; Neo4j per-vault database; VaultWriter PVC</td>
       </tr>
       <tr>
         <td><strong>Anvil access (local)</strong></td>
-        <td>Client (user agent)</td>
-        <td>No JWT — local socket reachability is the auth gate</td>
-        <td>No — all operations are localhost only</td>
-        <td>Yes — every write commits to LocalGit; sync pulls from RemoteGit</td>
+        <td>Client (user agent) or horus-ui-client (client-side federation)</td>
+        <td>No auth — local socket reachability is the auth gate. horus-ui routes /api/anvil/* local-direct with no auth header.</td>
+        <td>No — all Anvil operations are localhost only</td>
+        <td>Yes — every write commits to LocalGit; GitSyncEngine syncs to RemoteGit</td>
         <td>LocalTypesense; LocalNeo4j; LocalGit</td>
       </tr>
       <tr>
         <td><strong>Vault read</strong></td>
-        <td>Client (user agent)</td>
-        <td>Yes — JWT verified by AuthLib in VaultRouter</td>
-        <td>Yes — Client to VaultRouter to VaultReader to Typesense or Neo4j</td>
+        <td>horus-ui → horus-service (principal normalization) → VaultRouter → VaultReader</td>
+        <td>Yes — horus-service verifies client token via TokenVerifier; mints 60s X-Horus-Principal; VaultRouter verifies X-Horus-Principal</td>
+        <td>Yes — horus-ui to horus-service to VaultRouter to VaultReader to Typesense or Neo4j</td>
         <td>No — reads never touch git</td>
         <td>Typesense (document search and fetch); Neo4j (graph queries only)</td>
       </tr>
       <tr>
         <td><strong>Vault write</strong></td>
-        <td>Client (user agent)</td>
-        <td>Yes — JWT verified by AuthLib in VaultRouter; principal.user extracted for audit</td>
-        <td>Yes — Client to VaultRouter to VaultWriter; VaultWriter pushes to RemoteGit</td>
+        <td>horus-ui → horus-service (principal normalization) → VaultRouter → VaultWriter</td>
+        <td>Yes — horus-service verifies token and mints X-Horus-Principal; Principal.user extracted for git author</td>
+        <td>Yes — horus-ui to horus-service to VaultRouter to VaultWriter; VaultWriter pushes to RemoteGit</td>
         <td>Yes — VaultWriter commits to git working copy and pushes to remote</td>
         <td>VaultWriter PVC (git working copy); Typesense (upsert); Neo4j (edge update); RemoteGit</td>
       </tr>
       <tr>
         <td><strong>Forge install</strong></td>
-        <td>Client via Horus CLI</td>
-        <td>Anonymous for reads — no key required in alpha</td>
-        <td>Yes — CLI fetches from ForgeRegistry; ForgeRegistry reads from S3</td>
+        <td>horus-ui → horus-service (principal normalization) → forge-registry → S3</td>
+        <td>Yes — horus-service verifies client token and mints X-Horus-Principal for forge-registry</td>
+        <td>Yes — horus-ui to horus-service to forge-registry (ClusterIP); forge-registry reads from S3</td>
         <td>No</td>
-        <td>Local workspace directory on user's machine; ForgeRegistry index (read only)</td>
+        <td>Local workspace directory on user's machine; forge-registry SQLite index (read only)</td>
       </tr>
       <tr>
         <td><strong>Forge publish</strong></td>
-        <td>Operator or CI</td>
-        <td>Yes — admin API key required; no JWT</td>
-        <td>Yes — publisher to ForgeRegistry; ForgeRegistry writes to S3</td>
+        <td>Operator or CI → horus-service (admin role check) → forge-registry → S3</td>
+        <td>Yes — horus-service verifies admin credential and mints X-Horus-Principal with role=admin</td>
+        <td>Yes — publisher to horus-service to forge-registry; forge-registry writes to S3</td>
         <td>No</td>
-        <td>S3 artifact storage; ForgeRegistry registry index</td>
+        <td>S3 artifact storage; forge-registry SQLite index</td>
       </tr>
     </tbody>
   </table>
@@ -1065,6 +1150,13 @@ sequenceDiagram
   <!-- SECTION 9: OPEN QUESTIONS                                          -->
   <!-- ================================================================ -->
   <h2>Section 9 — Open Questions for Later</h2>
+  <p class="callout info" style="border-left: 4px solid #388bfd; background: #0d1d30; border-radius: 0 6px 6px 0; padding: 12px 16px; margin: 16px 0; font-size: 0.88rem; color: #79c0ff;">
+    <strong>Locked since last revision:</strong> Agent chat uses the <strong>Anthropic SDK</strong> (not <code>@cursor/sdk</code>/composer-2).
+    horus-service integrates the Anthropic SDK for agent chat features. horus-ui is the unified client UI (port 8400),
+    formerly called <code>reader-server</code>. The client-side SPA is <code>horus-ui-client</code>, formerly called <code>reader</code>.
+    Forge is REMOTE (behind horus-service); Vault is REMOTE. Only Anvil is LOCAL.
+    Federation is CLIENT-SIDE: horus-ui-client merges local Anvil results and remote (horus-service) results in the browser.
+  </p>
   <ol>
     <li>
       <strong>Local Anvil setup ergonomics.</strong>
@@ -1109,7 +1201,7 @@ sequenceDiagram
 
   <hr />
   <p style="font-size:0.8rem; color:#484f58; text-align:center; margin-top: 40px;">
-    Generated 2026-05-25 — Horus Identity and Request Flows — Locked Alpha Design
+    Updated 2026-05-28 — Horus Identity and Request Flows — Locked Alpha Design
   </p>
 
 </div>
