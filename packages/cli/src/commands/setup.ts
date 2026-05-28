@@ -12,530 +12,241 @@ import {
   configExists,
   defaultConfig,
   resolveConfigPath,
-  resolveGitHubHost,
+  loadPreprovisionedConfig,
+  detectPreprovisionedConfig,
+  ensureFsLayout,
   type Config,
-  type VaultConfig,
-  type GitHubHost,
 } from '../lib/config.js';
 import { checkRuntime, detectRuntime, composeStreaming } from '../lib/runtime.js';
 import { pollUntilHealthy, type ServiceHealth } from '../lib/health.js';
 import { installComposeFile } from '../lib/compose.js';
 import { DEFAULT_PORTS, DEFAULT_DATA_DIR } from '../lib/constants.js';
 import { runConnect, detectInstalledClients } from './connect.js';
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Embed a token into an HTTPS clone URL so git can authenticate without a
- * credential helper. Returns the URL unchanged if no token is provided.
- * git masks passwords in error output, so the token won't appear in logs.
- */
-function injectToken(url: string, token: string): string {
-  if (!token) return url;
-  try {
-    const parsed = new URL(url);
-    parsed.username = 'oauth2';
-    parsed.password = token;
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-/**
- * Extract the hostname from a URL, falling back to 'github.com' on parse error.
- */
-function extractHostname(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return 'github.com';
-  }
-}
+import { runLogin } from './login.js';
 
 // ── Setup command ───────────────────────────────────────────────────────────
 
 export const setupCommand = new Command('setup')
-  .description('Interactive first-run setup for Horus')
+  .description('First-run setup for the Horus client')
   .option('-y, --yes', 'Non-interactive mode (use defaults + env vars)')
-  .option('--runtime <runtime>', 'Container runtime to use: docker or podman (non-interactive only)')
+  .option('--local-only', 'Local-only mode: skip the control-plane / login prompts')
+  .option('--config <path>', 'Provision from a pre-provisioned, zod-validated config.yaml bundle')
+  .option('--no-pull', 'Skip pulling container images')
+  .option('--runtime <runtime>', 'Container runtime to use: docker or podman')
   .option('--data-dir <path>', 'Data directory path')
-  .option('--repos-path <path>', 'Host repos path for Forge scanning')
-  .option('--anvil-repo <url>', 'Anvil notes repository URL')
-  .option('--vault-name <name>', 'Vault name (can be specified multiple times)')
-  .option('--vault-repo <url>', 'Vault knowledge-base repository URL (matches positionally with --vault-name)')
-  .option('--forge-repo <url>', 'Forge registry repository URL')
-  .option('--github-token <token>', 'GitHub personal access token for private repos (primary host)')
-  .option('--claude-desktop', 'Configure Claude Desktop MCP servers during setup (non-interactive opt-in)')
-  .option('--registry <url>', 'Enterprise registry URL. When set, skips the personal git registry prompt and uses the company registry instead.')
+  .option('--anvil-repo <url>', 'Anvil notes repository URL (HTTPS)')
+  .option('--control-plane <url>', 'Control-plane base URL (connected mode)')
+  .option('--claude-desktop', 'Configure Claude Desktop MCP servers during setup')
   .action(async (opts) => {
     console.log('');
     console.log(chalk.bold('Horus Setup'));
     console.log(chalk.dim('──────────────────────────────────────'));
     console.log('');
 
-    // Step 1: Check if already configured
-    if (configExists()) {
-      if (opts.yes) {
-        console.log(chalk.yellow('Existing configuration found. Merging with existing values in non-interactive mode.'));
-      } else {
-        const proceed = await confirm({
-          message: 'Horus is already configured. Reconfigure?',
-          default: false,
-        });
-        if (!proceed) {
-          console.log(chalk.dim('Setup cancelled.'));
-          return;
-        }
+    // Resolve which provisioning mode we are in.
+    const preprovisionedPath: string | null = opts.config ?? detectPreprovisionedConfig();
+    const isPreprovisioned = !!preprovisionedPath;
+    const isYes = !!opts.yes;
+    const isLocalOnly = !!opts.localOnly;
+    const interactive = !isPreprovisioned && !isYes;
+
+    // Reconfigure guard (converge, never clobber silently).
+    if (configExists() && interactive) {
+      const proceed = await confirm({
+        message: 'Horus is already configured. Reconfigure? (existing data is preserved)',
+        default: false,
+      });
+      if (!proceed) {
+        console.log(chalk.dim('Setup cancelled.'));
+        return;
       }
     }
 
-    // Step 2: Choose container runtime
+    // Detect available container runtimes.
     const checkSpinner = ora('Checking for container runtimes...').start();
-    const [hasDocker, hasPodman] = await Promise.all([
-      checkRuntime('docker'),
-      checkRuntime('podman'),
-    ]);
+    const [hasDocker, hasPodman] = await Promise.all([checkRuntime('docker'), checkRuntime('podman')]);
     checkSpinner.stop();
-
     const available = [
       ...(hasDocker ? ['docker' as const] : []),
       ...(hasPodman ? ['podman' as const] : []),
     ];
-
     if (available.length === 0) {
       console.log(chalk.red('No container runtime found.'));
       console.log('');
       console.log('Horus requires Docker or Podman with the Compose plugin.');
-      console.log('');
-      console.log('Install one of:');
       console.log('  Docker Desktop: https://www.docker.com/products/docker-desktop/');
       console.log('  Podman Desktop: https://podman-desktop.io/');
       process.exit(1);
     }
 
+    // ── Build the config for this run ────────────────────────────────────────
+    let config: Config;
     let selectedRuntime: 'docker' | 'podman';
 
-    if (opts.yes) {
-      // Non-interactive: use --runtime flag or first available
+    if (isPreprovisioned) {
+      // --config <path> / auto-detected bundle: zod-validate and adopt.
+      const loadSpinner = ora(`Loading pre-provisioned config: ${preprovisionedPath}`).start();
+      try {
+        config = loadPreprovisionedConfig(preprovisionedPath!);
+        loadSpinner.succeed('Pre-provisioned config validated');
+      } catch (err) {
+        loadSpinner.fail('Pre-provisioned config is invalid');
+        console.log(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+      const requested = (opts.runtime as 'docker' | 'podman' | undefined) ?? config!.runtime;
+      selectedRuntime = available.includes(requested) ? requested : available[0];
+    } else if (isYes) {
+      // Non-interactive: defaults + env + existing config.
+      const existing = configExists() ? loadConfig() : null;
+      const defaults = defaultConfig();
       const requested = opts.runtime as 'docker' | 'podman' | undefined;
       if (requested && !available.includes(requested)) {
         console.log(chalk.red(`Requested runtime "${requested}" is not installed.`));
-        console.log(chalk.dim(`Available: ${available.join(', ')}`));
         process.exit(1);
       }
-      selectedRuntime = requested ?? available[0];
-      console.log(`Using ${chalk.cyan(selectedRuntime)}`);
+      selectedRuntime = requested ?? existing?.runtime ?? available[0];
+
+      const controlPlane = opts.controlPlane || process.env.HORUS_CONTROL_PLANE_URL || existing?.control_plane_url || '';
+      config = {
+        ...defaults,
+        ...(existing ?? {}),
+        runtime: selectedRuntime,
+        data_dir: opts.dataDir || existing?.data_dir || DEFAULT_DATA_DIR,
+        control_plane_url: controlPlane,
+        token_provider: {
+          kind: process.env.TOKEN_PROVIDER_KIND || existing?.token_provider?.kind || (controlPlane ? 'static' : ''),
+          config: process.env.TOKEN_PROVIDER_CONFIG || existing?.token_provider?.config || '',
+        },
+        repos: {
+          anvil_notes: opts.anvilRepo || process.env.ANVIL_REPO_URL || existing?.repos.anvil_notes || '',
+          forge_registry: existing?.repos.forge_registry || '',
+        },
+        ai: {
+          key: process.env.HORUS_AI_KEY || existing?.ai.key || '',
+          anthropic_api_key: process.env.HORUS_ANTHROPIC_API_KEY || existing?.ai.anthropic_api_key || '',
+          model: process.env.HORUS_AGENT_MODEL || existing?.ai.model || defaults.ai.model,
+        },
+      };
     } else {
-      selectedRuntime = await select({
-        message: 'Which container runtime would you like to use?',
-        choices: available.map((r) => ({
-          value: r,
-          name: r === 'docker' ? 'Docker' : 'Podman',
-        })),
-      });
-    }
+      // Interactive — runtime prompt first.
+      selectedRuntime = available.length === 1
+        ? available[0]
+        : await select({
+            message: 'Which container runtime would you like to use?',
+            choices: available.map((r) => ({ value: r, name: r === 'docker' ? 'Docker' : 'Podman' })),
+          });
 
-    const runtime = await detectRuntime(selectedRuntime);
-
-    // Step 2b: Check registry reachability
-    if (opts.registry) {
-      // Enterprise mode: validate the company registry is reachable (fatal if not)
-      const registrySpinner = ora(`Checking company registry at ${opts.registry}...`).start();
-      try {
-        const healthUrl = opts.registry.replace(/\/$/, '') + '/health';
-        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(10_000) });
-        if (res.ok) {
-          registrySpinner.succeed(`Company registry reachable (HTTP ${res.status})`);
-        } else {
-          registrySpinner.fail(`Company registry returned HTTP ${res.status}`);
-          console.log(chalk.red(`  URL: ${healthUrl}`));
-          console.log(chalk.dim('  Ensure the registry is running and accessible from this machine.'));
-          process.exit(1);
-        }
-      } catch (err) {
-        registrySpinner.fail('Company registry is not reachable');
-        console.log(chalk.red(`  URL: ${opts.registry}`));
-        console.log(chalk.dim(`  Error: ${(err as Error).message}`));
-        console.log(chalk.dim('  Ensure the registry is running and accessible from this machine.'));
-        process.exit(1);
-      }
-    } else {
-      // Solo-dev mode: check global registry reachability (non-fatal warning)
-      const cfSpinner = ora('Checking global registry (CloudFront)...').start();
-      try {
-        const cfRes = await fetch('https://d1agcpjabvrj1s.cloudfront.net/health', { signal: AbortSignal.timeout(8_000) });
-        if (cfRes.ok) {
-          cfSpinner.succeed('Global registry reachable');
-        } else {
-          cfSpinner.warn(`Global registry responded with HTTP ${cfRes.status} — continuing`);
-        }
-      } catch {
-        cfSpinner.warn('Global registry unreachable — setup will continue, but artifact resolution may be limited');
-      }
-    }
-
-    // Step 3: Gather configuration
-    let config: Config;
-
-    if (opts.yes) {
-      // Non-interactive mode — use flags, env vars, then existing config, then defaults.
-      // Existing config values are preserved when no explicit flag/env override is given.
-      const existing = configExists() ? loadConfig() : null;
       const defaults = defaultConfig();
+      let control_plane_url = '';
+      let token_provider = { kind: '', config: '' };
 
-      // Parse vault names and repos from flags (only if explicitly provided)
-      let vaults: Record<string, VaultConfig>;
-      if (opts.vaultName || opts.vaultRepo) {
-        const vaultNames: string[] = opts.vaultName
-          ? Array.isArray(opts.vaultName) ? opts.vaultName : [opts.vaultName]
-          : ['default'];
-        const vaultRepos: string[] = opts.vaultRepo
-          ? Array.isArray(opts.vaultRepo) ? opts.vaultRepo : [opts.vaultRepo]
-          : [process.env.VAULT_KNOWLEDGE_REPO_URL ?? ''];
+      if (!isLocalOnly) {
+        // (1) Control-plane URL — soft-warn if unreachable, NEVER fatal.
+        control_plane_url = (
+          await input({
+            message: 'Control-plane URL (leave empty for local-only):',
+            default: opts.controlPlane ?? '',
+          })
+        ).trim();
 
-        vaults = {};
-        vaultNames.forEach((name, i) => {
-          vaults[name] = {
-            repo: vaultRepos[i] ?? vaultRepos[0] ?? '',
-            default: i === 0,
-          };
-        });
+        if (control_plane_url) {
+          const cpSpinner = ora(`Checking control plane at ${control_plane_url}...`).start();
+          try {
+            const res = await fetch(control_plane_url.replace(/\/$/, '') + '/health', {
+              signal: AbortSignal.timeout(8_000),
+            });
+            if (res.ok) cpSpinner.succeed('Control plane reachable');
+            else cpSpinner.warn(`Control plane responded HTTP ${res.status} — continuing (login can be deferred)`);
+          } catch {
+            cpSpinner.warn('Control plane unreachable — continuing; run `horus login` later');
+          }
+
+          // (2) TokenProvider flavor.
+          const kind = await select({
+            message: 'Principal token provider:',
+            choices: [
+              { value: 'static', name: 'Static token (paste a token)' },
+              { value: 'oidc', name: 'OIDC (issuer URL; login completes against the control plane)' },
+              { value: 'none', name: 'None (anonymous / configure later)' },
+            ],
+          });
+
+          // (3) Provider config.
+          let providerConfig = '';
+          if (kind === 'static') {
+            providerConfig = (await password({ message: 'Principal token:', mask: '*' })).trim();
+          } else if (kind === 'oidc') {
+            providerConfig = (await input({ message: 'OIDC issuer URL:' })).trim();
+          }
+          token_provider = { kind, config: providerConfig };
+        }
       } else {
-        // Preserve existing vaults; fall back to env var or empty default
-        vaults = existing?.vaults ?? (
-          process.env.VAULT_KNOWLEDGE_REPO_URL
-            ? { default: { repo: process.env.VAULT_KNOWLEDGE_REPO_URL, default: true } }
-            : defaults.vaults
-        );
+        console.log(chalk.dim('Local-only mode — skipping control-plane and login prompts.'));
       }
 
-      // Build github_hosts: map each unique hostname from vault repos + anvil repo
-      const primaryToken = opts.githubToken || process.env.GITHUB_TOKEN || '';
-      const anvilRepo =
-        opts.anvilRepo ||
-        process.env.ANVIL_REPO_URL ||
-        existing?.repos.anvil_notes ||
-        defaults.repos.anvil_notes;
+      // (5) Anvil git repo (optional).
+      const anvil_notes = (
+        await input({
+          message: 'Anvil notes repo URL (HTTPS, optional — leave empty to start with an empty local notes dir):',
+          default: opts.anvilRepo ?? '',
+        })
+      ).trim();
 
-      // Only rebuild github_hosts if explicit flags/tokens are provided;
-      // otherwise preserve existing entries so tokens are not lost.
-      let github_hosts: Record<string, GitHubHost>;
-      if (opts.githubToken || !existing || Object.keys(existing.github_hosts).length === 0) {
-        const allRepoUrls = [anvilRepo, ...Object.values(vaults).map((v) => v.repo)].filter(Boolean);
-        const seenHosts = new Set<string>();
-        github_hosts = {};
-        let hostIndex = 0;
-        for (const url of allRepoUrls) {
-          const hostname = extractHostname(url);
-          if (!seenHosts.has(hostname)) {
-            seenHosts.add(hostname);
-            const hostKey = hostIndex === 0 ? 'default' : hostname;
-            github_hosts[hostKey] = {
-              host: hostname,
-              token: primaryToken,
-            };
-            hostIndex++;
-          }
-        }
-        // Ensure at least one github_host entry
-        if (Object.keys(github_hosts).length === 0) {
-          github_hosts['default'] = { host: 'github.com', token: primaryToken };
-        }
-      } else {
-        github_hosts = existing.github_hosts;
+      // (6) Data dir.
+      const data_dir = await input({ message: 'Data directory:', default: opts.dataDir ?? DEFAULT_DATA_DIR });
+
+      // (agent key — optional; chat surface is disabled when empty)
+      const anthropicKey = (
+        await password({ message: 'Anthropic API key for agent chat (leave empty to skip):', mask: '*' })
+      ).trim();
+
+      // (7) Ports?
+      let ports: Config['ports'] = { ...DEFAULT_PORTS };
+      const customizePorts = await confirm({ message: 'Customize port assignments?', default: false });
+      if (customizePorts) {
+        const anvil = await number({ message: 'Anvil port:', default: DEFAULT_PORTS.anvil });
+        const ui = await number({ message: 'Horus UI port:', default: DEFAULT_PORTS.ui });
+        const typesense = await number({ message: 'Typesense port:', default: DEFAULT_PORTS.typesense });
+        const neo4j_http = await number({ message: 'Neo4j HTTP port:', default: DEFAULT_PORTS.neo4j_http });
+        const neo4j_bolt = await number({ message: 'Neo4j Bolt port:', default: DEFAULT_PORTS.neo4j_bolt });
+        ports = {
+          ...ports,
+          anvil: anvil ?? DEFAULT_PORTS.anvil,
+          ui: ui ?? DEFAULT_PORTS.ui,
+          typesense: typesense ?? DEFAULT_PORTS.typesense,
+          neo4j_http: neo4j_http ?? DEFAULT_PORTS.neo4j_http,
+          neo4j_bolt: neo4j_bolt ?? DEFAULT_PORTS.neo4j_bolt,
+        };
       }
 
       config = {
         ...defaults,
-        // Preserve all existing top-level fields first
-        ...(existing ?? {}),
-        // Then apply runtime (always re-detected)
-        runtime: runtime.name,
-        // Apply field-level overrides: explicit flag > existing value > default
-        data_dir: opts.dataDir || existing?.data_dir || DEFAULT_DATA_DIR,
-        host_repos_path: opts.reposPath || existing?.host_repos_path || '',
-        repos: {
-          anvil_notes: anvilRepo,
-          forge_registry:
-            opts.forgeRepo ||
-            process.env.FORGE_REGISTRY_REPO_URL ||
-            existing?.repos.forge_registry ||
-            defaults.repos.forge_registry,
-        },
-        registry_git_url: opts.forgeRepo || existing?.registry_git_url || undefined,
-        registry_deploy_key: existing?.registry_deploy_key || undefined,
-        enterprise_registry_url: opts.registry || existing?.enterprise_registry_url || undefined,
-        vaults,
-        github_hosts,
-        ai: {
-          key: process.env.HORUS_AI_KEY || existing?.ai.key || '',
-        },
-      };
-    } else {
-      // Interactive mode
-      const data_dir = await input({
-        message: 'Data directory:',
-        default: DEFAULT_DATA_DIR,
-      });
-
-      const host_repos_path = await input({
-        message: 'Host repos path (for Forge repo scanning, leave empty to skip):',
-        default: '',
-      });
-      // Repos are now auto-discovered recursively — no manual subdirectory prompt needed.
-      const host_repos_extra_scan_dirs: string[] = [];
-
-      const customize_ports = await confirm({
-        message: 'Customize port assignments?',
-        default: false,
-      });
-
-      let ports: { anvil: number; vault_rest: number; vault_mcp: number; vault_router: number; ui: number; forge: number; typesense: number; neo4j_http: number; neo4j_bolt: number } = { ...DEFAULT_PORTS };
-
-      if (customize_ports) {
-        const anvil = await number({
-          message: 'Anvil port:',
-          default: DEFAULT_PORTS.anvil,
-        });
-        const vault_rest = await number({
-          message: 'Vault REST port (per-vault instances):',
-          default: DEFAULT_PORTS.vault_rest,
-        });
-        const vault_mcp = await number({
-          message: 'Vault MCP port:',
-          default: DEFAULT_PORTS.vault_mcp,
-        });
-        const vault_router = await number({
-          message: 'Vault Router port:',
-          default: DEFAULT_PORTS.vault_router,
-        });
-        const forge = await number({
-          message: 'Forge port:',
-          default: DEFAULT_PORTS.forge,
-        });
-        ports = {
-          anvil: anvil ?? DEFAULT_PORTS.anvil,
-          vault_rest: vault_rest ?? DEFAULT_PORTS.vault_rest,
-          vault_mcp: vault_mcp ?? DEFAULT_PORTS.vault_mcp,
-          vault_router: vault_router ?? DEFAULT_PORTS.vault_router,
-          ui: DEFAULT_PORTS.ui,
-          forge: forge ?? DEFAULT_PORTS.forge,
-          typesense: DEFAULT_PORTS.typesense,
-          neo4j_http: DEFAULT_PORTS.neo4j_http,
-          neo4j_bolt: DEFAULT_PORTS.neo4j_bolt,
-        };
-      }
-
-      // Repository configuration
-      console.log('');
-      console.log(chalk.bold('Repository Configuration'));
-      console.log(chalk.dim('Horus stores notes and knowledge in Git repos you own.'));
-      console.log(chalk.dim('Create empty repos on your Git server, then paste the URLs below.'));
-      console.log('');
-      console.log(chalk.yellow('  Use HTTPS URLs — container services do not have SSH keys.'));
-      console.log(chalk.dim('  SSH URLs (git@github.com:...) will fail at runtime inside Docker/Podman.'));
-      console.log('');
-
-      const primaryHost = await input({
-        message: 'Primary Git server hostname:',
-        default: 'github.com',
-      });
-
-      const example = (repo: string) => chalk.dim(`  e.g., https://${primaryHost}/<owner>/${repo}`);
-
-      console.log('');
-
-      const anvil_notes = await input({
-        message: `Anvil notes repo URL:\n${example('horus-notes')}\n`,
-        validate: (v) => v.trim().length > 0 || 'Anvil needs a notes repo to store your data.',
-      });
-
-      // Registry setup: enterprise vs solo-dev path
-      let forge_registry = '';
-      let registry_git_url = '';
-      let registry_deploy_key = '';
-
-      if (opts.registry) {
-        // Enterprise path: use company registry URL, skip git repo prompt
-        // (reachability was already validated in step 2b above)
-        console.log('');
-        console.log(chalk.bold.cyan('Enterprise Registry'));
-        console.log(chalk.green(`  Registry URL: ${opts.registry}`));
-        console.log(chalk.dim('  Skipping personal git registry — using company registry instead.'));
-        console.log('');
-      } else {
-        // Solo-dev path: git repo is mandatory (backs the personal registry-service via GitStorageBackend)
-        console.log('');
-        console.log(chalk.bold('Personal Registry (Git-Backed)'));
-        console.log(chalk.dim('Horus stores your artifacts and repo metadata in a private git repo you own.'));
-        console.log(chalk.dim('This repo backs the local registry-service that runs alongside Horus.'));
-        console.log(chalk.dim('Create an empty GitHub repo and paste the URL below.'));
-        console.log('');
-
-        registry_git_url = await input({
-          message: `Registry git repo URL:\n${example('horus-registry')}\n`,
-          validate: async (v) => {
-            if (!v.trim()) return 'A git repo URL is required for the personal registry.';
-            // Validate the URL is accessible via git ls-remote
-            try {
-              execSync(`git ls-remote "${v.trim()}" HEAD`, { stdio: 'pipe', timeout: 15_000 });
-              return true;
-            } catch {
-              return `Cannot access "${v.trim()}" — check the URL and ensure you have read access.`;
-            }
-          },
-        });
-
-        const wantsDeployKey = await confirm({
-          message: 'Does the registry repo require a deploy key (SSH private key)?',
-          default: false,
-        });
-
-        if (wantsDeployKey) {
-          registry_deploy_key = await input({
-            message: 'Path to deploy key (SSH private key file):',
-            validate: (v) => {
-              if (!v.trim()) return 'Deploy key path cannot be empty.';
-              if (!existsSync(v.trim())) return `File not found: ${v.trim()}`;
-              return true;
-            },
-          });
-        }
-
-        forge_registry = registry_git_url;
-      }
-
-      // Vault collection flow
-      console.log('');
-      console.log(chalk.bold('Vault Configuration'));
-      console.log(chalk.dim('Add one or more knowledge-base vaults. Each vault is a separate Git repo.'));
-      console.log('');
-
-      const vaults: Record<string, VaultConfig> = {};
-      let addingVaults = true;
-      let isFirstVault = true;
-
-      while (addingVaults) {
-        const vaultName = await input({
-          message: 'Add vault name (e.g., personal):',
-          validate: (v) => {
-            const trimmed = v.trim();
-            if (!trimmed) return 'Vault name cannot be empty.';
-            if (!/^[a-z0-9-]+$/.test(trimmed)) return 'Vault name must be lowercase alphanumeric with hyphens only.';
-            if (trimmed in vaults) return `Vault "${trimmed}" already added.`;
-            return true;
-          },
-        });
-
-        const vaultRepo = await input({
-          message: `Vault repo URL:\n${example(`${vaultName.trim()}-knowledge`)}\n`,
-          validate: (v) => v.trim().length > 0 || 'Vault repo URL cannot be empty.',
-        });
-
-        let isDefault = isFirstVault;
-        if (!isFirstVault) {
-          isDefault = await confirm({
-            message: `Is "${vaultName.trim()}" the default vault?`,
-            default: false,
-          });
-        }
-
-        // If user marks a new vault as default, unset any previous default
-        if (isDefault) {
-          for (const v of Object.values(vaults)) {
-            v.default = false;
-          }
-        }
-
-        vaults[vaultName.trim()] = {
-          repo: vaultRepo.trim(),
-          default: isDefault || isFirstVault,
-        };
-        isFirstVault = false;
-
-        addingVaults = await confirm({
-          message: 'Add another vault?',
-          default: false,
-        });
-      }
-
-      // Ensure exactly one default
-      const defaultCount = Object.values(vaults).filter((v) => v.default).length;
-      if (defaultCount === 0 && Object.keys(vaults).length > 0) {
-        // Mark first vault as default
-        const firstKey = Object.keys(vaults)[0];
-        vaults[firstKey].default = true;
-      }
-
-      // Authentication: collect tokens per unique hostname
-      console.log('');
-      console.log(chalk.bold('Authentication'));
-      console.log(chalk.dim('A personal access token is required per Git server for private repositories.'));
-      console.log('');
-
-      const allRepoUrls = [anvil_notes.trim(), ...Object.values(vaults).map((v) => v.repo)].filter(Boolean);
-      const uniqueHostnames = [...new Set(allRepoUrls.map(extractHostname))];
-
-      const github_hosts: Record<string, GitHubHost> = {};
-      for (let i = 0; i < uniqueHostnames.length; i++) {
-        const hostname = uniqueHostnames[i];
-        const token = await password({
-          message: `GitHub token for ${chalk.cyan(hostname)} (leave empty to skip):`,
-          mask: '*',
-        });
-        const hostKey = i === 0 ? 'default' : hostname;
-        github_hosts[hostKey] = {
-          host: hostname,
-          token: token.trim(),
-        };
-      }
-
-      // AI key — optional but required for NLP agent search
-      console.log('');
-      console.log(chalk.bold('NLP Agent Search'));
-      console.log(chalk.dim('Required for the ✦ Ask bar in the Horus Reader.'));
-      console.log('');
-
-      const aiKey = await password({
-        message: 'Horus AI key (leave empty to configure later):',
-        mask: '*',
-      });
-
-      config = {
-        ...defaultConfig(),
+        runtime: selectedRuntime,
         data_dir,
-        host_repos_path,
-        host_repos_extra_scan_dirs,
-        runtime: runtime.name,
         ports,
-        repos: {
-          anvil_notes: anvil_notes.trim(),
-          forge_registry: forge_registry.trim(),
-        },
-        registry_git_url: registry_git_url?.trim() || undefined,
-        registry_deploy_key: registry_deploy_key?.trim() || undefined,
-        enterprise_registry_url: opts.registry?.trim() || undefined,
-        vaults,
-        github_hosts,
-        ai: {
-          key: aiKey.trim(),
-        },
+        control_plane_url,
+        token_provider,
+        repos: { anvil_notes, forge_registry: '' },
+        ai: { key: '', anthropic_api_key: anthropicKey, model: defaults.ai.model },
       };
     }
 
-    // Step 4: Save config
+    const runtime = await detectRuntime(selectedRuntime);
+    config.runtime = runtime.name;
+
+    // ── Persist config + provision the filesystem ────────────────────────────
     const configSpinner = ora('Saving configuration...').start();
     try {
       saveConfig(config);
-      configSpinner.succeed('Configuration saved to ~/Horus/config.yaml');
+      ensureFsLayout(); // providers/, logs/, keys/
+      configSpinner.succeed('Configuration saved to ~/Horus/config.yaml (providers/, logs/, keys/ ready)');
     } catch (error) {
       configSpinner.fail('Failed to save configuration');
       console.error((error as Error).message);
       process.exit(1);
     }
 
-    // Step 5: Generate .env
     const envSpinner = ora('Generating .env file...').start();
     try {
       writeEnvFile(config);
@@ -546,7 +257,6 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 6: Install compose file (generated dynamically from config)
     const composeSpinner = ora('Installing docker-compose.yml...').start();
     try {
       installComposeFile(config, runtime.name);
@@ -557,112 +267,45 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 7: Clone repos to data directory using host git credentials
+    // ── Clone the Anvil notes repo (optional, idempotent) ────────────────────
     const dataDir = resolveConfigPath(config.data_dir);
-
-    // Build list of repos to clone
-    const anvilToken = resolveGitHubHost(config.repos.anvil_notes, config.github_hosts)?.token ?? '';
-    const forgeToken = resolveGitHubHost(config.repos.forge_registry, config.github_hosts)?.token ?? '';
-
-    const reposToClone: Array<{ url: string; dest: string; label: string; token: string }> = [
-      {
-        url: config.repos.anvil_notes,
-        dest: join(dataDir, 'notes'),
-        label: 'Anvil notes',
-        token: anvilToken,
-      },
-      {
-        url: config.repos.forge_registry,
-        dest: join(dataDir, 'registry'),
-        label: 'Forge registry',
-        token: forgeToken,
-      },
-    ].filter((r) => r.url);
-
-    // Add each vault repo
-    for (const [name, vault] of Object.entries(config.vaults)) {
-      if (vault.repo) {
-        const vaultToken = resolveGitHubHost(vault.repo, config.github_hosts)?.token ?? '';
-        reposToClone.push({
-          url: vault.repo,
-          dest: join(dataDir, 'vaults', name),
-          label: `Vault: ${name}`,
-          token: vaultToken,
-        });
-      }
-    }
-
-    if (reposToClone.length > 0) {
-      console.log('');
-      console.log(chalk.bold('Cloning repositories...'));
-      mkdirSync(dataDir, { recursive: true });
-
-      for (const repo of reposToClone) {
-        const spinner = ora(`Cloning ${repo.label}...`).start();
-
-        if (existsSync(join(repo.dest, '.git'))) {
-          spinner.succeed(`${repo.label} already cloned`);
-          continue;
-        }
-
+    mkdirSync(dataDir, { recursive: true });
+    const notesDest = join(dataDir, 'notes');
+    if (config.repos.anvil_notes) {
+      const spinner = ora('Cloning Anvil notes...').start();
+      if (existsSync(join(notesDest, '.git'))) {
+        spinner.succeed('Anvil notes already cloned');
+      } else {
         try {
-          mkdirSync(repo.dest, { recursive: true });
-          const cloneUrl = injectToken(repo.url, repo.token);
-          execSync(`git clone "${cloneUrl}" "${repo.dest}"`, {
-            stdio: 'pipe',
-            timeout: 60_000,
-          });
-          spinner.succeed(`${repo.label} cloned`);
+          mkdirSync(notesDest, { recursive: true });
+          // Clone runs on the host, using host git credentials (SSH/helper).
+          execSync(`git clone "${config.repos.anvil_notes}" "${notesDest}"`, { stdio: 'pipe', timeout: 60_000 });
+          spinner.succeed('Anvil notes cloned');
         } catch (error) {
-          spinner.fail(`Failed to clone ${repo.label}`);
-          const msg = (error as Error).message || '';
-          if (msg.includes('already exists and is not an empty directory')) {
-            console.log(chalk.dim('  Directory exists but has no .git — check the path.'));
-          } else {
-            console.log(chalk.dim(`  ${msg.split('\n')[0]}`));
-          }
-          console.log(chalk.dim(`  URL: ${repo.url}`));
-          if (!repo.token) {
-            console.log(chalk.dim('  Tip: Re-run setup and provide a GitHub token if the repo is private.'));
-          }
-          process.exit(1);
+          spinner.fail('Failed to clone Anvil notes (continuing with an empty notes dir)');
+          console.log(chalk.dim(`  ${((error as Error).message || '').split('\n')[0]}`));
+          console.log(chalk.dim(`  URL: ${config.repos.anvil_notes}`));
+          mkdirSync(notesDest, { recursive: true });
         }
       }
+    } else {
+      mkdirSync(notesDest, { recursive: true });
     }
 
-    // Step 7b: Chown Forge data dirs to UID 1001 on Linux
-    // The Forge container runs as UID 1001. On Linux (bare Docker/Podman, no
-    // uid-mapping shim), directories created by the provisioning user are owned
-    // by root or the current user, causing EACCES when Forge tries to open its
-    // config file. Docker Desktop on macOS handles uid mapping transparently, so
-    // we skip this step there.
-    if (process.platform === 'linux') {
-      const forgeDirs = ['config', 'registry', 'workspaces', 'sessions']
-        .map((d) => join(dataDir, d));
-      for (const dir of forgeDirs) {
-        mkdirSync(dir, { recursive: true });
-      }
-      const dirList = forgeDirs.map((d) => `"${d}"`).join(' ');
+    // ── Pull images (unless --no-pull) — non-fatal ───────────────────────────
+    if (opts.pull !== false) {
+      console.log('');
+      console.log(chalk.bold('Pulling container images...'));
       try {
-        execSync(`chown -R 1001:1001 ${dirList}`, { stdio: 'pipe' });
-      } catch (error) {
-        console.log(chalk.yellow('Warning: could not chown Forge data dirs to UID 1001.'));
-        console.log(chalk.dim('  Forge may fail to start if directory ownership is incorrect.'));
-        console.log(chalk.dim(`  Run manually: sudo chown -R 1001:1001 ${forgeDirs.join(' ')}`));
+        await composeStreaming(runtime, runtime.name === 'podman' ? ['pull'] : ['pull', '--ignore-pull-failures']);
+      } catch {
+        console.log(chalk.yellow('Some images could not be pulled — continuing.'));
       }
+    } else {
+      console.log(chalk.dim('Skipping image pull (--no-pull).'));
     }
 
-    // Step 8: Pull images (non-fatal — images may not be published yet)
-    console.log('');
-    console.log(chalk.bold('Pulling container images...'));
-    try {
-      await composeStreaming(runtime, runtime.name === 'podman' ? ['pull'] : ['pull', '--ignore-pull-failures']);
-    } catch {
-      console.log(chalk.yellow('Some images could not be pulled.'));
-      console.log(chalk.dim('Continuing — services will be built from source if build contexts are available.'));
-    }
-
-    // Step 9: Start services
+    // ── Start services ───────────────────────────────────────────────────────
     console.log('');
     console.log(chalk.bold('Starting Horus services...'));
     try {
@@ -673,114 +316,94 @@ export const setupCommand = new Command('setup')
       process.exit(1);
     }
 
-    // Step 10: Poll health checks
+    // ── Health poll ───────────────────────────────────────────────────────────
     console.log('');
     const healthSpinner = ora('Waiting for services to become healthy...').start();
-
     let lastStates: ServiceHealth[] = [];
     try {
-      const states = await pollUntilHealthy(
+      lastStates = await pollUntilHealthy(
         runtime,
         (current) => {
           lastStates = current;
           const summary = current
             .map((s) => {
-              const icon =
-                s.status === 'healthy'
-                  ? chalk.green('*')
-                  : s.status === 'starting'
-                    ? chalk.yellow('~')
-                    : chalk.red('x');
+              const icon = s.status === 'healthy' ? chalk.green('*') : s.status === 'starting' ? chalk.yellow('~') : chalk.red('x');
               return `${icon} ${s.name}`;
             })
             .join('  ');
           healthSpinner.text = `Waiting for services...  ${summary}`;
         },
         600_000,
-        5_000
+        5_000,
       );
       healthSpinner.succeed('All services are healthy');
-      lastStates = states;
     } catch (error) {
       healthSpinner.fail('Some services did not become healthy');
       console.log(chalk.dim((error as Error).message));
-      console.log('');
-      console.log(chalk.dim('Tip: Check logs with `docker compose logs` from ~/Horus/'));
-      process.exit(1);
+      console.log(chalk.dim('Tip: check logs with `horus status` or `docker compose logs` from ~/Horus/'));
+      // Non-fatal: the UI may still be browsable; continue to login/connect.
     }
 
-    // Step 11: Configure AI clients
+    // ── Login (connected only, non-fatal, at the end) ─────────────────────────
+    if (config.control_plane_url) {
+      console.log('');
+      const loginSpinner = ora('Logging in to the control plane...').start();
+      const result = await runLogin(config);
+      if (result.ok) loginSpinner.succeed(result.message);
+      else loginSpinner.warn(result.message);
+    }
+
+    // ── Configure MCP clients ──────────────────────────────────────────────────
     console.log('');
     const detectedClients = detectInstalledClients();
     if (detectedClients.length > 0) {
       console.log(chalk.bold('Configuring AI clients...'));
-
       let clientsToConnect = [...detectedClients];
-
-      // Claude Desktop requires an explicit opt-in: prompt in interactive mode,
-      // flag-controlled in non-interactive mode.
       if (clientsToConnect.includes('claude-desktop')) {
         let configureDesktop: boolean;
-        if (opts.yes) {
+        if (!interactive) {
           configureDesktop = opts.claudeDesktop === true;
-          if (!configureDesktop) {
-            console.log(chalk.dim('Skipping Claude Desktop (pass --claude-desktop to configure it).'));
-          }
         } else {
           configureDesktop = opts.claudeDesktop === false
             ? false
             : await confirm({ message: 'Setup for Claude Desktop?', default: true });
         }
-        if (!configureDesktop) {
-          clientsToConnect = clientsToConnect.filter((c) => c !== 'claude-desktop');
-        }
+        if (!configureDesktop) clientsToConnect = clientsToConnect.filter((c) => c !== 'claude-desktop');
       }
-
       if (clientsToConnect.length > 0) {
         try {
           await runConnect(config, runtime, clientsToConnect, 'localhost');
-        } catch (error) {
+        } catch {
           console.log(chalk.yellow('Could not configure AI clients automatically.'));
           console.log(chalk.dim(`Run ${chalk.cyan('horus connect')} to configure them manually.`));
         }
       }
     } else {
-      console.log(chalk.dim(`No AI clients detected. Run ${chalk.cyan('horus connect')} after installing Claude Desktop, Claude Code, or Cursor.`));
+      console.log(chalk.dim(`No AI clients detected. Run ${chalk.cyan('horus connect')} after installing one.`));
     }
 
-    // Step 12: Print success summary
+    // ── Summary ────────────────────────────────────────────────────────────────
+    const mode = config.control_plane_url ? 'connected' : 'local-only';
     console.log('');
     console.log(chalk.bold.green('Setup complete!'));
     console.log(chalk.dim('──────────────────────────────────────'));
     console.log('');
+    console.log(`  ${chalk.bold('Mode:')}       ${mode}`);
     console.log(`  ${chalk.bold('Runtime:')}    ${runtime.name}`);
     console.log(`  ${chalk.bold('Config:')}     ~/Horus/config.yaml`);
     console.log(`  ${chalk.bold('Data:')}       ${config.data_dir}`);
-    console.log('');
-    console.log(chalk.bold('  Service URLs:'));
-    console.log(`    Anvil:        http://localhost:${config.ports.anvil}`);
-    console.log(`    Vault Router: http://localhost:${config.ports.vault_router}`);
-    console.log(`    Vault MCP:    http://localhost:${config.ports.vault_mcp}`);
-    console.log(`    Forge:        http://localhost:${config.ports.forge}`);
-    console.log('');
-    console.log(chalk.bold('  Vault instances:'));
-    Object.entries(config.vaults).sort(([a], [b]) => a.localeCompare(b)).forEach(([name, vault], index) => {
-      const port = `800${index + 1}`;
-      const defaultLabel = vault.default ? chalk.dim(' (default)') : '';
-      console.log(`    ${name}${defaultLabel}:  http://localhost:${port}`);
-    });
-    console.log('');
-
-    console.log(chalk.bold('  Registry cascade:'));
-    if (config.enterprise_registry_url) {
-      console.log(`    1. ${config.enterprise_registry_url}  ${chalk.dim('(company registry — read/write)')}`);
-      console.log(chalk.dim('       No global fallback (air-gapped)'));
-    } else {
-      console.log(`    1. localhost:8744  ${chalk.dim('(personal registry — read/write, backed by git)')}`);
-      console.log(`    2. CloudFront     ${chalk.dim('(global public registry — read-only)')}`);
+    if (config.control_plane_url) {
+      console.log(`  ${chalk.bold('Control plane:')} ${config.control_plane_url}`);
     }
     console.log('');
+    console.log(chalk.bold('  Service URLs:'));
+    console.log(`    Horus UI:  http://localhost:${config.ports.ui}`);
+    console.log(`    Anvil:     http://localhost:${config.ports.anvil}`);
+    console.log('');
+    if (mode === 'local-only') {
+      console.log(chalk.dim('  Vault, Forge, and Admin require a control plane — not available in local-only mode.'));
+      console.log('');
+    }
 
-    // Suppress unused variable warning for lastStates
     void lastStates;
   });

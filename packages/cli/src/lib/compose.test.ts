@@ -73,8 +73,12 @@ function makeConfig(): Config {
       default: { host: 'github.com', token: 'test-token' },
     },
     enable_ui: true,
+    control_plane_url: '',
+    token_provider: { kind: '', config: '' },
     ai: {
       key: '',
+      anthropic_api_key: '',
+      model: 'claude-sonnet-4-6',
     },
   } as Config;
 }
