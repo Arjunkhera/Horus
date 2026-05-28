@@ -99,6 +99,16 @@ describe('installComposeFile', () => {
     expect(content).toContain('anvil:');
   });
 
+  it('main compose uses the renamed horus-ui service and ghcr.io/.../ui image', () => {
+    const config = makeConfig();
+    installComposeFile(config);
+    const content = readFileSync(join(testDir, 'docker-compose.yml'), 'utf-8');
+    expect(content).toContain('horus-ui:');
+    expect(content).toContain('ghcr.io/arjunkhera/horus/ui:latest');
+    expect(content).not.toContain('ghcr.io/arjunkhera/horus/reader');
+    expect(content).not.toMatch(/^\s*reader:/m);
+  });
+
   it('writes docker-compose.test.yml to the target directory', () => {
     const config = makeConfig();
     installComposeFile(config);
@@ -120,7 +130,7 @@ describe('installComposeFile', () => {
     expect(content).toContain('vault-mcp:');
     expect(content).toContain('forge:');
     expect(content).toContain('typesense:');
-    expect(content).toContain('reader:');
+    expect(content).toContain('horus-ui:');
   });
 
   it('test compose file uses TEST_PORT_* env vars for port remapping', () => {

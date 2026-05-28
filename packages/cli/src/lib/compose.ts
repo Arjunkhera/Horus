@@ -264,12 +264,12 @@ function buildRegistryService(config: Config): string | null {
       retries: 3`;
 }
 
-const READER_SERVICE = `\
-  # ── Reader ─────────────────────────────────────────────────────────────────
-  # Horus Reader — Express server + NLP agent search at port 8400.
-  # Serves Reader SPA, proxies /api/* to Anvil, hosts POST /api/ai/ask.
-  reader:
-    image: ghcr.io/arjunkhera/horus/reader:latest
+const HORUS_UI_SERVICE = `\
+  # ── Horus UI ───────────────────────────────────────────────────────────────
+  # Horus UI — Express server + NLP agent search at port 8400.
+  # Serves the UI SPA, proxies /api/* to Anvil, hosts POST /api/ai/ask.
+  horus-ui:
+    image: ghcr.io/arjunkhera/horus/ui:latest
     ports:
       - "\${UI_PORT:-8400}:8400"
     environment:
@@ -364,7 +364,7 @@ services:
     volumes:
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/typesense-data:/data"
 
-  reader:
+  horus-ui:
     ports:
       - "\${TEST_PORT_UI:-9260}:8400"
 
@@ -551,7 +551,7 @@ ${vaultRouterDependsOn ? `    depends_on:\n${vaultRouterDependsOn}\n` : ''}    n
     '',
     TYPESENSE_SERVICE,
     '',
-    ...(config.enable_ui !== false ? [READER_SERVICE, ''] : []),
+    ...(config.enable_ui !== false ? [HORUS_UI_SERVICE, ''] : []),
     '# ── Networks ──────────────────────────────────────────────────────────────────',
     'networks:',
     '  horus-net:',

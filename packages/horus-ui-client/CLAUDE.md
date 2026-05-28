@@ -1,4 +1,4 @@
-# Horus Reader — packages/reader/
+# Horus UI Client (SPA) — packages/horus-ui-client/
 
 Minimal read-only SPA served at `localhost:8400`. "Quartz for Anvil" — dark-theme browser for navigating Anvil notes.
 
@@ -82,7 +82,7 @@ Always create a Forge session before editing:
 
 ```
 forge_develop(repo: "Horus", workItem: "<id>")
-→ edit files inside sessionPath/packages/reader/
+→ edit files inside sessionPath/packages/horus-ui-client/
 → commit + push + open PR
 ```
 
@@ -93,7 +93,7 @@ The Docker container at port 8400 uses a **baked image with no volume mounts** �
 Because the Reader has no bundler (Babel Standalone handles JSX transpilation in-browser), serve it as plain static files:
 
 ```bash
-python3 -m http.server 8403 --directory packages/reader
+python3 -m http.server 8403 --directory packages/horus-ui-client
 # open http://localhost:8403
 ```
 
@@ -101,6 +101,6 @@ python3 -m http.server 8403 --directory packages/reader
 
 **What works:** JSX transpilation, all UI logic, mock data fallback, and live Anvil API calls (`AnvilClient` calls `localhost:8100` directly). The app behaves identically to the production container for all client-side verification.
 
-**Port selection:** 8400 = Docker production, 8401 = reader-server. Pick an unused port (e.g. 8403) to avoid conflicts.
+**Port selection:** 8400 = Docker production, 8401 = horus-ui server. Pick an unused port (e.g. 8403) to avoid conflicts.
 
 See `shared/guides/horus-reader-development.md` in Vault for full architecture context.

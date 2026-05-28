@@ -1,5 +1,5 @@
 {
-  "name": "@horus/reader-server",
+  "name": "@horus/horus-ui",
   "version": "1.0.0",
   "type": "module",
   "main": "server.js",

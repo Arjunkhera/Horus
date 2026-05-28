@@ -23,7 +23,7 @@ jobs:
       vault-router: ${{ steps.filter.outputs.vault-router }}
       vault-mcp: ${{ steps.filter.outputs.vault-mcp }}
       forge: ${{ steps.filter.outputs.forge }}
-      reader: ${{ steps.filter.outputs.reader }}
+      horus-ui: ${{ steps.filter.outputs.horus-ui }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,9 +45,9 @@ jobs:
             forge:
               - 'packages/search/**'
               - 'packages/forge/**'
-            reader:
-              - 'packages/reader/**'
-              - 'packages/reader-server/**'
+            horus-ui:
+              - 'packages/horus-ui-client/**'
+              - 'packages/horus-ui/**'
 
   # ── Anvil ─────────────────────────────────────────────────────────────────────
   build-anvil:
@@ -309,11 +309,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Reader (Horus Reader SPA) ─────────────────────────────────────────────────
-  build-reader:
-    name: Build reader
+  # ── Horus UI (unified client) ─────────────────────────────────────────────────
+  build-horus-ui:
+    name: Build horus-ui
     needs: changes
-    if: needs.changes.outputs.reader == 'true' || startsWith(github.ref, 'refs/tags/v')
+    if: needs.changes.outputs.horus-ui == 'true' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -341,7 +341,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/arjunkhera/horus/reader
+          images: ghcr.io/arjunkhera/horus/ui
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-,format=short
@@ -353,7 +353,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: packages/reader-server/Dockerfile
+          file: packages/horus-ui/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

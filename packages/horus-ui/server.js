@@ -15,7 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8400;
 const ANVIL_HOST = process.env.ANVIL_HOST || 'anvil';
 const ANVIL_PORT = process.env.ANVIL_PORT || '8100';
-const READER_STATIC = process.env.READER_STATIC || path.join(__dirname, '../reader');
+const READER_STATIC = process.env.READER_STATIC || path.join(__dirname, '../horus-ui-client');
 
 const app = express();
 app.use(express.json());
@@ -185,5 +185,5 @@ app.get('*', (_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Horus reader-server listening on port ${PORT}`);
+  console.log(`Horus horus-ui listening on port ${PORT}`);
 });

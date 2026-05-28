@@ -254,9 +254,7 @@ importers:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@20.19.37)
 
-  packages/reader: {}
-
-  packages/reader-server:
+  packages/horus-ui:
     dependencies:
       '@cursor/sdk':
         specifier: ^1.0.7
@@ -267,6 +265,8 @@ importers:
       http-proxy-middleware:
         specifier: ^2.0.6
         version: 2.0.9
+
+  packages/horus-ui-client: {}
 
   packages/scope:
     dependencies:
