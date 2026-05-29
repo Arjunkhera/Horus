@@ -9,11 +9,15 @@ import { z } from 'zod';
 import { RequestService } from './service.js';
 import { KeyManager } from './keys.js';
 import type { Store } from './store.js';
+import type { ClientTokenMinter } from './tokens.js';
 
 export interface AppDeps {
   service: RequestService;
   keys: KeyManager;
   store: Store;
+  mintClientToken: ClientTokenMinter;
+  /** TTL for the initial client token placed in the bundle. Default 24h. */
+  initialTokenTtlSeconds?: number;
 }
 
 const createRequestSchema = z.object({
@@ -71,6 +75,43 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.delete('/users/:id', async (req) => {
     deps.store.deleteUser((req.params as { id: string }).id);
     return { ok: true };
+  });
+
+  // Mint a user's initial client token (signed with the client-facing key so
+  // horus-service accepts it). Placed in the pre-provisioned bundle by the CLI.
+  const tokenSchema = z.object({ userId: z.string().min(1), ttlSeconds: z.number().int().positive().optional() });
+  app.post('/tokens', async (req, reply) => {
+    const parsed = tokenSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: parsed.error.message } });
+    }
+    const user = deps.store.getUser(parsed.data.userId);
+    if (!user) {
+      return reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'user not found' } });
+    }
+    const ttl = parsed.data.ttlSeconds ?? deps.initialTokenTtlSeconds ?? 86400;
+    const token = await deps.mintClientToken(
+      { tenant: user.tenant, user: user.userId, role: user.role },
+      ttl,
+    );
+    deps.store.audit('operator-service', 'token.minted', user.userId);
+    return { token, expiresIn: ttl };
+  });
+
+  // §H forced bootstrap-admin rotation: clears the mustRotate gate on first login.
+  const rotateSchema = z.object({ adminId: z.string().min(1) });
+  app.post('/admin/rotate', async (req, reply) => {
+    const parsed = rotateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: parsed.error.message } });
+    }
+    const admin = deps.store.getUser(parsed.data.adminId);
+    if (!admin) {
+      return reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'admin not found' } });
+    }
+    deps.store.upsertUser({ ...admin, mustRotate: false });
+    deps.store.audit(admin.userId, 'bootstrap-admin.rotated', admin.userId);
+    return { ...admin, mustRotate: false };
   });
 
   // Public JWKS discovery (verify keys only — the private signing key ships

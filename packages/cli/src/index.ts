@@ -16,6 +16,7 @@ import { testEnvCommand } from './commands/test-env.js';
 import { helpCommand } from './commands/help.js';
 import { guideCommand } from './commands/guide.js';
 import { repoCommand } from './commands/repo.js';
+import { operatorCommand } from './commands/operator.js';
 import { CLI_VERSION } from './lib/constants.js';
 
 const program = new Command();
@@ -40,6 +41,7 @@ program.addCommand(testEnvCommand);
 program.addCommand(helpCommand);
 program.addCommand(guideCommand);
 program.addCommand(repoCommand);
+program.addCommand(operatorCommand);
 
 // Global error handling
 program.exitOverride();

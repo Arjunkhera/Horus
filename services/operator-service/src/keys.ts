@@ -62,6 +62,12 @@ export class KeyManager {
     return { kid: k.kid, alg: k.alg, privateJwk: k.privateJwk };
   }
 
+  /** Client-facing signing key — used to mint a user's initial client token. */
+  clientSigningKey(): { kid: string; alg: SupportedAlg; privateJwk: Record<string, unknown> } {
+    const k = this.load(CLIENT_KEY);
+    return { kid: k.kid, alg: k.alg, privateJwk: k.privateJwk };
+  }
+
   /** Public JWKS for the internal key — published so backends (e.g. Vault) verify X-Horus-Principal. */
   internalJwks(): Array<{ kid: string; publicJwk: Record<string, unknown> }> {
     const k = this.load(INTERNAL_KEY);

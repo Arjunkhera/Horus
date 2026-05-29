@@ -10,6 +10,7 @@ import {
   vaultDeleteHandler,
 } from './handlers.js';
 import type { HandlerMap } from './provisioner.js';
+import { createClientTokenMinter } from './tokens.js';
 import { buildApp } from './app.js';
 
 const store = new Store(process.env.OPERATOR_DB_PATH ?? '/data/operator.db');
@@ -31,7 +32,8 @@ const handlers: HandlerMap = {
 };
 
 const service = new RequestService(store, handlers);
-const app = buildApp({ service, keys, store });
+const mintClientToken = createClientTokenMinter(keys);
+const app = buildApp({ service, keys, store, mintClientToken });
 
 const port = Number(process.env.OPERATOR_PORT ?? '8090');
 try {
