@@ -32,6 +32,7 @@ from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
 from .graph import GraphClient, GraphConnectionError
 from .layer2.graph_export import import_graph
 from .layer2.uuid_registry import UUIDRegistry
+from .security.principal import install_principal_middleware
 
 
 # Configure logging
@@ -283,6 +284,13 @@ def get_uuid_registry_override(request: Request):
 
 
 app.dependency_overrides[get_uuid_registry] = get_uuid_registry_override
+
+# Principal-enforcement middleware (verifies X-Horus-Principal when a public key
+# is configured; no-op otherwise for local/single-tenant dev).
+if install_principal_middleware(app):
+    logger.info("Principal enforcement ENABLED (X-Horus-Principal verification)")
+else:
+    logger.info("Principal enforcement disabled (no HORUS_PRINCIPAL_PUBLIC_JWK configured)")
 
 # Include API routes
 app.include_router(router, prefix="", tags=["knowledge"])
