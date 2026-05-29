@@ -170,6 +170,40 @@ export function createJwtProvider(opts: JwtProviderOptions): CredentialProvider 
 }
 
 // ---------------------------------------------------------------------------
+// Per-principal signer (gateway principal normalization)
+// ---------------------------------------------------------------------------
+
+export interface PrincipalSignerOptions {
+  privateKey: KeyLike;
+  kid: string;
+  alg: SupportedAlg;
+  /** Token lifetime in seconds (e.g. 60 for the internal X-Horus-Principal JWT). */
+  ttlSeconds: number;
+}
+
+/**
+ * Build a per-principal token minter.
+ *
+ * Unlike {@link createJwtProvider} (fixed identity, cached), this signs an
+ * arbitrary Principal on demand — used by the gateway to normalize any verified
+ * client principal into a short-lived internal JWT (the X-Horus-Principal
+ * header). Returns the raw compact JWT (no "Bearer " prefix).
+ */
+export function createPrincipalSigner(
+  opts: PrincipalSignerOptions,
+): (principal: Principal) => Promise<string> {
+  const { privateKey, kid, alg, ttlSeconds } = opts;
+  return async (principal: Principal): Promise<string> => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    return new SignJWT({ tenant: principal.tenant, user: principal.user, role: principal.role })
+      .setProtectedHeader({ alg, kid })
+      .setIssuedAt(nowSec)
+      .setExpirationTime(nowSec + ttlSeconds)
+      .sign(privateKey);
+  };
+}
+
+// ---------------------------------------------------------------------------
 // JWT verifier (offline, tenant-enforced)
 // ---------------------------------------------------------------------------
 
