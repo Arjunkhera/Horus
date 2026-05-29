@@ -33,6 +33,7 @@ from .graph import GraphClient, GraphConnectionError
 from .layer2.graph_export import import_graph
 from .layer2.uuid_registry import UUIDRegistry
 from .security.principal import install_principal_middleware
+from .service_mode import get_vault_mode, should_run_sync, install_read_only_guard
 
 
 # Configure logging
@@ -158,23 +159,28 @@ async def lifespan(app: FastAPI):
         logger.warning("Neo4j unavailable at startup (non-fatal): %s", exc)
     app.state.graph = graph_client
 
-    # Start sync daemon (git pull loop + workspace watcher)
-    # Rebuild UUID registry after each successful reindex
+    # Start sync daemon (git pull loop + workspace watcher) — WRITER only.
+    # Readers are stateless (no git/PVC), so they skip the sync daemon entirely.
     def _rebuild_registry():
         uuid_registry.build(settings.knowledge_repo_path, collection_paths)
 
-    logger.info("Starting sync daemon...")
-    git_pull_task, workspace_observer = await start_sync_daemon(
-        store=store,
-        knowledge_repo_path=settings.knowledge_repo_path,
-        workspace_path=settings.workspace_path,
-        sync_interval=settings.sync_interval,
-        debounce_seconds=5.0,
-        on_reindex=_rebuild_registry,
-    )
-
-    app.state.git_pull_task = git_pull_task
-    app.state.workspace_observer = workspace_observer
+    mode = get_vault_mode()
+    if should_run_sync(mode):
+        logger.info("Starting sync daemon (mode=%s)...", mode)
+        git_pull_task, workspace_observer = await start_sync_daemon(
+            store=store,
+            knowledge_repo_path=settings.knowledge_repo_path,
+            workspace_path=settings.workspace_path,
+            sync_interval=settings.sync_interval,
+            debounce_seconds=5.0,
+            on_reindex=_rebuild_registry,
+        )
+        app.state.git_pull_task = git_pull_task
+        app.state.workspace_observer = workspace_observer
+    else:
+        logger.info("Reader mode — sync daemon disabled (stateless)")
+        app.state.git_pull_task = None
+        app.state.workspace_observer = None
 
     logger.info("Vault Knowledge Service started successfully")
 
@@ -184,10 +190,11 @@ async def lifespan(app: FastAPI):
     # SHUTDOWN
     # ============================================================================
     logger.info("Shutting down Vault Knowledge Service...")
-    await stop_sync_daemon(
-        git_pull_task=app.state.git_pull_task,
-        workspace_observer=app.state.workspace_observer
-    )
+    if app.state.git_pull_task is not None or app.state.workspace_observer is not None:
+        await stop_sync_daemon(
+            git_pull_task=app.state.git_pull_task,
+            workspace_observer=app.state.workspace_observer
+        )
     app.state.graph.close()
     logger.info("Vault Knowledge Service shutdown complete")
 
@@ -284,6 +291,10 @@ def get_uuid_registry_override(request: Request):
 
 
 app.dependency_overrides[get_uuid_registry] = get_uuid_registry_override
+
+# Reader/Writer split: on a reader pod, reject misrouted writes (#8).
+if install_read_only_guard(app, get_vault_mode()):
+    logger.info("Reader mode — write endpoints will return 503 (route writes to vault-writer)")
 
 # Principal-enforcement middleware (verifies X-Horus-Principal when a public key
 # is configured; no-op otherwise for local/single-tenant dev).
