@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: horus-system
+
+commonLabels:
+  app.kubernetes.io/part-of: horus-control-plane
+  app.kubernetes.io/component: observability
+
+resources:
+  - config.yaml
+  - stack.yaml
