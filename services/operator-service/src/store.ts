@@ -3,8 +3,13 @@
  * Uses node-sqlite3-wasm (no native build). Pass ':memory:' in tests.
  */
 
-import { Database } from 'node-sqlite3-wasm';
+import sqlite3Wasm from 'node-sqlite3-wasm';
 import type { ProvisioningRequest, RequestKind, RequestStatus, Decision } from './model.js';
+
+// node-sqlite3-wasm is CommonJS — under native ESM its named exports aren't
+// statically detectable, so default-import the module object and destructure.
+const { Database } = sqlite3Wasm;
+type Database = InstanceType<typeof Database>;
 
 export interface UserRecord {
   userId: string;
