@@ -13,6 +13,14 @@ resources:
 # Alpha keeps base replica counts and pinned tags. Re-pin images here per release.
 # horus-service re-pinned ahead of the rest: ships the anonymous forge-read
 # change (EC2→K8s cutover, story 2828ffb7) without a full alpha re-tag.
+# vault/vault-router/operator-service re-pinned to ship B3 multi-vault
+# provisioning (PR #362, merge 6df2cec) ahead of a full alpha re-tag.
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
+  - name: ghcr.io/arjunkhera/horus/vault
+    newTag: sha-6df2cec
+  - name: ghcr.io/arjunkhera/horus/vault-router
+    newTag: sha-6df2cec
+  - name: ghcr.io/arjunkhera/horus/operator-service
+    newTag: sha-6df2cec
