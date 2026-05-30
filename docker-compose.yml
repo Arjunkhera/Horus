@@ -322,12 +322,12 @@ services:
       start_period: 60s
       retries: 3
 
-  # ── Reader Server ──────────────────────────────────────────────────────────
-  # Express server: serves reader SPA, proxies /api/* to Anvil, and handles
-  # POST /api/ai/ask with Cursor SDK agent lifecycle + SSE streaming.
-  reader-server:
+  # ── Horus UI ───────────────────────────────────────────────────────────────
+  # Express server: serves the UI SPA, proxies /api/* to Anvil, and handles
+  # POST /api/ai/ask with the agent lifecycle + SSE streaming.
+  horus-ui:
     build:
-      context: packages/reader-server
+      context: packages/horus-ui
       dockerfile: Dockerfile
     ports:
       - "${READER_PORT:-8400}:8400"
@@ -336,9 +336,9 @@ services:
       - HORUS_AGENT_MODEL=${HORUS_AGENT_MODEL:-composer-2}
       - ANVIL_HOST=anvil
       - ANVIL_PORT=8100
-      - READER_STATIC=/app/reader
+      - READER_STATIC=/app/horus-ui-client
     volumes:
-      - ./packages/reader:/app/reader:ro
+      - ./packages/horus-ui-client:/app/horus-ui-client:ro
     depends_on:
       anvil:
         condition: service_healthy

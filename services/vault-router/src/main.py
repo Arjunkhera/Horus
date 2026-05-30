@@ -17,6 +17,7 @@ Startup sequence:
 import asyncio
 import logging
 import logging.config
+import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
@@ -26,6 +27,7 @@ from fastapi.responses import JSONResponse
 from .client import VaultClient
 from .settings import VaultRouterSettings, load_settings
 from .uuid_registry import CrossVaultUUIDRegistry, start_registry_refresh_loop
+from .registry import VaultRegistry, start_registry_watch
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.registry_refresh_task = refresh_task
 
+    # vault-registry live-reload (58aef4ad): watch the mounted ConfigMap file and
+    # reload the namespace→endpoint routing table on change, no restart.
+    vault_registry_task = None
+    registry_path = os.getenv("VAULT_REGISTRY_PATH")
+    if registry_path:
+        vault_registry = VaultRegistry(registry_path)
+        app.state.vault_registry = vault_registry
+        vault_registry_task = await start_registry_watch(vault_registry)
+        logger.info("vault-registry live-reload enabled: %s", registry_path)
+
     yield
 
     # Shutdown: cancel refresh task
@@ -92,6 +104,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await refresh_task
     except asyncio.CancelledError:
         pass
+    if vault_registry_task is not None:
+        vault_registry_task.cancel()
+        try:
+            await vault_registry_task
+        except asyncio.CancelledError:
+            pass
     await vault_client.stop()
     logger.info("Vault Router stopped")
 

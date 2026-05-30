@@ -1,0 +1,26 @@
+# Child Application: forge-registry (Forge Remote Registry on K8s, story 2828ffb7).
+# Own sync lifecycle, mirroring the observability/backup child-app pattern. Lands
+# in horus-system alongside the control plane, sharing its namespace, the
+# horus-principal-pub Secret, and the cluster Typesense.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: horus-forge-registry
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/arjunkhera/horus.git
+    targetRevision: HEAD
+    path: deploy/forge-registry
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: horus-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

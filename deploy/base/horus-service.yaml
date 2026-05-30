@@ -1,0 +1,94 @@
+# horus-service — the ONLY public entry point (Edge/Identity + Aggregation).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: horus-service
+  labels:
+    app.kubernetes.io/name: horus-service
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: horus-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: horus-service
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: horus-service
+          image: ghcr.io/arjunkhera/horus/horus-service:0.1.0-alpha
+          ports:
+            - containerPort: 8080
+          env:
+            - name: HORUS_SERVICE_PORT
+              value: "8080"
+            - name: HORUS_VAULT_ROUTER_URL
+              value: http://vault-router.horus-system.svc.cluster.local:8000
+            - name: HORUS_EVENTS_URL
+              value: http://vault-router.horus-system.svc.cluster.local:8000
+          envFrom:
+            - configMapRef:
+                name: horus-service-config
+            # Two-key material delivered out-of-band (see deploy/secrets.example.yaml):
+            #   HORUS_CLIENT_JWKS_JSON, HORUS_INTERNAL_SIGNING_KEY_JSON, HORUS_FORGE_REGISTRY_URL
+            - secretRef:
+                name: horus-service-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: horus-service
+  labels:
+    app.kubernetes.io/name: horus-service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: horus-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# Public ingress — the single externally-reachable surface.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: horus-service
+  labels:
+    app.kubernetes.io/name: horus-service
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: horus.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: horus-service
+                port:
+                  number: 8080

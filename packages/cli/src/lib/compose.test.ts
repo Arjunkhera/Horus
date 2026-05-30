@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { parse as parseYaml } from 'yaml';
 
 // vi.hoisted runs before vi.mock hoisting, so testDir is available
 const { testDir } = vi.hoisted(() => {
@@ -72,8 +73,12 @@ function makeConfig(): Config {
       default: { host: 'github.com', token: 'test-token' },
     },
     enable_ui: true,
+    control_plane_url: '',
+    token_provider: { kind: '', config: '' },
     ai: {
       key: '',
+      anthropic_api_key: '',
+      model: 'claude-sonnet-4-6',
     },
   } as Config;
 }
@@ -99,6 +104,66 @@ describe('installComposeFile', () => {
     expect(content).toContain('anvil:');
   });
 
+  it('main compose uses the renamed horus-ui service and ghcr.io/.../ui image', () => {
+    const config = makeConfig();
+    installComposeFile(config);
+    const content = readFileSync(join(testDir, 'docker-compose.yml'), 'utf-8');
+    expect(content).toContain('horus-ui:');
+    expect(content).toContain('ghcr.io/arjunkhera/horus/ui:latest');
+    expect(content).not.toContain('ghcr.io/arjunkhera/horus/reader');
+    expect(content).not.toMatch(/^\s*reader:/m);
+  });
+
+  it('main compose emits only the 4 alpha-local services (no vault/forge)', () => {
+    const content = generateComposeFile(makeConfig());
+    // present
+    expect(content).toContain('anvil:');
+    expect(content).toContain('typesense:');
+    expect(content).toContain('neo4j:');
+    expect(content).toContain('horus-ui:');
+    // dropped — remote services live behind the control plane now
+    expect(content).not.toContain('vault-router:');
+    expect(content).not.toContain('vault-mcp:');
+    expect(content).not.toMatch(/^\s*vault-[a-z]+:/m);
+    expect(content).not.toMatch(/^\s*forge:/m);
+    expect(content).not.toContain('forge-registry:');
+    expect(content).not.toContain('ghcr.io/arjunkhera/horus/vault');
+    expect(content).not.toContain('ghcr.io/arjunkhera/horus/forge');
+  });
+
+  it('horus-ui block has alpha env, providers volume, and no depends_on', () => {
+    const content = generateComposeFile(makeConfig());
+    expect(content).toContain('HORUS_CONTROL_PLANE_URL');
+    expect(content).toContain('TOKEN_PROVIDER_KIND');
+    expect(content).toContain('TOKEN_PROVIDER_CONFIG');
+    expect(content).toContain('HORUS_ANTHROPIC_API_KEY');
+    expect(content).toContain('HORUS_AGENT_MODEL');
+    expect(content).toContain('/horus-providers');
+    // horus-ui boots first — no depends_on (block runs until the anvil service)
+    const uiBlock = content.slice(content.indexOf('horus-ui:'), content.indexOf('anvil:'));
+    expect(uiBlock).not.toContain('depends_on');
+  });
+
+  it('main compose parses as valid YAML with exactly the 4 alpha services', () => {
+    const doc = parseYaml(generateComposeFile(makeConfig()));
+    expect(Object.keys(doc.services).sort()).toEqual(
+      ['anvil', 'horus-ui', 'neo4j', 'typesense'],
+    );
+    expect(doc.networks['horus-net']).toBeDefined();
+    expect(doc.volumes).toHaveProperty('neo4j-data');
+    expect(doc.volumes).toHaveProperty('neo4j-logs');
+    expect(doc.services['horus-ui'].depends_on).toBeUndefined();
+    expect(doc.services['horus-ui'].image).toBe('ghcr.io/arjunkhera/horus/ui:latest');
+  });
+
+  it('never bakes a literal GITHUB_TOKEN into the generated compose (sources from .env)', () => {
+    // makeConfig sets github_hosts.default.token = 'test-token'
+    const content = generateComposeFile(makeConfig());
+    expect(content).not.toContain('test-token');
+    // Anvil sources the token by reference from .env, not as a literal value
+    expect(content).toMatch(/GITHUB_TOKEN=\$\{GITHUB_TOKEN/);
+  });
+
   it('writes docker-compose.test.yml to the target directory', () => {
     const config = makeConfig();
     installComposeFile(config);
@@ -120,7 +185,7 @@ describe('installComposeFile', () => {
     expect(content).toContain('vault-mcp:');
     expect(content).toContain('forge:');
     expect(content).toContain('typesense:');
-    expect(content).toContain('reader:');
+    expect(content).toContain('horus-ui:');
   });
 
   it('test compose file uses TEST_PORT_* env vars for port remapping', () => {
@@ -178,18 +243,21 @@ describe('installComposeFile', () => {
     expect(defaultContent).not.toContain('vault-personal:');
   });
 
-  it('does not alter main compose file generation', () => {
+  it('main compose has the alpha-local topology and no test-env refs', () => {
     const config = makeConfig();
     const content = generateComposeFile(config);
 
-    // The main compose file should contain the dynamically generated services
+    // The main compose file contains only the four alpha-local services
     expect(content).toContain('Horus — Generated Docker Compose');
     expect(content).toContain('anvil:');
-    expect(content).toContain('vault-personal:');
-    expect(content).toContain('vault-router:');
-    expect(content).toContain('forge:');
     expect(content).toContain('typesense:');
+    expect(content).toContain('neo4j:');
+    expect(content).toContain('horus-ui:');
     expect(content).toContain('horus-net');
+
+    // Remote services are no longer generated client-side
+    expect(content).not.toMatch(/^\s*forge:/m);
+    expect(content).not.toContain('vault-router:');
 
     // Should NOT contain test-env references
     expect(content).not.toContain('TEST_PORT_');

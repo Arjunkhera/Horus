@@ -1,0 +1,123 @@
+# Shared datastores for the Vault tier (single-replica StatefulSets for the alpha).
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: typesense
+  labels:
+    app.kubernetes.io/name: typesense
+    app.kubernetes.io/component: datastore
+spec:
+  serviceName: typesense
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: typesense
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: typesense
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: typesense
+          image: typesense/typesense:0.25.2
+          args: ["--data-dir=/data", "--api-key=$(TYPESENSE_API_KEY)", "--enable-cors"]
+          ports:
+            - containerPort: 8108
+          env:
+            - name: TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: TYPESENSE_API_KEY
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: typesense
+  labels:
+    app.kubernetes.io/name: typesense
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: typesense
+  ports:
+    - name: http
+      port: 8108
+      targetPort: 8108
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+  labels:
+    app.kubernetes.io/name: neo4j
+    app.kubernetes.io/component: datastore
+spec:
+  serviceName: neo4j
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: neo4j
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: neo4j
+    spec:
+      # k8s injects NEO4J_PORT_7687_TCP_PORT-style service-link env vars (from the
+      # `neo4j` Service); neo4j 5.x reads any NEO4J_-prefixed var as a config
+      # setting and fails strict validation. Disable service links to avoid it.
+      enableServiceLinks: false
+      containers:
+        - name: neo4j
+          image: neo4j:5.26.0
+          ports:
+            - containerPort: 7687
+            - containerPort: 7474
+          env:
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: NEO4J_AUTH
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  labels:
+    app.kubernetes.io/name: neo4j
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: neo4j
+  ports:
+    - name: bolt
+      port: 7687
+      targetPort: 7687
+    - name: http
+      port: 7474
+      targetPort: 7474

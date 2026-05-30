@@ -33,7 +33,7 @@ export const DEFAULT_PORTS = {
   vault_rest: 8000,   // keep for individual vault instances
   vault_mcp: 8300,
   vault_router: 8050, // internal routing layer
-  ui: 8400,          // reader — Horus Reader SPA
+  ui: 8400,          // horus-ui — Horus unified UI
   forge: 8200,
   typesense: 8108,   // Typesense search engine
   neo4j_http: 7474,  // Neo4j Browser / HTTP API
@@ -51,12 +51,11 @@ export const DEFAULT_REPOS = {
 export const DEFAULT_DATA_DIR = join(homedir(), 'Horus', 'data');
 
 // ── Service names (as they appear in docker-compose.yml) ────────────────────
+// Alpha client topology (§C): four local containers. Vault and Forge are
+// remote behind the control plane and are not part of the local service set.
 export const SERVICES = [
   'anvil',
-  'vault-router',  // replaces 'vault'
-  'vault-mcp',
-  'forge',
-  'reader',
+  'horus-ui',
   'typesense',
   'neo4j',
 ] as const;
@@ -66,10 +65,7 @@ export type ServiceName = (typeof SERVICES)[number];
 // ── Health check endpoints ──────────────────────────────────────────────────
 export const HEALTH_ENDPOINTS: Record<ServiceName, { port: number; path: string }> = {
   'anvil': { port: 8100, path: '/health' },
-  'vault-router': { port: 8050, path: '/health' },
-  'vault-mcp': { port: 8300, path: '/health' },
-  'forge': { port: 8200, path: '/health' },
-  'reader': { port: 8400, path: '/health' },
+  'horus-ui': { port: 8400, path: '/health' },
   'typesense': { port: 8108, path: '/health' },
   'neo4j': { port: 7474, path: '/' },
 };

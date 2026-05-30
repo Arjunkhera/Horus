@@ -29,7 +29,7 @@ This repo ships three thin-pointer skills under `.claude/skills/<name>/SKILL.md`
 | User asks to edit `docker-compose.yml`, the workspace-generated compose file, or any file under a source-repo path; agent unsure where a fix belongs | **horus-where-do-edits-go** | Names the three locations (workspace, source repo, session) and routes the change to the right one. |
 | User asks for a CLI release, version bump, or `npm publish` of `@arkhera30/cli` | **horus-cli-release-gate** | Walks the CLI release procedure: bump → build → test → publish → tag → verify. References `shared/procedures/horus-release.md`. |
 | User asks to add a new MCP tool to Anvil, Forge, or Vault MCP | **horus-mcp-tool-add** | Names the registration file, schema location, and test pattern for each MCP server. References per-package guides. |
-| User asks to add a new Anvil type to the Reader, fix a Reader UI bug, add a page or route, change Reader styling, or make any edit to `packages/reader/` | **horus-reader-dev** | Covers the no-bundler architecture, script load order, type display system (`TYPE_ORDER` + `activeTypes`), CSS type color recipe, and `forge_develop` workflow for the Reader. |
+| User asks to add a new Anvil type to the Reader, fix a Reader UI bug, add a page or route, change Reader styling, or make any edit to `packages/horus-ui-client/` | **horus-reader-dev** | Covers the no-bundler architecture, script load order, type display system (`TYPE_ORDER` + `activeTypes`), CSS type color recipe, and `forge_develop` workflow for the Reader. |
 | User asks to deploy, redeploy, troubleshoot, or operate the Forge Remote Registry; mentions terraform, EC2, CloudFront, registry infrastructure | **forge-registry-ops** | Architecture quick ref, script inventory, critical gotchas, Vault page links for full procedures. |
 
 ## Always Load (Vault Pages)
@@ -57,8 +57,8 @@ Load a specific package guide when working on that package:
 | `packages/vault-mcp` | `shared/guides/horus-vault-mcp.md` |
 | `packages/cli` | `shared/guides/horus-cli-package.md` |
 | `packages/search` | `shared/guides/horus-search-package.md` |
-| `packages/ui-server` + `packages/ui-client` | `shared/guides/horus-ui-package.md` |
-| `packages/reader` | `shared/guides/horus-reader-development.md` |
+| `packages/horus-ui` (Express server) | `shared/guides/horus-ui-package.md` |
+| `packages/horus-ui-client` (SPA) | `shared/guides/horus-reader-development.md` |
 | Anvil graph layer | `shared/concepts/horus-anvil-graph.md` |
 | `packages/forge/packages/registry-service` | `procedures/forge-registry-deploy.md` + `concepts/forge-registry-architecture.md` |
 | Personal task / PKM | `shared/guides/horus-pkm.md` |
@@ -82,12 +82,12 @@ A directive lookup table. When the agent needs to know "where does X live?", loo
 | Vault REST service entry | `services/vault/src/main.py` |
 | Vault REST routes (21 endpoints) | `services/vault/src/api/routes.py` |
 | Vault Router (multi-vault proxy) | `services/vault-router/src/main.py` |
-| Horus UI Express proxy | `packages/ui-server/src/server.js` |
-| Reader SPA entry (script load order) | `packages/reader/index.html` |
-| Reader root component + routing | `packages/reader/app.jsx` |
-| Reader all UI components | `packages/reader/pages.jsx` |
-| Reader type display order | `packages/reader/pages.jsx` → `TYPE_ORDER` constant |
-| Reader CSS + type colors | `packages/reader/styles.css` |
+| Horus UI Express proxy | `packages/horus-ui/server.js` |
+| Reader SPA entry (script load order) | `packages/horus-ui-client/index.html` |
+| Reader root component + routing | `packages/horus-ui-client/app.jsx` |
+| Reader all UI components | `packages/horus-ui-client/pages.jsx` |
+| Reader type display order | `packages/horus-ui-client/pages.jsx` → `TYPE_ORDER` constant |
+| Reader CSS + type colors | `packages/horus-ui-client/styles.css` |
 
 ### Adding things
 
@@ -99,8 +99,8 @@ A directive lookup table. When the agent needs to know "where does X live?", loo
 | New Vault MCP tool (proxy) | `packages/vault-mcp/src/index.ts` |
 | New Anvil note type (built-in) | YAML file in `packages/anvil/defaults/` |
 | New Anvil intent | Register in `packages/anvil/src/core/graph/intent-registry.ts` |
-| New Reader Anvil type (color + priority) | `packages/reader/pages.jsx` (add to `TYPE_ORDER`) + `packages/reader/styles.css` (add `--type-*` vars in both `:root` and `[data-theme="light"]`) |
-| New Reader page / route | `packages/reader/pages.jsx` (component) + `packages/reader/app.jsx` (route branch + crumb) |
+| New Reader Anvil type (color + priority) | `packages/horus-ui-client/pages.jsx` (add to `TYPE_ORDER`) + `packages/horus-ui-client/styles.css` (add `--type-*` vars in both `:root` and `[data-theme="light"]`) |
+| New Reader page / route | `packages/horus-ui-client/pages.jsx` (component) + `packages/horus-ui-client/app.jsx` (route branch + crumb) |
 
 ### Schema, graph, search
 

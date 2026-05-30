@@ -1,0 +1,251 @@
+# Vault tier — Reader/Writer split (#8) realized as deployment topology.
+#   vault-reader : stateless, N replicas, reads from Typesense + Neo4j (no git/PVC)
+#   vault-writer : single replica, StatefulSet + PVC (sole git writer)
+#   vault-router : routes reads→reader pool, writes→writer, per the vault-registry ConfigMap
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-reader
+  labels:
+    app.kubernetes.io/name: vault-reader
+    app.kubernetes.io/component: vault
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault-reader
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault-reader
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        # entrypoint.sh fails fast unless a git repo exists at KNOWLEDGE_REPO_PATH
+        # (or VAULT_KNOWLEDGE_REPO_URL is set). For a self-contained start, init one.
+        - name: init-knowledge-repo
+          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
+          command: ["sh", "-c", "test -d /data/knowledge-repo/.git || git init -q /data/knowledge-repo"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: knowledge-data
+              mountPath: /data
+      containers:
+        - name: vault-reader
+          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
+          ports:
+            - containerPort: 8000
+          env:
+            - name: VAULT_MODE
+              value: reader
+            - name: HORUS_PRINCIPAL_PUBLIC_JWK_FILE
+              value: /etc/horus/principal/pub.jwk
+          envFrom:
+            - configMapRef:
+                name: vault-config
+            - secretRef:
+                name: vault-secrets
+          volumeMounts:
+            - name: knowledge-data
+              mountPath: /data
+            - name: principal-pub
+              mountPath: /etc/horus/principal
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: knowledge-data
+          emptyDir: {}
+        - name: principal-pub
+          secret:
+            secretName: horus-principal-pub
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-reader
+  labels:
+    app.kubernetes.io/name: vault-reader
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vault-reader
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault-writer
+  labels:
+    app.kubernetes.io/name: vault-writer
+    app.kubernetes.io/component: vault
+spec:
+  serviceName: vault-writer
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault-writer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault-writer
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        # entrypoint.sh fails fast unless a git repo exists at KNOWLEDGE_REPO_PATH
+        # (or VAULT_KNOWLEDGE_REPO_URL is set). For a self-contained start, init one
+        # on the writer's PVC (idempotent — only inits if absent).
+        - name: init-knowledge-repo
+          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
+          command: ["sh", "-c", "test -d /data/knowledge-repo/.git || git init -q /data/knowledge-repo"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: vault-writer
+          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
+          ports:
+            - containerPort: 8000
+          env:
+            - name: VAULT_MODE
+              value: writer
+            - name: KNOWLEDGE_REPO_PATH
+              value: /data/knowledge-repo
+            - name: HORUS_PRINCIPAL_PUBLIC_JWK_FILE
+              value: /etc/horus/principal/pub.jwk
+          envFrom:
+            - configMapRef:
+                name: vault-config
+            - secretRef:
+                name: vault-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: principal-pub
+              mountPath: /etc/horus/principal
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: principal-pub
+          secret:
+            secretName: horus-principal-pub
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-writer
+  labels:
+    app.kubernetes.io/name: vault-writer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vault-writer
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-router
+  labels:
+    app.kubernetes.io/name: vault-router
+    app.kubernetes.io/component: vault
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault-router
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault-router
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: vault-router
+          image: ghcr.io/arjunkhera/horus/vault-router:0.1.0-alpha
+          ports:
+            - containerPort: 8000
+          env:
+            # The router selects an upstream by vault NAME (VAULT_ENDPOINTS), not by
+            # read/write method; fan-out read endpoints broadcast to all names. Register
+            # the reader + writer pools as named endpoints; writes default to writer.
+            - name: VAULT_ENDPOINTS
+              value: reader=http://vault-reader.horus-system.svc.cluster.local:8000,writer=http://vault-writer.horus-system.svc.cluster.local:8000
+            - name: VAULT_DEFAULT
+              value: writer
+            # App defaults to 8400; pin to 8000 to match containerPort/Service/probe.
+            - name: VAULT_ROUTER_PORT
+              value: "8000"
+            # vault-registry mounted as a file; router watches + live-reloads (#10).
+            - name: VAULT_REGISTRY_PATH
+              value: /etc/horus/vault-registry/registry.yaml
+          volumeMounts:
+            - name: vault-registry
+              mountPath: /etc/horus/vault-registry
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: vault-registry
+          configMap:
+            name: vault-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-router
+  labels:
+    app.kubernetes.io/name: vault-router
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vault-router
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+# vault-registry: namespace→endpoint routing table. The operator-service
+# provisioner is the SOLE writer (RBAC); router + writer are read-only watchers.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-registry
+  labels:
+    app.kubernetes.io/name: vault-registry
+    app.kubernetes.io/managed-by: operator-service
+data:
+  registry.yaml: |
+    # Populated by operator-service on vault provisioning. Initially empty.
+    vaults: {}

@@ -268,7 +268,7 @@ export const updateCommand = new Command('update')
     // Regenerate compose file from current config so the on-disk file always
     // matches what this version of the CLI expects (service names, images,
     // health endpoints). This is a no-op when nothing changed, but it's
-    // essential for migrations like horus-ui → reader.
+    // essential for migrations like reader → horus-ui.
     const composeSpinner = ora('Updating compose configuration...').start();
     try {
       const runtimeName = runtime.name === 'podman' ? 'podman' : 'docker';

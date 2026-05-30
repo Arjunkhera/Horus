@@ -14,8 +14,9 @@ RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /build
 
-# Copy root workspace manifest (needed so pnpm resolves workspace: protocol)
-COPY package.json pnpm-workspace.yaml .npmrc* ./
+# Copy root workspace manifest + lockfile (needed so pnpm resolves workspace:
+# protocol and installs the exact dep tree — incl. @horus/search's tsup devDep).
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* .npmrc* ./
 
 # Copy workspace package manifests in dependency order (layer cache-friendly)
 COPY packages/forge/package.json ./packages/forge/
@@ -65,8 +66,8 @@ RUN useradd -ms /bin/bash forge
 
 WORKDIR /app
 
-# Copy workspace manifests for production install
-COPY package.json pnpm-workspace.yaml .npmrc* ./
+# Copy workspace manifests + lockfile for a deterministic production install
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* .npmrc* ./
 COPY packages/forge/package.json ./packages/forge/
 COPY packages/forge/packages/core/package.json ./packages/forge/packages/core/
 COPY packages/forge/packages/registry-service/package.json ./packages/forge/packages/registry-service/

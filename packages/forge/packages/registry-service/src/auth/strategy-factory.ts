@@ -13,6 +13,7 @@ import type { AuthStrategy } from './types.js';
 import { BuiltinAuthStrategy } from './builtin.js';
 import { WebhookAuthStrategy } from './webhook.js';
 import { TrustedHeadersAuthStrategy } from './trusted-headers.js';
+import { HorusPrincipalAuthStrategy } from './horus-principal.js';
 
 /**
  * Create and return the auth strategy specified by `config.auth.strategy`.
@@ -33,13 +34,16 @@ export function createAuthStrategy(
     case 'trusted-headers':
       return new TrustedHeadersAuthStrategy(authConfig);
 
+    case 'horus-principal':
+      return new HorusPrincipalAuthStrategy(authConfig);
+
     default: {
       // TypeScript exhaustiveness check — this branch is unreachable at
       // compile time, but guards against runtime config drift.
       const _never: never = authConfig;
       throw new Error(
         `Unknown auth strategy '${(_never as { strategy: string }).strategy}'. ` +
-          `Valid values are: builtin, webhook, trusted-headers.`,
+          `Valid values are: builtin, webhook, trusted-headers, horus-principal.`,
       );
     }
   }

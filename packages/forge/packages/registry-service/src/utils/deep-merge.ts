@@ -9,21 +9,23 @@
  *   - `updatedAt` is ALWAYS set to new Date().toISOString() after a merge.
  */
 
-import type { RepoMetadata } from '../types/repo-metadata.js';
+import type { RepoMetadata, PatchRepoInput } from '../types/repo-metadata.js';
 
 /**
  * Merge `patch` onto `existing`, returning a new RepoMetadata.
  *
  * @param existing - The current persisted metadata.
- * @param patch    - Partial update — only provided keys are applied.
+ * @param patch    - Deep-partial update — only provided keys are applied, and
+ *                   nested sub-schemas (host, workflow, …) may be partial.
  * @returns A new RepoMetadata with the patch applied.
  */
 export function deepMergeRepo(
   existing: RepoMetadata,
-  patch: Partial<RepoMetadata>,
+  patch: PatchRepoInput,
 ): RepoMetadata {
   // Start with a shallow copy of existing
   const result: RepoMetadata = { ...existing };
+  const patchRecord = patch as Record<string, unknown>;
 
   for (const _key of Object.keys(patch) as Array<keyof RepoMetadata>) {
     const key = _key as keyof RepoMetadata;
@@ -34,7 +36,7 @@ export function deepMergeRepo(
     // updatedAt is handled below
     if (key === 'updatedAt') continue;
 
-    const patchVal = patch[key];
+    const patchVal = patchRecord[key as string];
     if (patchVal === undefined) continue;
 
     // Deep-merge for known nested object sub-schemas

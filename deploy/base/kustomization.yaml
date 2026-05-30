@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Pinned image tags (ADR-0007 — never :latest). Overlays may re-pin per env.
+images:
+  - name: ghcr.io/arjunkhera/horus/horus-service
+    newTag: 0.1.0-alpha
+  - name: ghcr.io/arjunkhera/horus/operator-service
+    newTag: 0.1.0-alpha
+  - name: ghcr.io/arjunkhera/horus/vault
+    newTag: 0.1.0-alpha
+  - name: ghcr.io/arjunkhera/horus/vault-router
+    newTag: 0.1.0-alpha
+
+resources:
+  - namespace.yaml
+  - configmaps.yaml
+  - datastores.yaml
+  - vault.yaml
+  - operator-service.yaml
+  - horus-service.yaml

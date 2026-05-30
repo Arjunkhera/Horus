@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSy
 import { resolve, join as pathJoin, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { z } from 'zod';
 import {
   HORUS_DIR,
   LEGACY_HORUS_DIR,
@@ -49,11 +50,31 @@ export interface Config {
   registry_deploy_key?: string;
   /** Enterprise: URL of the company registry service. When set, the git repo prompt is skipped. */
   enterprise_registry_url?: string;
+  /**
+   * Control-plane base URL. Empty string => local-only mode (mode is
+   * config-driven, not compose-driven). When set, horus-ui proxies
+   * vault/forge/admin to this control plane.
+   */
+  control_plane_url?: string;
+  /**
+   * Principal token provider for control-plane auth. `kind` selects the
+   * flavor (e.g. "none", "static", "oidc"); `config` is a provider-specific
+   * opaque string (a token for "static", an issuer URL for "oidc", etc.).
+   */
+  token_provider?: {
+    kind: string;
+    config: string;
+  };
   search: {
     api_key: string;
   };
   ai: {
+    /** Legacy Cursor key (HORUS_AI_KEY); retained for back-compat. */
     key: string;
+    /** Anthropic API key for the agent chat (HORUS_ANTHROPIC_API_KEY). */
+    anthropic_api_key: string;
+    /** Agent model id (HORUS_AGENT_MODEL). */
+    model: string;
   };
   vaults: Record<string, VaultConfig>;
   github_hosts: Record<string, GitHubHost>;
@@ -77,8 +98,12 @@ export function defaultConfig(): Config {
     search: {
       api_key: 'horus-local-key',
     },
+    control_plane_url: '',
+    token_provider: { kind: '', config: '' },
     ai: {
       key: '',
+      anthropic_api_key: '',
+      model: 'claude-sonnet-4-6',
     },
     vaults: {},
     github_hosts: {},
@@ -96,6 +121,23 @@ export function getHorusDir(): string {
 
 export function ensureHorusDir(): void {
   mkdirSync(HORUS_DIR, { recursive: true });
+}
+
+/**
+ * Ensure the ~/Horus/ FS layout exists: providers/ (read-only secrets/config
+ * mounted into horus-ui), logs/, and keys/. Idempotent — safe to re-run.
+ */
+export function ensureFsLayout(): { providers: string; logs: string; keys: string } {
+  ensureHorusDir();
+  const dirs = {
+    providers: pathJoin(HORUS_DIR, 'providers'),
+    logs: pathJoin(HORUS_DIR, 'logs'),
+    keys: pathJoin(HORUS_DIR, 'keys'),
+  };
+  for (const d of Object.values(dirs)) {
+    mkdirSync(d, { recursive: true });
+  }
+  return dirs;
 }
 
 // ── Config I/O ──────────────────────────────────────────────────────────────
@@ -161,8 +203,15 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
     search: {
       api_key: ((parsed.search as Record<string, unknown> | undefined)?.api_key as string | undefined) ?? defaults.search.api_key,
     },
+    control_plane_url: (parsed.control_plane_url as string | undefined) ?? defaults.control_plane_url,
+    token_provider: {
+      kind: ((parsed.token_provider as Record<string, unknown> | undefined)?.kind as string | undefined) ?? defaults.token_provider!.kind,
+      config: ((parsed.token_provider as Record<string, unknown> | undefined)?.config as string | undefined) ?? defaults.token_provider!.config,
+    },
     ai: {
       key: ((parsed.ai as Record<string, unknown> | undefined)?.key as string | undefined) ?? defaults.ai.key,
+      anthropic_api_key: ((parsed.ai as Record<string, unknown> | undefined)?.anthropic_api_key as string | undefined) ?? defaults.ai.anthropic_api_key,
+      model: ((parsed.ai as Record<string, unknown> | undefined)?.model as string | undefined) ?? defaults.ai.model,
     },
     vaults: (parsed.vaults as Record<string, VaultConfig> | undefined) ?? defaults.vaults,
     github_hosts: (parsed.github_hosts as Record<string, GitHubHost> | undefined) ?? defaults.github_hosts,
@@ -173,6 +222,76 @@ function buildConfigFromParsed(parsed: Record<string, unknown>): Config {
     registry_deploy_key: (parsed.registry_deploy_key as string | undefined),
     enterprise_registry_url: (parsed.enterprise_registry_url as string | undefined),
   };
+}
+
+// ── Pre-provisioned config (--config <path>) ──────────────────────────────────
+
+/**
+ * Schema for an operator-issued pre-provisioned config bundle. The bundle
+ * itself is produced by the control-plane operator CLI (Seq 2); here we only
+ * validate the shape before adopting it. Unknown keys pass through so the
+ * bundle format can evolve without breaking older clients.
+ */
+const preprovisionedSchema = z
+  .object({
+    version: z.string().optional(),
+    data_dir: z.string().optional(),
+    runtime: z.enum(['docker', 'podman']).optional(),
+    control_plane_url: z.string().optional(),
+    token_provider: z.object({ kind: z.string(), config: z.string() }).optional(),
+    ports: z.record(z.number()).optional(),
+    repos: z
+      .object({ anvil_notes: z.string().optional(), forge_registry: z.string().optional() })
+      .optional(),
+    vaults: z.record(z.any()).optional(),
+    github_hosts: z.record(z.any()).optional(),
+    ai: z
+      .object({
+        key: z.string().optional(),
+        anthropic_api_key: z.string().optional(),
+        model: z.string().optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+/**
+ * Load and zod-validate a pre-provisioned config.yaml from an explicit path
+ * (`horus setup --config <path>`). Throws with a readable message on invalid
+ * YAML or schema violations. Validated values are merged over defaults via the
+ * same builder used for the normal config.yaml.
+ */
+export function loadPreprovisionedConfig(path: string): Config {
+  if (!existsSync(path)) {
+    throw new Error(`Pre-provisioned config not found at ${path}`);
+  }
+  const raw = readFileSync(path, 'utf-8');
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch (e) {
+    throw new Error(`Pre-provisioned config is not valid YAML: ${(e as Error).message}`);
+  }
+  const result = preprovisionedSchema.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('\n');
+    throw new Error(`Pre-provisioned config failed validation:\n${issues}`);
+  }
+  return buildConfigFromParsed(result.data as Record<string, unknown>);
+}
+
+/**
+ * Auto-detect a pre-provisioned bundle (`config.yaml.preprovisioned`) in the
+ * current directory or the Horus dir. Returns the path or null.
+ */
+export function detectPreprovisionedConfig(): string | null {
+  const candidates = [
+    pathJoin(process.cwd(), 'config.yaml.preprovisioned'),
+    pathJoin(HORUS_DIR, 'config.yaml.preprovisioned'),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? null;
 }
 
 export function saveConfig(config: Config): void {
@@ -266,6 +385,9 @@ export function discoverRepoDirs(rootDir: string, maxDepth = 4): string[] {
  */
 export function generateEnv(config: Config): string {
   const dataDir = resolvePath(config.data_dir);
+  // Providers dir lives under the ~/Horus root (sibling of data/), mounted
+  // read-only into horus-ui at /horus-providers.
+  const providersPath = pathJoin(HORUS_DIR, 'providers');
   const hostReposPath = config.host_repos_path
     ? resolvePath(config.host_repos_path)
     : '';
@@ -324,15 +446,22 @@ export function generateEnv(config: Config): string {
     '# Search',
     `TYPESENSE_API_KEY=${config.search.api_key}`,
     '',
-    '# AI (required for NLP agent search in the Reader)',
+    '# Control plane (empty HORUS_CONTROL_PLANE_URL => local-only mode)',
+    `HORUS_CONTROL_PLANE_URL=${config.control_plane_url ?? ''}`,
+    `TOKEN_PROVIDER_KIND=${config.token_provider?.kind ?? ''}`,
+    `TOKEN_PROVIDER_CONFIG=${config.token_provider?.config ?? ''}`,
+    '',
+    '# Agent chat (Anthropic). Chat surface is disabled when the key is empty.',
+    `HORUS_ANTHROPIC_API_KEY=${config.ai.anthropic_api_key}`,
+    `HORUS_AGENT_MODEL=${config.ai.model}`,
+    '# Legacy Cursor key — retained for back-compat, unused by the alpha client.',
     `HORUS_AI_KEY=${config.ai.key}`,
     '',
-    '# Repository URLs (must be HTTPS — container services do not have SSH keys)',
-    `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
-    `FORGE_REGISTRY_REPO_URL=${config.repos.forge_registry}`,
+    '# Providers mount (read-only secrets/config dir for horus-ui)',
+    `HORUS_PROVIDERS_PATH=${providersPath}`,
     '',
-    '# Enterprise registry (air-gapped mode — empty means solo-dev local registry is used)',
-    `ENTERPRISE_REGISTRY_URL=${config.enterprise_registry_url ?? ''}`,
+    '# Anvil notes repo (must be HTTPS — container services do not have SSH keys)',
+    `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
     '',
   ];
 
@@ -368,6 +497,11 @@ export const CONFIG_KEYS = [
   'repo.forge-registry',
   'search.api-key',
   'ai.key',
+  'ai.anthropic-key',
+  'ai.model',
+  'control-plane-url',
+  'token-provider-kind',
+  'token-provider-config',
   'enable-ui',
 ] as const;
 
@@ -406,6 +540,16 @@ export function getConfigValue(config: Config, key: ConfigKey): string {
       return config.search.api_key;
     case 'ai.key':
       return config.ai.key;
+    case 'ai.anthropic-key':
+      return config.ai.anthropic_api_key;
+    case 'ai.model':
+      return config.ai.model;
+    case 'control-plane-url':
+      return config.control_plane_url ?? '';
+    case 'token-provider-kind':
+      return config.token_provider?.kind ?? '';
+    case 'token-provider-config':
+      return config.token_provider?.config ?? '';
     case 'enable-ui':
       return String(config.enable_ui);
   }
@@ -465,6 +609,21 @@ export function setConfigValue(config: Config, key: ConfigKey, value: string): C
       break;
     case 'ai.key':
       updated.ai = { ...updated.ai, key: value };
+      break;
+    case 'ai.anthropic-key':
+      updated.ai = { ...updated.ai, anthropic_api_key: value };
+      break;
+    case 'ai.model':
+      updated.ai = { ...updated.ai, model: value };
+      break;
+    case 'control-plane-url':
+      updated.control_plane_url = value;
+      break;
+    case 'token-provider-kind':
+      updated.token_provider = { kind: value, config: updated.token_provider?.config ?? '' };
+      break;
+    case 'token-provider-config':
+      updated.token_provider = { kind: updated.token_provider?.kind ?? '', config: value };
       break;
     case 'enable-ui':
       if (value !== 'true' && value !== 'false') {

@@ -1,6 +1,6 @@
 ---
 name: horus-reader-dev
-description: Use this skill before making any change to the Horus Reader (packages/reader/). Fires when the user asks to add a type, fix a UI bug, add a page, change styling, or extend the Reader in any way. Covers the no-bundler architecture, file responsibilities, script load order, type display system, and the forge_develop workflow.
+description: Use this skill before making any change to the Horus Reader (packages/horus-ui-client/). Fires when the user asks to add a type, fix a UI bug, add a page, change styling, or extend the Reader in any way. Covers the no-bundler architecture, file responsibilities, script load order, type display system, and the forge_develop workflow.
 ---
 
 # horus-reader-dev
@@ -12,7 +12,7 @@ description: Use this skill before making any change to the Horus Reader (packag
 - Fixing a visual bug in the Reader
 - Adding a new page or route
 - Changing theme colors or CSS variables
-- Any edit to `packages/reader/` files
+- Any edit to `packages/horus-ui-client/` files
 
 ## Architecture in one paragraph
 
@@ -81,7 +81,7 @@ To add a route: create a component in `pages.jsx`, add a branch in `app.jsx`, up
 
 ```
 forge_develop(repo: "Horus", workItem: "<work-item-id>")
-→ edit sessionPath/packages/reader/
+→ edit sessionPath/packages/horus-ui-client/
 → commit + push + gh pr create
 ```
 

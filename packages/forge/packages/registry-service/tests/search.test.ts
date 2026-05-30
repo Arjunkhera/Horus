@@ -63,17 +63,34 @@ function makeTypesenseCollection(docs: ArtifactDocument[] = []) {
   };
 }
 
-function makeTypesenseClient(docs: ArtifactDocument[] = []) {
-  const col = makeTypesenseCollection(docs);
+/**
+ * Mirror the real Typesense client surface. The SDK overloads `collections`:
+ *   - `collections()`      → list handle: `retrieve()` lists all collections,
+ *                            `create(schema)` creates one.
+ *   - `collections(name)`  → per-collection handle: `documents()`, `retrieve()`
+ *                            (→ `{ num_documents }`), `delete()`.
+ */
+function makeCollectionsList(existing: Array<{ name: string }>) {
   return {
-    collections: Object.assign(
-      (_name: string) => col,
-      {
-        create: vi.fn().mockResolvedValue({}),
-        retrieveAll: vi.fn().mockResolvedValue([{ name: 'forge_registry_artifacts' }]),
-      },
-    ),
+    retrieve: vi.fn().mockResolvedValue(existing),
+    create: vi.fn().mockResolvedValue({}),
   };
+}
+
+function overloadedCollections(
+  perCollection: unknown,
+  list: ReturnType<typeof makeCollectionsList>,
+) {
+  return (name?: string) => (name === undefined ? list : perCollection);
+}
+
+function makeTypesenseClient(
+  docs: ArtifactDocument[] = [],
+  existing: Array<{ name: string }> = [{ name: 'forge_registry_artifacts' }],
+) {
+  const col = makeTypesenseCollection(docs);
+  const list = makeCollectionsList(existing);
+  return { collections: overloadedCollections(col, list), _col: col, _list: list };
 }
 
 /**
@@ -242,19 +259,16 @@ describe('RegistrySearchClient', () => {
       const client = makeSearchClient([]);
       // Patch the internal ts to throw
       const errorTs = {
-        collections: Object.assign(
-          (_name: string) => ({
+        collections: overloadedCollections(
+          {
             documents: () => ({
               search: vi.fn().mockRejectedValue(new Error('connection refused')),
               upsert: vi.fn(),
             }),
             retrieve: vi.fn().mockResolvedValue({ num_documents: 1 }),
             delete: vi.fn(),
-          }),
-          {
-            create: vi.fn(),
-            retrieveAll: vi.fn().mockResolvedValue([{ name: 'forge_registry_artifacts' }]),
           },
+          makeCollectionsList([{ name: 'forge_registry_artifacts' }]),
         ),
       };
       const errorClient = new (RegistrySearchClient as unknown as {
@@ -288,19 +302,16 @@ describe('RegistrySearchClient', () => {
 
     it('does not throw when Typesense is unavailable', async () => {
       const errorTs = {
-        collections: Object.assign(
-          (_name: string) => ({
+        collections: overloadedCollections(
+          {
             documents: () => ({
               upsert: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
               search: vi.fn(),
             }),
             retrieve: vi.fn().mockResolvedValue({ num_documents: 1 }),
             delete: vi.fn(),
-          }),
-          {
-            create: vi.fn(),
-            retrieveAll: vi.fn().mockResolvedValue([{ name: 'forge_registry_artifacts' }]),
           },
+          makeCollectionsList([{ name: 'forge_registry_artifacts' }]),
         ),
       };
 
@@ -361,16 +372,13 @@ describe('RegistrySearchClient', () => {
       const upsertSpy = vi.fn().mockResolvedValue({});
       const stableDocuments = { upsert: upsertSpy, search: vi.fn() };
       const ts = {
-        collections: Object.assign(
-          (_name: string) => ({
+        collections: overloadedCollections(
+          {
             documents: () => stableDocuments,
             retrieve: vi.fn().mockResolvedValue({ num_documents: 0 }),
             delete: vi.fn(),
-          }),
-          {
-            create: vi.fn().mockResolvedValue({}),
-            retrieveAll: vi.fn().mockResolvedValue([{ name: 'forge_registry_artifacts' }]),
           },
+          makeCollectionsList([{ name: 'forge_registry_artifacts' }]),
         ),
       };
 
@@ -390,20 +398,18 @@ describe('RegistrySearchClient', () => {
     });
 
     it('creates the collection when it does not exist', async () => {
+      const list = makeCollectionsList([]); // no collections yet
       const ts = {
-        collections: Object.assign(
-          (_name: string) => ({
+        collections: overloadedCollections(
+          {
             documents: () => ({
               upsert: vi.fn().mockResolvedValue({}),
               search: vi.fn(),
             }),
             retrieve: vi.fn().mockResolvedValue({ num_documents: 0 }),
             delete: vi.fn(),
-          }),
-          {
-            create: vi.fn().mockResolvedValue({}),
-            retrieveAll: vi.fn().mockResolvedValue([]), // no collections yet
           },
+          list,
         ),
       };
 
@@ -416,7 +422,7 @@ describe('RegistrySearchClient', () => {
 
       await client.rebuild(storage, { info: vi.fn(), warn: vi.fn() });
 
-      expect(ts.collections.create).toHaveBeenCalledOnce();
+      expect(list.create).toHaveBeenCalledOnce();
     });
   });
 });

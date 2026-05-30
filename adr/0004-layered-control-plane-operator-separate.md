@@ -113,4 +113,30 @@ Rejected — breaks the one-primitive requirement.
 
 ## Updates
 
-_None._
+### 2026-05-28 — Federation point moved to the client (Anvil-local premise change)
+
+**Amends:** the Decision/Consequences claim that `horus_search` federation lives in the
+control-plane **Aggregation module** server-side (lines 26–27), and the Alternatives rationale
+that rejected the thin-gateway option *because* "`horus_search` must federate two domains,
+impossible from inside Anvil" (lines 71–73).
+
+**What changed:** A later decision (Horus Phase 2 design, conversation-state `03619fa6`) made
+**Anvil local-only for alpha** — Anvil runs in containers on the user's own machine, git-synced,
+and is **not reachable from the remote control plane**. The original premise behind locating
+federation server-side (the gateway can reach both domains) no longer holds: the control plane
+cannot reach a user's local Anvil.
+
+**New decision:** **The client (horus-ui) is the federation point.** horus-ui issues two queries
+in parallel — local Anvil (direct, no auth) and the remote control plane — and merges/ranks the
+results. The control-plane **Aggregation module federates only the remote domains** it can reach
+(Vault + Forge). This keeps Anvil data off the remote plane (privacy-preserving) and is the only
+topology consistent with Anvil-local.
+
+**Unchanged:** the layered-module model, the separate Operator service, and the
+Edge/Identity + Aggregation split all stand. Aggregation still exists and still federates — its
+scope just narrows to the remote domains. ADR-0005's "single Edge/Aggregation API" is unaffected
+in shape; only the federation fan-out boundary moves.
+
+**Related:** ADR-0002 (two-domain federation), ADR-0005 (Edge/Aggregation API), ADR-0007
+(deployment), ADR-0008 (principal normalization). Anvil-local rationale recorded in
+conversation-state `03619fa6`.

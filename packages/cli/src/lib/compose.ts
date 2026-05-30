@@ -72,70 +72,6 @@ const ANVIL_SERVICE = `\
       start_period: 60s
       retries: 3`;
 
-const FORGE_SERVICE = `\
-  # ── Forge ──────────────────────────────────────────────────────────────────
-  # Workspace manager and package registry MCP server.
-  forge:
-    image: ghcr.io/arjunkhera/horus/forge:latest
-    ports:
-      - "\${FORGE_PORT:-8200}:8200"
-    volumes:
-      - \${HORUS_DATA_PATH}/config:/data/config:rw
-      - \${HORUS_DATA_PATH}/registry:/data/registry:rw
-      - \${HORUS_DATA_PATH}/workspaces:/data/workspaces:rw
-      - \${HORUS_DATA_PATH}/repos:/data/horus-repos:rw
-      - \${HORUS_DATA_PATH}/sessions:/data/sessions:rw
-      - \${HOST_REPOS_PATH}:/data/repos:ro
-    environment:
-      - HORUS_RUNTIME=\${HORUS_RUNTIME:-docker}
-      - FORGE_PORT=8200
-      - FORGE_HOST=0.0.0.0
-      - FORGE_REGISTRY_PATH=/data/registry
-      - FORGE_WORKSPACES_PATH=/data/workspaces
-      - FORGE_CONFIG_PATH=/data/config
-      - FORGE_MANAGED_REPOS_PATH=/data/horus-repos
-      - FORGE_REGISTRY_REPO_URL=\${FORGE_REGISTRY_REPO_URL:-}
-      - FORGE_SYNC_INTERVAL=\${FORGE_SYNC_INTERVAL:-300}
-      - FORGE_ANVIL_URL=http://anvil:8100
-      - FORGE_VAULT_URL=http://vault-mcp:8300
-      - FORGE_HOST_WORKSPACES_PATH=\${HORUS_DATA_PATH}/workspaces
-      - FORGE_HOST_MANAGED_REPOS_PATH=\${HORUS_DATA_PATH}/repos
-      - FORGE_HOST_REPOS_PATH=\${HOST_REPOS_PATH}
-      - FORGE_HOST_MANAGED_REPOS_PATH=\${HORUS_DATA_PATH}/repos
-      - FORGE_HOST_ANVIL_URL=http://localhost:\${ANVIL_PORT:-8100}
-      - FORGE_HOST_VAULT_URL=http://localhost:\${VAULT_MCP_PORT:-8300}
-      - FORGE_HOST_FORGE_URL=http://localhost:\${FORGE_PORT:-8200}
-      - FORGE_SCAN_PATHS=\${FORGE_SCAN_PATHS:-/data/repos}
-      - FORGE_SESSION_TTL_MS=\${FORGE_SESSION_TTL_MS:-1800000}
-      - GITHUB_TOKEN=\${GITHUB_TOKEN:-}
-      - TYPESENSE_HOST=typesense
-      - TYPESENSE_PORT=8108
-      - TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
-    depends_on:
-      anvil:
-        condition: service_healthy
-      typesense:
-        condition: service_healthy
-      vault-router:
-        condition: service_healthy
-    networks:
-      - horus-net
-    restart: unless-stopped
-    stop_grace_period: 15s
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-        reservations:
-          memory: 128m
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 60s
-      retries: 3`;
-
-
 const NEO4J_SERVICE = `\
   # ── Neo4j ─────────────────────────────────────────────────────────────────
   # Graph database for relationship-aware knowledge queries.
@@ -193,93 +129,27 @@ const TYPESENSE_SERVICE = `\
       start_period: 5s
     restart: unless-stopped`;
 
-// ── Registry service (solo-dev git backend) ──────────────────────────────────
-
-/**
- * Build the forge-registry service block for the solo-dev compose.
- * Only emitted when `registry_git_url` is set AND no enterprise registry is configured.
- * Enterprise mode (air-gapped) omits the local registry entirely.
- *
- * Env var mapping (registry-service/src/config.ts):
- *   FORGE_REGISTRY_STORAGE_BACKEND  → storageBackend: 'git'
- *   FORGE_REGISTRY_GIT_URL          → gitConfig.url
- *   FORGE_REGISTRY_GIT_LOCAL_PATH   → gitConfig.localPath
- *   FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH → gitConfig.deployKeyPath (optional)
- */
-function buildRegistryService(config: Config): string | null {
-  // Enterprise mode: no local registry service
-  if (config.enterprise_registry_url) return null;
-
-  const gitUrl = config.registry_git_url;
-  if (!gitUrl) return null;
-
-  const deployKey = config.registry_deploy_key;
-  const deployKeyMount = deployKey
-    ? `\n      - ${deployKey}:/run/secrets/registry-deploy-key:ro`
-    : '';
-  const deployKeyEnv = deployKey
-    ? `\n      - FORGE_REGISTRY_GIT_DEPLOY_KEY_PATH=/run/secrets/registry-deploy-key`
-    : '';
-
-  return `\
-  # ── Forge Registry ─────────────────────────────────────────────────────────
-  # Personal package registry backed by a git repository (GitStorageBackend).
-  # Activated when registry_git_url is set in ~/Horus/config.yaml.
-  # Omitted in enterprise mode (enterprise_registry_url is set).
-  forge-registry:
-    image: ghcr.io/arjunkhera/horus/forge-registry:latest
-    ports:
-      - "\${FORGE_REGISTRY_PORT:-8744}:8744"
-    volumes:
-      - \${HORUS_DATA_PATH}/registry:/data/registry:rw${deployKeyMount}
-    environment:
-      - FORGE_REGISTRY_HOST=0.0.0.0
-      - FORGE_REGISTRY_PORT=8744
-      - FORGE_REGISTRY_LOG_LEVEL=\${LOG_LEVEL:-info}
-      - FORGE_REGISTRY_DB_PATH=/data/registry/forge-registry.db
-      - FORGE_REGISTRY_STORAGE_BACKEND=git
-      - FORGE_REGISTRY_GIT_URL=${gitUrl}
-      - FORGE_REGISTRY_GIT_LOCAL_PATH=/data/registry/git-store${deployKeyEnv}
-      - FORGE_REGISTRY_TYPESENSE_HOST=typesense
-      - FORGE_REGISTRY_TYPESENSE_PORT=8108
-      - FORGE_REGISTRY_TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
-    depends_on:
-      typesense:
-        condition: service_healthy
-    networks:
-      - horus-net
-    restart: unless-stopped
-    stop_grace_period: 15s
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-        reservations:
-          memory: 128m
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8744/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 60s
-      retries: 3`;
-}
-
-const READER_SERVICE = `\
-  # ── Reader ─────────────────────────────────────────────────────────────────
-  # Horus Reader — Express server + NLP agent search at port 8400.
-  # Serves Reader SPA, proxies /api/* to Anvil, hosts POST /api/ai/ask.
-  reader:
-    image: ghcr.io/arjunkhera/horus/reader:latest
+const HORUS_UI_SERVICE = `\
+  # ── Horus UI ───────────────────────────────────────────────────────────────
+  # Unified Horus client. Serves the SPA, proxies /api/anvil/* to the local
+  # Anvil and (when connected) vault/forge/admin to the control plane, and hosts
+  # the agent chat at POST /api/ai/ask. Boots first — no depends_on. Connected
+  # vs local-only mode is config-driven: an empty HORUS_CONTROL_PLANE_URL is
+  # local-only.
+  horus-ui:
+    image: ghcr.io/arjunkhera/horus/ui:latest
     ports:
       - "\${UI_PORT:-8400}:8400"
     environment:
-      - CURSOR_API_KEY=\${HORUS_AI_KEY}
-      - HORUS_AGENT_MODEL=\${HORUS_AGENT_MODEL:-composer-2}
+      - HORUS_CONTROL_PLANE_URL=\${HORUS_CONTROL_PLANE_URL:-}
+      - TOKEN_PROVIDER_KIND=\${TOKEN_PROVIDER_KIND:-}
+      - TOKEN_PROVIDER_CONFIG=\${TOKEN_PROVIDER_CONFIG:-}
+      - HORUS_ANTHROPIC_API_KEY=\${HORUS_ANTHROPIC_API_KEY:-}
+      - HORUS_AGENT_MODEL=\${HORUS_AGENT_MODEL:-claude-sonnet-4-6}
       - ANVIL_HOST=anvil
       - ANVIL_PORT=8100
-    depends_on:
-      anvil:
-        condition: service_healthy
+    volumes:
+      - \${HORUS_PROVIDERS_PATH}:/horus-providers:ro
     networks:
       - horus-net
     restart: unless-stopped
@@ -364,7 +234,7 @@ services:
     volumes:
       - "\${TEST_DATA_PATH:-/tmp/horus-test}/typesense-data:/data"
 
-  reader:
+  horus-ui:
     ports:
       - "\${TEST_PORT_UI:-9260}:8400"
 
@@ -392,166 +262,31 @@ ${config.registry_git_url ? `
  * fronts them all, and static services for anvil, vault-mcp, forge,
  * and typesense.
  */
-export function generateComposeFile(config: Config, runtime?: 'docker' | 'podman'): string {
-  const vaultEntries = Object.entries(config.vaults).sort(([a], [b]) => a.localeCompare(b));
-
-  // Build per-vault service blocks
-  const vaultServices = vaultEntries.map(([name, vault], index) => {
-    const hostPort = `800${index + 1}`;
-    const envVarName = `VAULT_REST_PORT_${name.toUpperCase().replace(/-/g, '_')}`;
-    const githubHost = resolveGitHubHost(vault.repo, config.github_hosts);
-    const token = githubHost?.token ?? '';
-    const apiHost = githubHost?.host ?? 'github.com';
-
-    return `\
-  # ── Vault: ${name} ─────────────────────────────────────────────────────────
-  vault-${name}:
-    image: ghcr.io/arjunkhera/horus/vault:latest
-    ports:
-      - "\${${envVarName}:-${hostPort}}:8000"
-    volumes:
-      - \${HORUS_DATA_PATH}/vaults/${name}:/data/knowledge-repo:rw
-      - vault-${name}-workspace:/data/workspace
-    environment:
-      - HORUS_RUNTIME=\${HORUS_RUNTIME:-docker}
-      - KNOWLEDGE_REPO_PATH=/data/knowledge-repo
-      - WORKSPACE_PATH=/data/workspace
-      - VAULT_KNOWLEDGE_REPO_URL=${vault.repo}
-      - SYNC_INTERVAL=\${VAULT_SYNC_INTERVAL:-300}
-      - VAULT_SYNC_INTERVAL=\${VAULT_SYNC_INTERVAL:-300}
-      - LOG_LEVEL=\${LOG_LEVEL:-info}
-      - HOST=0.0.0.0
-      - PORT=8000
-      - GITHUB_TOKEN=${token}
-      - GITHUB_API_HOST=${apiHost}
-      - TYPESENSE_HOST=typesense
-      - TYPESENSE_PORT=8108
-      - TYPESENSE_API_KEY=\${TYPESENSE_API_KEY:-horus-local-key}
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=horus-neo4j
-    depends_on:
-      typesense:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-    networks:
-      - horus-net
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-        reservations:
-          memory: 256m
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
-      retries: 3`;
-  });
-
-  // Build vault-router service
-  const defaultVaultEntry = vaultEntries.find(([, v]) => v.default);
-  const defaultVaultName = defaultVaultEntry ? defaultVaultEntry[0] : (vaultEntries[0]?.[0] ?? '');
-  const vaultEndpoints = vaultEntries
-    .map(([name]) => `${name}=http://vault-${name}:8000`)
-    .join(',');
-  const vaultRouterDependsOn = vaultEntries
-    .map(([name]) => `      vault-${name}:\n        condition: service_healthy`)
-    .join('\n');
-
-  const vaultRouterService = `\
-  # ── Vault Router ───────────────────────────────────────────────────────────
-  # Routes requests to the appropriate vault instance by name.
-  vault-router:
-    image: ghcr.io/arjunkhera/horus/vault-router:latest
-    ports:
-      - "\${VAULT_ROUTER_PORT:-8050}:8400"
-    environment:
-${vaultEndpoints ? `      - VAULT_ENDPOINTS=${vaultEndpoints}\n` : ''}      - VAULT_DEFAULT=${defaultVaultName}
-${vaultRouterDependsOn ? `    depends_on:\n${vaultRouterDependsOn}\n` : ''}    networks:
-      - horus-net
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-        reservations:
-          memory: 64m
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8400/health')"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3`;
-
-  const vaultMcpService = `\
-  # ── Vault MCP ──────────────────────────────────────────────────────────────
-  # Thin MCP adapter that translates MCP tool calls to Vault REST API calls.
-  vault-mcp:
-    image: ghcr.io/arjunkhera/horus/vault-mcp:latest
-    ports:
-      - "\${VAULT_MCP_PORT:-8300}:8300"
-    environment:
-      - VAULT_MCP_HTTP=true
-      - VAULT_MCP_PORT=8300
-      - VAULT_MCP_HOST=0.0.0.0
-      - KNOWLEDGE_SERVICE_URL=http://vault-router:8400
-    depends_on:
-      vault-router:
-        condition: service_healthy
-    networks:
-      - horus-net
-    restart: unless-stopped
-    stop_grace_period: 15s
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-        reservations:
-          memory: 64m
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8300/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 30s
-      retries: 3`;
-
-  // Build volumes section
-  const vaultVolumeEntries = [
-    ...vaultEntries.map(([name]) => `  vault-${name}-workspace:`),
-    '  neo4j-data:',
-    '  neo4j-logs:',
-  ].join('\n');
-
-  const registryService = buildRegistryService(config);
-
+export function generateComposeFile(_config: Config, runtime?: 'docker' | 'podman'): string {
+  // Alpha client topology (§C): exactly four local containers. Vault and Forge
+  // are remote, reached through the control plane — they are NOT generated here.
   const sections: string[] = [
     '# ─────────────────────────────────────────────────────────────────────────────',
     '# Horus — Generated Docker Compose',
     '# Managed by @arkhera30/cli. Do not edit manually.',
     '# Generated dynamically from ~/Horus/config.yaml by `horus setup`.',
+    '#',
+    '# Alpha client topology (§C): horus-ui, anvil, typesense, neo4j only.',
+    '# Vault and Forge are remote behind the control plane. Connected vs',
+    '# local-only mode is config-driven (empty HORUS_CONTROL_PLANE_URL =',
+    '# local-only), NOT compose-driven — the service set is identical in both.',
     '# ─────────────────────────────────────────────────────────────────────────────',
     '',
     'services:',
     '',
+    HORUS_UI_SERVICE,
+    '',
     ANVIL_SERVICE,
-    '',
-    ...vaultServices.map((s) => s + '\n'),
-    vaultRouterService,
-    '',
-    vaultMcpService,
-    '',
-    FORGE_SERVICE,
-    '',
-    ...(registryService ? [registryService, ''] : []),
-    NEO4J_SERVICE,
     '',
     TYPESENSE_SERVICE,
     '',
-    ...(config.enable_ui !== false ? [READER_SERVICE, ''] : []),
+    NEO4J_SERVICE,
+    '',
     '# ── Networks ──────────────────────────────────────────────────────────────────',
     'networks:',
     '  horus-net:',
@@ -559,7 +294,8 @@ ${vaultRouterDependsOn ? `    depends_on:\n${vaultRouterDependsOn}\n` : ''}    n
     '',
     '# ── Volumes ───────────────────────────────────────────────────────────────────',
     'volumes:',
-    vaultVolumeEntries,
+    '  neo4j-data:',
+    '  neo4j-logs:',
   ];
 
   let content = sections.join('\n');

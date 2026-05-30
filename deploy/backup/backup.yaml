@@ -1,0 +1,100 @@
+# operator-service SQLite → S3 backup (897f806a).
+# Streams `sqlite3 .dump` out of the operator pod via `kubectl exec` and pipes
+# it to S3 — avoids mounting the RWO PVC a second time. The S3 artifact bucket
+# has versioning enabled (see the one-shot Job below) so every backup is a
+# distinct, recoverable object version.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: operator-backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: operator-backup
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: operator-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: operator-backup
+subjects:
+  - kind: ServiceAccount
+    name: operator-backup
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: operator-sqlite-backup
+  labels:
+    app.kubernetes.io/name: operator-sqlite-backup
+spec:
+  schedule: "0 */6 * * *" # every 6 hours
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: operator-backup
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha
+              command: ["/bin/sh", "-c"]
+              args:
+                # operator-service uses node-sqlite3-wasm and ships NO sqlite3
+                # binary, so `kubectl exec … sqlite3` fails. Stream the raw DB file
+                # out and run `.dump` here in the backup image (which has sqlite3).
+                # NOTE: `cat` copies the file non-atomically — a write in-flight could
+                # yield a torn snapshot. Acceptable for the low-write alpha operator DB;
+                # harden later (copy -wal/-journal sidecars, or a true online backup).
+                - >
+                  set -euo pipefail;
+                  TS=$(date -u +%Y%m%dT%H%M%SZ);
+                  kubectl exec operator-service-0 -c operator-service -- cat /data/operator.db > /tmp/operator.db;
+                  sqlite3 /tmp/operator.db .dump
+                  | gzip
+                  | aws s3 cp - "s3://${BACKUP_BUCKET}/operator/operator-${TS}.sql.gz"
+              envFrom:
+                - secretRef:
+                    name: backup-credentials # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, BACKUP_BUCKET
+---
+# One-shot Job: ensure the artifact/backup bucket has versioning enabled
+# (idempotent). Run once after the bucket exists.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: enable-bucket-versioning
+  labels:
+    app.kubernetes.io/name: enable-bucket-versioning
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: versioning
+          image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              aws s3api put-bucket-versioning
+              --bucket "${BACKUP_BUCKET}"
+              --versioning-configuration Status=Enabled
+          envFrom:
+            - secretRef:
+                name: backup-credentials

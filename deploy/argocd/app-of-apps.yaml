@@ -1,0 +1,26 @@
+# Root "app of apps" — bootstrap this one Application into ArgoCD; it syncs every
+# child Application under deploy/argocd/apps.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: horus-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/arjunkhera/horus.git
+    targetRevision: HEAD
+    path: deploy/argocd/apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -8,6 +8,7 @@ import { downCommand } from './commands/down.js';
 import { statusCommand } from './commands/status.js';
 import { configCommand } from './commands/config.js';
 import { connectCommand } from './commands/connect.js';
+import { loginCommand } from './commands/login.js';
 import { updateCommand } from './commands/update.js';
 import { doctorCommand } from './commands/doctor.js';
 import { backupCommand } from './commands/backup.js';
@@ -15,6 +16,7 @@ import { testEnvCommand } from './commands/test-env.js';
 import { helpCommand } from './commands/help.js';
 import { guideCommand } from './commands/guide.js';
 import { repoCommand } from './commands/repo.js';
+import { operatorCommand } from './commands/operator.js';
 import { CLI_VERSION } from './lib/constants.js';
 
 const program = new Command();
@@ -31,6 +33,7 @@ program.addCommand(downCommand);
 program.addCommand(statusCommand);
 program.addCommand(configCommand);
 program.addCommand(connectCommand);
+program.addCommand(loginCommand);
 program.addCommand(updateCommand);
 program.addCommand(doctorCommand);
 program.addCommand(backupCommand);
@@ -38,6 +41,7 @@ program.addCommand(testEnvCommand);
 program.addCommand(helpCommand);
 program.addCommand(guideCommand);
 program.addCommand(repoCommand);
+program.addCommand(operatorCommand);
 
 // Global error handling
 program.exitOverride();

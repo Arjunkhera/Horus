@@ -1,0 +1,92 @@
+# operator-service — privileged provisioning. ClusterIP + port-forward only, NO ingress.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: operator-service
+  labels:
+    app.kubernetes.io/name: operator-service
+    app.kubernetes.io/component: operator
+spec:
+  serviceName: operator-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: operator-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: operator-service
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: operator-service
+          image: ghcr.io/arjunkhera/horus/operator-service:0.1.0-alpha
+          ports:
+            - containerPort: 8090
+          env:
+            - name: OPERATOR_PORT
+              value: "8090"
+            - name: OPERATOR_DB_PATH
+              value: /data/operator.db
+          envFrom:
+            - configMapRef:
+                name: operator-service-config
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: operator-service
+  labels:
+    app.kubernetes.io/name: operator-service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: operator-service
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+# Privilege boundary: only the operator-service may be reached, and only from
+# within the cluster (port-forward by the `horus operator` CLI). No ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: operator-service-deny-external
+  labels:
+    app.kubernetes.io/name: operator-service
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: operator-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: horus-system

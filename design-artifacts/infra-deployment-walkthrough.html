@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Horus Alpha — Infra & Deployment Walkthrough</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2230;
+    --border: #2d3645;
+    --text: #e6edf3;
+    --muted: #9aa7b6;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --teal: #39c5cf;
+    --pink: #f778ba;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); line-height: 1.6; font-size: 15px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 24px 120px; }
+  header.hero {
+    border-bottom: 1px solid var(--border); padding-bottom: 28px; margin-bottom: 8px;
+  }
+  h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -0.5px; }
+  .sub { color: var(--muted); font-size: 16px; }
+  .tag { display:inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--accent); border:1px solid var(--border);
+    border-radius: 999px; padding: 3px 10px; margin-bottom: 14px; background: var(--panel); }
+  h2 { font-size: 22px; margin: 56px 0 6px; letter-spacing: -0.3px; }
+  h2 .n { color: var(--accent); font-family: var(--mono); font-size: 16px; margin-right: 10px; }
+  h3 { font-size: 16px; margin: 28px 0 8px; color: var(--text); }
+  p { color: #cdd6e0; }
+  .lead { color: var(--muted); margin-top: 4px; }
+  code { font-family: var(--mono); font-size: 13px; background: var(--panel-2);
+    padding: 1px 6px; border-radius: 5px; color: var(--teal); border:1px solid var(--border);}
+  .panel { background: var(--panel); border:1px solid var(--border); border-radius: 12px;
+    padding: 22px 24px; margin: 18px 0; }
+  .analogy { border-left: 3px solid var(--purple); background: var(--panel-2);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  .analogy b { color: var(--purple); }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px){ .grid2 { grid-template-columns: 1fr; } }
+
+  /* glossary */
+  .gloss { display:grid; grid-template-columns: 150px 1fr; gap: 4px 18px; margin-top: 8px; }
+  .gloss dt { font-family: var(--mono); color: var(--accent); font-size: 13px; padding-top:8px;
+    border-top:1px solid var(--border); }
+  .gloss dd { margin:0; padding-top:8px; border-top:1px solid var(--border); color:#cdd6e0; font-size:14px;}
+  .gloss dt:first-of-type, .gloss dd:first-of-type { border-top: none; }
+
+  /* cluster diagram */
+  .cluster { background: var(--panel); border:1px solid var(--border); border-radius: 14px; padding: 0; overflow:hidden; margin: 22px 0; }
+  .cluster-band { padding: 8px 16px; font-family: var(--mono); font-size: 11px; letter-spacing:.6px;
+    text-transform: uppercase; color: var(--muted); background: var(--panel-2); border-bottom:1px solid var(--border);}
+  .cluster-body { padding: 20px 18px; }
+  .zone { border:1px dashed var(--border); border-radius: 10px; padding: 14px; margin: 12px 0; position:relative;}
+  .zone-label { position:absolute; top:-10px; left:14px; background: var(--panel); padding: 0 8px;
+    font-family: var(--mono); font-size: 11px; letter-spacing:.5px; text-transform:uppercase; }
+  .zone.public { border-color: #2f5fa8; } .zone.public .zone-label { color: var(--accent); }
+  .zone.admin  { border-color: #8a5cc0; } .zone.admin  .zone-label { color: var(--purple); }
+  .zone.internal { border-color: #2d3645; } .zone.internal .zone-label { color: var(--muted); }
+  .nodes { display:flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+  .node { background: var(--panel-2); border:1px solid var(--border); border-radius: 9px;
+    padding: 10px 13px; min-width: 150px; flex: 1 1 150px; }
+  .node .nm { font-weight: 600; font-size: 14px; display:flex; align-items:center; gap:7px; }
+  .node .meta { color: var(--muted); font-size: 12px; font-family: var(--mono); margin-top: 4px; }
+  .node .role { color:#cdd6e0; font-size:12.5px; margin-top:6px; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .dot.green{background:var(--green);} .dot.purple{background:var(--purple);}
+  .dot.teal{background:var(--teal);} .dot.amber{background:var(--amber);}
+  .dot.pink{background:var(--pink);} .dot.blue{background:var(--accent);}
+  .kind { font-family:var(--mono); font-size:10.5px; border:1px solid var(--border);
+    border-radius:5px; padding:1px 6px; color:var(--muted); margin-left:6px;}
+
+  .arrowline { text-align:center; color: var(--muted); font-family: var(--mono); font-size: 12px; margin: 4px 0; }
+
+  /* laptop box */
+  .laptop { border:1px solid var(--green); border-radius: 12px; padding: 16px; margin: 18px 0;
+    background: linear-gradient(180deg, rgba(63,185,80,.06), transparent); }
+  .laptop .zone-label { color: var(--green); }
+
+  /* flow steps */
+  ol.flow { list-style:none; counter-reset: step; padding:0; margin: 8px 0; }
+  ol.flow li { counter-increment: step; position:relative; padding: 14px 16px 14px 56px;
+    border:1px solid var(--border); border-radius: 10px; margin: 10px 0; background: var(--panel); }
+  ol.flow li::before { content: counter(step); position:absolute; left:14px; top:14px;
+    width:28px; height:28px; border-radius:50%; background: var(--accent); color:#04101f;
+    font-weight:700; display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:14px;}
+  ol.flow li b { color: var(--text); }
+  ol.flow code { font-size:12.5px; }
+
+  /* decision compare */
+  .compare { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin: 16px 0; }
+  @media (max-width:760px){ .compare{ grid-template-columns:1fr; } }
+  .opt { border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .opt h4 { margin:0; padding:12px 16px; font-size:14px; background:var(--panel-2); border-bottom:1px solid var(--border);}
+  .opt.rec h4 { background: rgba(63,185,80,.12); color: var(--green); }
+  .opt .body { padding: 14px 16px; }
+  .opt ul { margin:8px 0 0; padding-left:18px; }
+  .opt li { font-size:13.5px; margin:5px 0; color:#cdd6e0; }
+  .pro::before{content:"+ "; color:var(--green); font-weight:700;}
+  .con::before{content:"− "; color:var(--red); font-weight:700;}
+  .recpill{font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--green); border:1px solid var(--green); border-radius:999px; padding:1px 7px; margin-left:8px;}
+
+  .filetree { font-family: var(--mono); font-size: 13px; background: var(--panel-2);
+    border:1px solid var(--border); border-radius: 10px; padding: 16px 18px; color:#cdd6e0; white-space: pre; overflow-x:auto;}
+  .filetree .c { color: var(--muted); }
+  .filetree .h { color: var(--accent); }
+
+  .callout { display:flex; gap:12px; align-items:flex-start; background: rgba(88,166,255,.07);
+    border:1px solid #27406b; border-radius:10px; padding:14px 16px; margin:16px 0; }
+  .callout .ic { font-size:18px; }
+  .callout.warn { background: rgba(210,153,34,.08); border-color:#5c4a1e; }
+  hr.sep { border:none; border-top:1px solid var(--border); margin: 40px 0; }
+  .legend { display:flex; gap:18px; flex-wrap:wrap; font-size:12.5px; color:var(--muted); margin-top:10px;}
+  .legend span{ display:flex; align-items:center; gap:6px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 60px; border-top:1px solid var(--border); padding-top:20px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="tag">Horus Phase 2 · Section D · Deployment & Bootstrap</div>
+    <h1>How Horus Runs in the Cloud — a Visual Walkthrough</h1>
+    <p class="sub">Written for someone who has <b>not</b> used Kubernetes, Helm, or ArgoCD before.
+    By the end you'll understand what each piece does and how the two-service control plane (horus-service + operator-service, ADR-0004) maps to the K8s objects that run it. Updated 2026-05-28.</p>
+  </header>
+
+  <!-- ============ MENTAL MODEL ============ -->
+  <h2><span class="n">0</span>The mental model in one breath</h2>
+  <p class="lead">There are <b>two</b> places Horus runs, and they are very different.</p>
+  <div class="grid2">
+    <div class="panel" style="border-color:#2f6b39;">
+      <h3 style="color:var(--green); margin-top:0;">① On each user's machine (the Client)</h3>
+      <p style="font-size:14px;"><b>NPM CLI</b> (<code>@arkhera/horus</code>) + <b>4 Docker containers</b>: <code>horus-ui</code> (port 8400, formerly <code>reader-server</code>), <code>anvil</code>, <code>typesense</code>, <code>neo4j</code>. Anvil is LOCAL and git-synced. Vault + Forge are REMOTE. <b>Federation is client-side</b>: horus-ui-client merges local Anvil results and remote results from horus-service in the browser.</p>
+    </div>
+    <div class="panel" style="border-color:#2f5fa8;">
+      <h3 style="color:var(--accent); margin-top:0;">② In a shared cluster (the Control Plane)</h3>
+      <p style="font-size:14px;">One Kubernetes cluster per company, running the remote services (Vault, Forge, user management, routing). <b>Two control-plane services (ADR-0004):</b> <code>horus-service</code> (public ingress — identity + aggregation) and <code>operator-service</code> (admin ClusterIP only). This is <b>Section D</b> — what this page is about.</p>
+    </div>
+  </div>
+  <div class="analogy">
+    <b>Analogy.</b> The Client is like the <b>app on your phone</b>. The Control Plane is like the
+    <b>company's servers</b> the app talks to. You install the app once per device; the servers run once for everyone.
+  </div>
+
+  <!-- ============ GLOSSARY ============ -->
+  <h2><span class="n">1</span>The words, in plain English</h2>
+  <div class="panel">
+    <dl class="gloss">
+      <dt>Kubernetes (K8s)</dt><dd>A system that runs containers on a pool of machines and keeps them alive. You tell it "I want these things running," and it makes that true and re-makes it true if something crashes.</dd>
+      <dt>Container / Image</dt><dd>An <b>image</b> is a frozen, shippable copy of a service (we publish these to GHCR). A <b>container</b> is a running instance of an image.</dd>
+      <dt>Pod</dt><dd>K8s's smallest unit — usually one container. When we say "the horus-service pod" we mean the running horus-service.</dd>
+      <dt>Deployment</dt><dd>"Keep N copies of this stateless service running." Easy to scale up/down and roll back. Used for services that hold no data of their own.</dd>
+      <dt>StatefulSet</dt><dd>Like a Deployment, but for services that <b>own data on disk</b> (databases). Gets stable storage that survives restarts.</dd>
+      <dt>PVC (Persistent Volume Claim)</dt><dd>A request for a disk. "Give me 20 GB that survives if the pod restarts." Databases use these.</dd>
+      <dt>Service (ClusterIP)</dt><dd>A stable internal address so pods can find each other. <b>ClusterIP</b> = reachable only <i>inside</i> the cluster, not from the internet.</dd>
+      <dt>Ingress</dt><dd>The front door from the internet into the cluster. Maps a public URL to an internal Service.</dd>
+      <dt>ConfigMap</dt><dd>A bundle of non-secret settings (e.g., "vault-router lives at this internal address").</dd>
+      <dt>Secret</dt><dd>Like a ConfigMap but for sensitive values (passwords, keys, tokens).</dd>
+      <dt>NetworkPolicy</dt><dd>A firewall rule between pods. We use it to ensure only the front door can reach the internal services.</dd>
+    </dl>
+  </div>
+
+  <!-- ============ CLUSTER DIAGRAM ============ -->
+  <h2><span class="n">2</span>What actually runs in the cluster</h2>
+  <p class="lead">8 services in three zones by who is allowed to reach them. (This is the topology we locked.) Two are control-plane services (horus-service = public, operator-service = admin-only); the rest are ClusterIP internal.</p>
+
+  <div class="cluster">
+    <div class="cluster-band">☸  Kubernetes cluster · one per company · "any conformant K8s"</div>
+    <div class="cluster-body">
+
+      <div class="zone public">
+        <span class="zone-label">● Public zone — reachable from the internet</span>
+        <div class="nodes">
+          <div class="node">
+            <div class="nm"><span class="dot blue"></span>horus-service<span class="kind">Deployment ×1</span></div>
+            <div class="meta">ingress: horus.company.com</div>
+            <div class="role">The single front door. Edge/Identity (logins, the Principal, routing) + Aggregation (federated search, cross-system reads). Every end-user request enters here.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="zone admin">
+        <span class="zone-label">● Admin zone — infra god-mode, you only</span>
+        <div class="nodes">
+          <div class="node">
+            <div class="nm"><span class="dot purple"></span>operator-service<span class="kind">Deployment ×1</span></div>
+            <div class="meta">ClusterIP · reach via kubectl port-forward</div>
+            <div class="role">User management, tenant registry, provisioning (create vault, attach forge), infra governance. <b>No public door</b> — separate privilege boundary (ADR-0004). CLI-only in alpha.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="zone internal">
+        <span class="zone-label">● Internal zone — cluster-only (ClusterIP + NetworkPolicy)</span>
+        <div class="arrowline">▲ horus-service verifies client token → normalizes Principal → mints 60s <code>X-Horus-Principal</code> → routes <code>/api/v1/vault/*</code>, <code>/api/v1/forge/*</code>, <code>/api/v1/events</code> (SSE) down to ▼</div>
+        <div class="nodes">
+          <div class="node">
+            <div class="nm"><span class="dot teal"></span>vault-router<span class="kind">Deployment ×1</span></div>
+            <div class="meta">internal</div>
+            <div class="role">Resolves which vault + splits reads vs. writes.</div>
+          </div>
+          <div class="node">
+            <div class="nm"><span class="dot teal"></span>vault-reader<span class="kind">Deployment ×2–3</span></div>
+            <div class="meta">stateless · scales</div>
+            <div class="role">Serves all reads from Typesense + Neo4j.</div>
+          </div>
+          <div class="node">
+            <div class="nm"><span class="dot teal"></span>vault-writer<span class="kind">StatefulSet ×1</span></div>
+            <div class="meta">PVC: git working copies</div>
+            <div class="role">Sole git writer; per-vault write queues.</div>
+          </div>
+        </div>
+        <div class="nodes">
+          <div class="node">
+            <div class="nm"><span class="dot pink"></span>forge-registry<span class="kind">Deployment ×1</span></div>
+            <div class="meta">PVC: SQLite · + S3 artifacts</div>
+            <div class="role">Artifact registry. Migrated from EC2 into the cluster.</div>
+          </div>
+          <div class="node">
+            <div class="nm"><span class="dot amber"></span>typesense<span class="kind">StatefulSet ×1</span></div>
+            <div class="meta">PVC: index data</div>
+            <div class="role">Search index (per-vault collections inside).</div>
+          </div>
+          <div class="node">
+            <div class="nm"><span class="dot amber"></span>neo4j<span class="kind">StatefulSet ×1</span></div>
+            <div class="meta">PVC: graph data</div>
+            <div class="role">Graph store (per-vault databases inside).</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="dot blue"></span> public front door</span>
+    <span><span class="dot purple"></span> admin / god-mode</span>
+    <span><span class="dot teal"></span> vault plane</span>
+    <span><span class="dot pink"></span> forge</span>
+    <span><span class="dot amber"></span> datastores</span>
+  </div>
+
+  <div class="laptop">
+    <span class="zone-label" style="position:static; display:block; margin-bottom:8px;">💻 …and on each user's laptop (the Client — 4 containers managed by the <code>@arkhera/horus</code> NPM CLI)</span>
+    <div class="nodes">
+      <div class="node"><div class="nm"><span class="dot green"></span>horus-ui</div><div class="meta">:8400 · formerly reader-server · image: ghcr.io/arjunkhera/horus/ui</div><div class="role">Web UI + proxy. <code>/api/anvil/*</code> → local Anvil direct (no auth). <code>/api/v1/vault/*</code>, <code>/api/v1/forge/*</code>, <code>/api/v1/events</code> (SSE) → horus-service with Authorization header. <code>/api/admin/*</code> deferred.</div></div>
+      <div class="node"><div class="nm"><span class="dot green"></span>anvil</div><div class="meta">LOCAL — git-synced via GitSyncEngine</div><div class="role">Anvil MCP server. Only local data lives here. Syncs to user's private git remote.</div></div>
+      <div class="node"><div class="nm"><span class="dot green"></span>typesense</div><div class="meta">local index (Anvil-only)</div></div>
+      <div class="node"><div class="nm"><span class="dot green"></span>neo4j</div><div class="meta">local graph (Anvil-only)</div></div>
+    </div>
+    <div class="arrowline" style="margin-top:12px;">horus-ui ⇄ <code>https://horus.company.com</code> via Authorization header → horus-service verifies token → mints 60s <code>X-Horus-Principal</code> → internal backends</div>
+  </div>
+
+  <hr class="sep">
+
+  <!-- ============ KUSTOMIZE ============ -->
+  <h2><span class="n">3</span>What is Kustomize? <span style="font-size:13px; color:var(--green); font-family:var(--mono);">← chosen</span></h2>
+  <p>To run a service in K8s you must hand it YAML files describing the Deployment, Service, ConfigMap, etc.
+  Writing those by hand for 8 services — each slightly different per environment — is repetitive and error-prone.
+  <b>Kustomize</b> solves this <i>without</i> a templating language.</p>
+  <div class="analogy">
+    <b>Kustomize is "a default + a stack of patches."</b> You write the canonical YAML once (the <b>base</b>),
+    then a <b>overlay</b> applies small patches for your environment (image tag, domain, replica counts).
+    No <code>{{ placeholders }}</code> — you override real YAML fields by patching them.
+    <br><br>
+    Compare: <b>Helm</b> (the alternative we did <i>not</i> pick) fills in template placeholders from a values file.
+    Kustomize instead lays patches on top of plain YAML — easier to read when you're new, and supported by ArgoCD out of the box.
+  </div>
+  <p style="color:var(--muted); font-size:14px;">Day-to-day you'd edit the small patch files in <code>overlays/prod/</code> — the knobs — and leave <code>base/</code> alone.</p>
+
+  <!-- ============ ARGOCD ============ -->
+  <h2><span class="n">4</span>What is ArgoCD? (and "GitOps")</h2>
+  <p><b>GitOps</b> = your git repo is the single source of truth for what should be running.
+  <b>ArgoCD</b> is a robot living in the cluster that constantly compares "what git says should run" against "what is actually running," and fixes any difference.</p>
+  <div class="analogy">
+    <b>Analogy.</b> ArgoCD is a <b>thermostat</b>. Git is the temperature you set. ArgoCD keeps nudging the cluster until reality matches the setting — and if something drifts (a pod dies, someone hand-edits), it pulls it back.
+  </div>
+  <h3>"App-of-apps" (the structure we locked)</h3>
+  <p>One <b>root</b> ArgoCD Application points at your deploy repo. Inside, there's one <b>child</b> Application per service — each rendering its <code>base/&lt;service&gt;</code> through the <code>overlays/prod</code> patches. The root brings up the children; each child watches its own slice, so you can sync/roll back one service at a time.</p>
+  <div class="filetree"><span class="c"># your deploy repo — ArgoCD watches this (Kustomize)</span>
+horus-deploy/
+├── <span class="h">bootstrap/</span>
+│   └── argocd-root-app.yaml       <span class="c"># the one thing you kubectl apply</span>
+├── <span class="h">apps/</span>                          <span class="c"># one ArgoCD child app per service</span>
+│   ├── horus-service.yaml  operator-service.yaml
+│   ├── vault-router.yaml  vault-reader.yaml  vault-writer.yaml
+│   └── forge-registry.yaml  typesense.yaml  neo4j.yaml
+├── <span class="h">base/</span>                          <span class="c"># canonical YAML per service (don't touch)</span>
+│   ├── horus-service/ { deployment.yaml, service.yaml, kustomization.yaml }
+│   ├── operator-service/  vault-router/  vault-reader/  vault-writer/
+│   ├── forge-registry/  typesense/  neo4j/
+│   └── kustomization.yaml
+├── <span class="h">overlays/</span>
+│   └── prod/                       <span class="c"># the knobs you actually edit</span>
+│       ├── kustomization.yaml      <span class="c"># which bases + which patches</span>
+│       ├── patches/ { replicas.yaml, resources.yaml, domain.yaml }
+│       ├── ingress.yaml
+│       └── service-discovery.yaml  <span class="c"># ConfigMap: name → internal address</span>
+└── README.md                       <span class="c"># the bootstrap runbook</span></div>
+  <div class="callout warn">
+    <div class="ic">🔐</div>
+    <div><b>Secrets are the one exception.</b> Passwords/keys are <b>not</b> committed to this repo in alpha.
+    <code>horus operator init</code> applies them straight to the cluster (out-of-band). ArgoCD manages everything <i>except</i> secrets, and just references them by name. (Later you can switch to encrypted-secrets-in-git — a clean upgrade.)</div>
+  </div>
+
+  <hr class="sep">
+
+  <!-- ============ BOOTSTRAP FLOW ============ -->
+  <h2><span class="n">5</span>Going from nothing → running, step by step</h2>
+  <ol class="flow">
+    <li><b>Prerequisites.</b> You have a K8s cluster with ArgoCD installed. (We document a minimum; k3s on one VM is fine to start.)</li>
+    <li><b>Run <code>horus operator init</code>.</b> It asks for: namespace, public domain, image tag, a first-admin username/password, git tokens, Anthropic key, Neo4j password, etc. (auto-generates anything you skip).</li>
+    <li><b>It writes the deploy-repo scaffold</b> (the tree above) and <b>applies the Secrets</b> straight to the cluster.</li>
+    <li><b>You commit + push</b> the deploy repo to your git host.</li>
+    <li><b>You apply the root app</b> — one command: <code>kubectl apply -f bootstrap/argocd-root-app.yaml</code>.</li>
+    <li><b>ArgoCD syncs.</b> ConfigMaps + all 8 services come up automatically.</li>
+    <li><b>operator-service first boot</b> generates <b>two asymmetric keys</b> (saved as a K8s Secret, never re-created): (1) client-facing verify key — horus-service's TokenVerifier uses this to validate incoming client tokens; (2) internal signing key — horus-service uses this to mint short-lived (60 s) <code>X-Horus-Principal</code> JWTs injected into all internal backend calls. It then seeds your admin user (only if none exists yet).</li>
+    <li><b>You log in</b> via <code>horus operator login</code> (over a port-forward) → forced to set a new password.</li>
+    <li><b>You provision</b> the first vault: <code>horus operator vault-create &lt;name&gt;</code>. Then end users run <code>horus setup</code> pointed at <code>horus.company.com</code>.</li>
+  </ol>
+
+  <hr class="sep">
+
+  <!-- ============ DECISIONS LOCKED ============ -->
+  <h2><span class="n">6</span>What we locked</h2>
+  <p class="lead">Section D is fully decided. Summary of the choices baked into the diagram and repo layout above.</p>
+  <div class="panel">
+    <dl class="gloss">
+      <dt>Orchestration</dt><dd>Kubernetes — any conformant cluster (k3s on a VM for solo; managed K8s for prod). No cloud-specific dependencies.</dd>
+      <dt>Packaging</dt><dd><b>Kustomize</b> (base + prod overlay), not Helm. No templating language.</dd>
+      <dt>GitOps</dt><dd><b>ArgoCD app-of-apps</b> — root app + one child app per service. Per-service sync &amp; rollback.</dd>
+      <dt>Services</dt><dd>8 total: horus-service (public ingress — Edge/Identity + Aggregation), operator-service (admin ClusterIP only — user mgmt + Provisioner, ADR-0004), vault-router/reader/writer, forge-registry, typesense, neo4j (all internal). Server images use pinned version tags; rollback = git revert.</dd>
+      <dt>Forge</dt><dd>REMOTE — runs inside the cluster (ClusterIP). Migrated from EC2 into the cluster; keeps its S3 artifact backend, SQLite moves to a PVC. Clients access Forge via horus-service.</dd>
+      <dt>Vault + Anvil split</dt><dd>Vault is REMOTE (in the cluster). Anvil is LOCAL (user's machine, git-synced via GitSyncEngine). Federation is CLIENT-SIDE: horus-ui-client merges local Anvil results and remote results from horus-service in the browser.</dd>
+      <dt>Operator access</dt><dd>operator-service is ClusterIP + <code>kubectl port-forward</code>; CLI-only admin in alpha (no public admin UI yet).</dd>
+      <dt>Secrets</dt><dd>Plain K8s Secrets applied out-of-band by <code>horus operator init</code>; ArgoCD manages everything else.</dd>
+      <dt>JWT keys (2)</dt><dd>operator-service generates two asymmetric keys on first boot, stores as a Secret, never re-creates: (1) client-facing verify key for horus-service's TokenVerifier; (2) internal signing key for 60 s X-Horus-Principal JWTs injected into backend calls.</dd>
+      <dt>Agent chat SDK</dt><dd><b>Anthropic SDK</b> (not <code>@cursor/sdk</code>/composer-2). horus-service integrates the Anthropic SDK for agent chat features.</dd>
+      <dt>horus-ui naming</dt><dd>Client UI is <code>horus-ui</code> (port 8400, image <code>ghcr.io/arjunkhera/horus/ui</code>); browser SPA is <code>horus-ui-client</code>. Formerly called <code>reader-server</code> / <code>reader</code>.</dd>
+      <dt>First admin</dt><dd>Seeded from a bootstrap value (only if no users exist); forced password rotation on first login.</dd>
+    </dl>
+  </div>
+  <div class="callout">
+    <div class="ic">✅</div>
+    <div>Next up is <b>Section E — Service API surface</b>: the concrete HTTP contracts between the Horus client, horus-service, operator-service, and the vault/forge backends (including the <code>X-Horus-Principal</code> header and the <code>/api/system/status</code> probe).</div>
+  </div>
+
+  <footer>
+    Horus Phase 2 · Section D (Deployment &amp; Bootstrap) · companion to <code>infra-topology.html</code> and <code>identity-flows-walkthrough.html</code>.<br>
+    Reflects locked decisions through Section D. Service/package names (e.g. <code>horus-service</code>, <code>operator-service</code>) are design names; final code naming may differ.
+  </footer>
+
+</div>
+</body>
+</html>
