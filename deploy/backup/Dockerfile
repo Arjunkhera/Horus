@@ -4,7 +4,7 @@
 # Build (multi-arch, from any context):
 #   docker buildx build --platform linux/amd64,linux/arm64 \
 #     -f deploy/backup/Dockerfile \
-#     -t ghcr.io/arjunkhera/horus/backup:0.1.0-alpha deploy/backup --push
+#     -t ghcr.io/arjunkhera/horus/backup:0.1.0-alpha.1 deploy/backup --push
 FROM alpine:3.20
 
 ARG TARGETARCH=amd64

@@ -26,7 +26,7 @@ spec:
       # A pre-created empty .git would suppress that clone, leaving readers content-less.
       containers:
         - name: vault-reader
-          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
+          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha.1
           ports:
             - containerPort: 8000
           env:
@@ -98,7 +98,7 @@ spec:
       # clone. The PVC persists the checkout across restarts.
       containers:
         - name: vault-writer
-          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
+          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha.1
           ports:
             - containerPort: 8000
           env:
@@ -173,7 +173,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: vault-router
-          image: ghcr.io/arjunkhera/horus/vault-router:0.1.0-alpha
+          image: ghcr.io/arjunkhera/horus/vault-router:0.1.0-alpha.1
           ports:
             - containerPort: 8000
           env:

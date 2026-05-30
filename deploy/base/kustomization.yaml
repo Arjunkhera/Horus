@@ -4,13 +4,13 @@ kind: Kustomization
 # Pinned image tags (ADR-0007 — never :latest). Overlays may re-pin per env.
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
-    newTag: 0.1.0-alpha
+    newTag: 0.1.0-alpha.1
   - name: ghcr.io/arjunkhera/horus/operator-service
-    newTag: 0.1.0-alpha
+    newTag: 0.1.0-alpha.1
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: 0.1.0-alpha
+    newTag: 0.1.0-alpha.1
   - name: ghcr.io/arjunkhera/horus/vault-router
-    newTag: 0.1.0-alpha
+    newTag: 0.1.0-alpha.1
 
 resources:
   - namespace.yaml
