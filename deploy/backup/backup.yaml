@@ -59,6 +59,9 @@ spec:
                 # operator-service uses node-sqlite3-wasm and ships NO sqlite3
                 # binary, so `kubectl exec … sqlite3` fails. Stream the raw DB file
                 # out and run `.dump` here in the backup image (which has sqlite3).
+                # NOTE: `cat` copies the file non-atomically — a write in-flight could
+                # yield a torn snapshot. Acceptable for the low-write alpha operator DB;
+                # harden later (copy -wal/-journal sidecars, or a true online backup).
                 - >
                   set -euo pipefail;
                   TS=$(date -u +%Y%m%dT%H%M%SZ);
