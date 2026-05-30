@@ -8,9 +8,10 @@ commonLabels:
   app.kubernetes.io/component: forge
 
 # Pinned image tag (ADR-0007 — never :latest).
+# sha-270b977 = master build of PR #361 (shared S3-backed repo registry).
 images:
   - name: ghcr.io/arjunkhera/horus/forge-registry
-    newTag: 0.1.0-alpha
+    newTag: sha-270b977
 
 resources:
   - forge-registry.yaml
