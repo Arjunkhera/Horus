@@ -5,6 +5,7 @@
 import { loadConfig } from './config.js';
 import { createStorageBackend } from './storage/factory.js';
 import { BuiltinAuthStrategy } from './auth/builtin.js';
+import { createAuthStrategy } from './auth/strategy-factory.js';
 import { AuditLog } from './audit/audit-log.js';
 import { PublishPipeline } from './pipeline/publish-pipeline.js';
 import { RegistrySearchClient } from './search/registry-search.js';
@@ -28,10 +29,13 @@ async function main(): Promise<void> {
   const pino = (await import('pino')).default;
   const bootstrapLogger = pino({ level: config.logLevel });
 
-  // 5. Create auth strategy (bootstraps admin keys on first start)
-  const auth = new BuiltinAuthStrategy(
+  // 5. Create the auth strategy from config (builtin | webhook | trusted-headers |
+  // horus-principal). This previously hardcoded BuiltinAuthStrategy, so a configured
+  // strategy such as horus-principal was never actually used and all principal-authed
+  // writes fell through to deny.
+  const auth = createAuthStrategy(
+    config.auth,
     config.dbPath,
-    config.auth.strategy === 'builtin' ? config.auth.admins : [],
     bootstrapLogger as never, // pino is compatible with FastifyBaseLogger
   );
 
