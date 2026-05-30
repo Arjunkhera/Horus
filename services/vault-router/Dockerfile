@@ -26,6 +26,7 @@ ENV PYTHONPATH=/app
 EXPOSE 8400
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8400/health')"
+  CMD python -c "import os,urllib.request; urllib.request.urlopen('http://localhost:%s/health' % os.getenv('VAULT_ROUTER_PORT','8400'))"
 
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8400"]
+# Honor VAULT_ROUTER_PORT (default 8400) so the bind port matches deploy config.
+CMD ["sh", "-c", "exec python -m uvicorn src.main:app --host 0.0.0.0 --port ${VAULT_ROUTER_PORT:-8400}"]
