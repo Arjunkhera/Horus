@@ -64,8 +64,12 @@ spec:
                 # harden later (copy -wal/-journal sidecars, or a true online backup).
                 - >
                   set -euo pipefail;
+                  ARCH=$(uname -m);
+                  case "$ARCH" in aarch64) KARCH=arm64;; x86_64) KARCH=amd64;; *) KARCH=amd64;; esac;
+                  curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/v1.30.2/bin/linux/${KARCH}/kubectl";
+                  chmod +x /tmp/kubectl;
                   TS=$(date -u +%Y%m%dT%H%M%SZ);
-                  kubectl exec operator-service-0 -c operator-service -- cat /data/operator.db > /tmp/operator.db;
+                  /tmp/kubectl exec operator-service-0 -c operator-service -- cat /data/operator.db > /tmp/operator.db;
                   sqlite3 /tmp/operator.db .dump
                   | gzip
                   | aws s3 cp - "s3://${BACKUP_BUCKET}/operator/operator-${TS}.sql.gz"
