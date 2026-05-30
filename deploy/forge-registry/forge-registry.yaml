@@ -1,0 +1,195 @@
+# forge-registry — Forge Remote Registry HTTP service, migrated from bare EC2
+# (concepts/forge-registry-architecture.md) to Kubernetes (story 2828ffb7).
+#
+# ClusterIP only, behind horus-service (which proxies /api/v1/forge/* here and
+# injects the X-Horus-Principal JWT). The service name/port match the URL baked
+# into horus-service-config: forge-registry.horus-system.svc.cluster.local:8080.
+#
+# Auth: horus-principal strategy verifies X-Horus-Principal against the internal
+# signing key's PUBLIC half — the SAME `horus-principal-pub` Secret Vault mounts,
+# so one Secret feeds both services. Storage: S3 (artifact bucket). Search: the
+# shared cluster Typesense.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forge-registry-config
+  labels:
+    app.kubernetes.io/name: forge-registry
+data:
+  # Only `auth` must come from the config file (no env override exists for the
+  # auth strategy); storage / typesense / server are supplied via env vars on
+  # the Deployment. The public JWK is injected by the loader from
+  # HORUS_PRINCIPAL_PUBLIC_JWK_FILE — never stored here.
+  config.yaml: |
+    auth:
+      strategy: horus-principal
+      header: x-horus-principal
+      leewaySeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forge-registry
+  labels:
+    app.kubernetes.io/name: forge-registry
+    app.kubernetes.io/component: forge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: forge-registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: forge-registry
+    spec:
+      containers:
+        - name: forge-registry
+          image: ghcr.io/arjunkhera/horus/forge-registry:0.1.0-alpha
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FORGE_REGISTRY_HOST
+              value: "0.0.0.0"
+            - name: FORGE_REGISTRY_PORT
+              value: "8080"
+            - name: FORGE_REGISTRY_CONFIG
+              value: /etc/horus/forge-registry/config.yaml
+            - name: FORGE_REGISTRY_DB_PATH
+              value: /data/forge-registry.db
+            # Principal verification — same Secret + env contract as Vault.
+            - name: HORUS_PRINCIPAL_PUBLIC_JWK_FILE
+              value: /etc/horus/principal/pub.jwk
+            # Search — shared cluster Typesense. Host MUST be set to enable search.
+            - name: FORGE_REGISTRY_TYPESENSE_HOST
+              value: typesense.horus-system.svc.cluster.local
+            - name: FORGE_REGISTRY_TYPESENSE_PORT
+              value: "8108"
+            - name: FORGE_REGISTRY_TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: TYPESENSE_API_KEY
+            # Storage — S3 artifact bucket (concepts/forge-registry-architecture.md).
+            - name: FORGE_REGISTRY_STORAGE_BACKEND
+              value: s3
+            - name: FORGE_REGISTRY_S3_BUCKET
+              value: horus-forge-registry
+            - name: FORGE_REGISTRY_S3_REGION
+              value: us-east-1
+          envFrom:
+            # S3 credentials (explicit IAM user — does NOT use instance profile;
+            # see learnings/forge-registry-deploy-gotchas.md #5).
+            - secretRef:
+                name: forge-registry-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /etc/horus/forge-registry
+              readOnly: true
+            - name: principal-pub
+              mountPath: /etc/horus/principal
+              readOnly: true
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: forge-registry-config
+        - name: principal-pub
+          secret:
+            secretName: horus-principal-pub
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-registry
+  labels:
+    app.kubernetes.io/name: forge-registry
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: forge-registry
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# forge-registry is reachable only from within the cluster (horus-service proxy).
+# No ingress — the gateway is the single public surface.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forge-registry-internal-only
+  labels:
+    app.kubernetes.io/name: forge-registry
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: forge-registry
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: horus-system
+---
+# One-shot Job: ensure the Forge artifact bucket has versioning enabled
+# (idempotent). The EC2 terraform that previously owned this bucket's lifecycle
+# is retired by this migration, so the K8s deploy takes over — mirrors the
+# operator backup bucket's versioning Job (deploy/backup/backup.yaml).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: enable-forge-bucket-versioning
+  labels:
+    app.kubernetes.io/name: enable-forge-bucket-versioning
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: versioning
+          image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              aws s3api put-bucket-versioning
+              --bucket horus-forge-registry
+              --versioning-configuration Status=Enabled
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: forge-registry-secrets
+                  key: FORGE_REGISTRY_S3_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: forge-registry-secrets
+                  key: FORGE_REGISTRY_S3_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              value: us-east-1
