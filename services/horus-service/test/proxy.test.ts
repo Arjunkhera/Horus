@@ -61,6 +61,24 @@ describe('principal-normalizing proxy', () => {
     expect(forge.lastHeaders['x-horus-principal']).toBeTruthy();
   });
 
+  it('serves anonymous GET /api/v1/forge/* reads without a token (public community reads)', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/forge/artifacts/skill/capture/1.0.0`);
+    expect(res.status).toBe(200);
+    expect(forge.lastUrl).toBe('/artifacts/skill/capture/1.0.0');
+    // No client token → no minted principal is injected downstream.
+    expect(forge.lastHeaders['authorization']).toBeUndefined();
+    expect(forge.lastHeaders['x-horus-principal']).toBeUndefined();
+  });
+
+  it('still requires auth for forge writes (POST without a token → 401)', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/forge/artifacts/skill/capture/1.0.0`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(res.status).toBe(401);
+  });
+
   it('aggregate/status federates remote domains only', async () => {
     const auth = await fx.clientAuthHeader({ tenant: 'acme', user: 'alice', role: 'admin' });
     const res = await fetch(`${baseUrl}/api/v1/aggregate/status`, {

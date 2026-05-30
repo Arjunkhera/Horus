@@ -56,6 +56,20 @@ export interface BuildServerOptions {
 
 const AUTH_SKIP_PATHS = new Set(['/health', '/metrics']);
 
+/**
+ * Forge artifact reads are public (community-read model, mirroring the legacy
+ * CloudFront registry that this gateway replaces). Anonymous GET/HEAD requests
+ * under /api/v1/forge are served without a client token: the downstream
+ * forge-registry's horus-principal strategy permits reads for a null principal.
+ * Writes (publish/verify — POST/etc.) still require a verified Authorization.
+ */
+const FORGE_PREFIX = '/api/v1/forge';
+function isPublicForgeRead(method: string, pathOnly: string): boolean {
+  const m = method.toUpperCase();
+  if (m !== 'GET' && m !== 'HEAD') return false;
+  return pathOnly === FORGE_PREFIX || pathOnly.startsWith(`${FORGE_PREFIX}/`);
+}
+
 function rewritePath(request: FastifyRequest, prefix: string): string {
   const url = request.raw.url ?? request.url;
   const stripped = url.slice(prefix.length);
@@ -85,6 +99,23 @@ export function buildServer(opts: BuildServerOptions): FastifyInstance {
 
     const requestId = request.horusRequestId ?? getRequestId(request);
     const authHeader = request.headers['authorization'];
+
+    // Public community reads: GET/HEAD of forge artifacts never require a token.
+    // Identity is optional — if a valid token is presented, propagate it for
+    // audit; an absent or invalid token falls back to an anonymous read.
+    if (isPublicForgeRead(request.method, pathOnly)) {
+      if (authHeader) {
+        try {
+          const principal = await tokenVerifier.verify(authHeader);
+          request.principal = principal;
+          request.horusPrincipalToken = await principalSigner(principal);
+        } catch {
+          // Invalid token on a public read → serve anonymously, do not 401.
+        }
+      }
+      return;
+    }
+
     if (!authHeader) {
       return sendError(reply, 401, 'UNAUTHORIZED', 'Missing Authorization header', requestId);
     }
