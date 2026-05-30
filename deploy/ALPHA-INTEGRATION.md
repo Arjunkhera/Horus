@@ -109,13 +109,24 @@ operator-service generates the two keypairs on first boot (client-facing +
 internal signing) and persists them to its PVC. Bring it up first, then derive
 the Secrets the gateway + downstream verifiers need.
 
-> **Gap:** the `horus operator init` helper referenced in the design does **not
-> exist yet** — Secret wiring is currently manual. `horus operator` today
-> provides `user add/list`, `vault`, `request`, `login`, `status`;
-> operator-service exposes `GET /keys/jwks`, `/users`, `/tokens`,
-> `/admin/rotate`, `/health`. Track building `horus operator init` to automate
-> the steps below.
+**Automated (preferred):** `horus operator init` derives and applies both
+Secrets in one command. It port-forwards operator-service, calls the admin-only
+`GET /admin/principal-bundle` (client public JWKS + internal signing **private**
+key + internal **public** jwk), and applies `horus-service-secrets` +
+`horus-principal-pub`:
 
+```bash
+horus operator init --namespace horus-system
+# or inspect first:
+horus operator init --dry-run        # print the Secret manifests
+horus operator init --out secrets.yaml
+```
+
+The private signing key is exported only over the cluster-internal port-forward
+(operator-service has no ingress; NetworkPolicy denies external) — it never
+crosses the public boundary.
+
+**Manual (fallback):**
 1. Apply just the operator (e.g. `kubectl apply -k deploy/overlays/alpha` brings
    the whole control plane, but operator-service boots independently and is the
    key source).
@@ -205,7 +216,9 @@ scraping and the backup CronJob has produced at least one versioned S3 object.
 
 - **New Dockerfiles unproven until step 2.** horus-service/operator-service/backup
   images are new; build them manually first and fix issues before ArgoCD sync.
-- **`horus operator init` is not implemented** — Secret wiring is manual (step 4).
+- **`horus operator init`** now automates the principal Secret wiring (step 4)
+  via the admin-only `GET /admin/principal-bundle` endpoint; the manual flow
+  remains as a fallback.
 - **Pre-existing test failure** unrelated to this work: `registry-service`
   `tests/search.test.ts > rebuild() > creates the collection when it does not
   exist` (stale Typesense mock). It will show red in CI on the master merge —

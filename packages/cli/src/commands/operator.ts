@@ -236,6 +236,77 @@ operatorCommand
     }
   });
 
+// ── init (principal/secret wiring) ───────────────────────────────────────────
+
+interface PrincipalBundle {
+  clientJwks: Array<{ kid: string; publicJwk: Record<string, unknown> }>;
+  internalSigningKey: { kid: string; alg: string; privateJwk: Record<string, unknown> };
+  internalPublicJwk: Record<string, unknown>;
+}
+
+/** Render the two principal Secrets as a kubectl-appliable manifest. JSON values
+ *  are single-quoted YAML scalars (JSON never contains single quotes). */
+function renderPrincipalSecrets(namespace: string, b: PrincipalBundle): string {
+  const clientJwks = JSON.stringify(b.clientJwks);
+  const internalSigningKey = JSON.stringify(b.internalSigningKey);
+  const pubJwk = JSON.stringify(b.internalPublicJwk);
+  return `apiVersion: v1
+kind: Secret
+metadata:
+  name: horus-service-secrets
+  namespace: ${namespace}
+type: Opaque
+stringData:
+  HORUS_CLIENT_JWKS_JSON: '${clientJwks}'
+  HORUS_INTERNAL_SIGNING_KEY_JSON: '${internalSigningKey}'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: horus-principal-pub
+  namespace: ${namespace}
+type: Opaque
+stringData:
+  pub.jwk: '${pubJwk}'
+`;
+}
+
+operatorCommand
+  .command('init')
+  .description(
+    'Derive horus-service-secrets + horus-principal-pub from operator-service keys and apply them',
+  )
+  .option('--namespace <ns>', 'k8s namespace', 'horus-system')
+  .option('--operator-url <url>', 'operator-service base URL (skip port-forward)')
+  .option('--port <port>', 'local port for port-forward', '8090')
+  .option('--dry-run', 'print the Secret manifests instead of applying', false)
+  .option('--out <path>', 'write the Secret manifests to a file instead of applying')
+  .action(async (opts: GlobalOpts & { dryRun?: boolean; out?: string }) => {
+    const client = await connect(opts);
+    try {
+      const bundle = await api<PrincipalBundle>(client.baseUrl, 'GET', '/admin/principal-bundle');
+      const ns = opts.namespace ?? 'horus-system';
+      const manifests = renderPrincipalSecrets(ns, bundle);
+      if (opts.out) {
+        writeFileSync(resolve(opts.out), manifests, 'utf8');
+        console.log(`Principal Secrets written to ${resolve(opts.out)}`);
+        return;
+      }
+      if (opts.dryRun) {
+        process.stdout.write(manifests);
+        return;
+      }
+      await execa('kubectl', ['apply', '-n', ns, '-f', '-'], {
+        input: manifests,
+        stdio: ['pipe', 'inherit', 'inherit'],
+      });
+      console.log(`Applied horus-service-secrets + horus-principal-pub to namespace ${ns}.`);
+      console.log('horus-service can now mint X-Horus-Principal; Vault and forge-registry can verify it.');
+    } finally {
+      await client.close();
+    }
+  });
+
 // ── status ──────────────────────────────────────────────────────────────────
 operatorCommand
   .command('status')

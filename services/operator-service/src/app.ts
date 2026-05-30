@@ -121,6 +121,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     internal: deps.keys.internalJwks(),
   }));
 
+  // Principal-wiring export for `horus operator init`. Returns everything the
+  // CLI needs to build horus-service-secrets + horus-principal-pub in one call:
+  // the client public JWKS, the internal signing PRIVATE key (mints
+  // X-Horus-Principal), and the internal PUBLIC jwk (Vault + forge-registry
+  // verify against it). Admin-only and reachable ONLY via the cluster-internal
+  // port-forward — the NetworkPolicy denies external ingress (ADR-0004), so the
+  // private key never crosses the public boundary. This replaces the manual
+  // PVC/SQLite extraction documented in the alpha runbook §4.
+  app.get('/admin/principal-bundle', async (req, reply) => {
+    if (requesterRole(req) !== 'admin') {
+      return reply.status(403).send({ error: { code: 'FORBIDDEN', message: 'admin role required' } });
+    }
+    const internalSigningKey = deps.keys.internalSigningKey();
+    const internalPublicJwk = deps.keys.internalJwks()[0].publicJwk;
+    deps.store.audit(requester(req), 'principal-bundle.exported', 'operator-service');
+    return {
+      clientJwks: deps.keys.clientJwks(),
+      internalSigningKey,
+      internalPublicJwk,
+    };
+  });
+
   app.get('/health', async () => ({ status: 'ok', service: 'operator-service' }));
 
   return app;
