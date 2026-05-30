@@ -17,5 +17,8 @@
         "@forge/core": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.27.1",
         "yaml": "^2.4.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.4.0"
     }
 }
