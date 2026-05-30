@@ -26,12 +26,11 @@ def _make_graph(nodes=None, edges=None):
     edges = edges or []
 
     def _query_side_effect(cypher, *args, **kwargs):
-        cypher_stripped = cypher.strip()
-        if cypher_stripped.startswith("MATCH (p:Page)"):
+        cypher_upper = cypher.strip().upper()
+        if "RETURN P.PAGE_ID AS PAGE_ID" in cypher_upper:
             return nodes
-        if cypher_stripped.startswith("MATCH (s:Page)-[r]->(t:Page)"):
+        if "RETURN S.PAGE_ID AS SOURCE_ID" in cypher_upper:
             return edges
-        # MERGE calls during import — return nothing meaningful
         return []
 
     graph.query.side_effect = _query_side_effect
@@ -177,10 +176,10 @@ class TestImportGraph:
         # Verify MERGE was called for both nodes and the edge
         assert graph.query.call_count == 3  # 2 node MERGEs + 1 edge MERGE
 
-        # Node MERGE calls use the node MERGE query
         first_call_args = graph.query.call_args_list[0]
-        assert "MERGE (p:Page {page_id: $page_id})" in first_call_args[0][0]
+        assert "MERGE (p:Page {page_id: $page_id, vault_name: $vault_name})" in first_call_args[0][0]
         assert first_call_args[0][1]["page_id"] == "page-1"
+        assert first_call_args[0][1]["vault_name"] == "default"
 
         # Edge MERGE call uses DEPENDS_ON edge type
         edge_call_args = graph.query.call_args_list[2]

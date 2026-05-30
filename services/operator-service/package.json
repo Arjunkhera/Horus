@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@horus/auth": "workspace:*",
+    "@horus/search": "workspace:*",
     "fastify": "^4.28.1",
     "jose": "^6.2.2",
     "node-sqlite3-wasm": "^0.8.53",

@@ -4,6 +4,7 @@ import { Store } from './store.js';
 import { KeyManager } from './keys.js';
 import { RequestService, ensureBootstrapAdmin } from './service.js';
 import { InMemoryVaultInfra, FileVaultInfra, type VaultInfra } from './infra.js';
+import { createKubernetesVaultInfra } from './infra-k8s.js';
 import {
   onboardHandler,
   vaultCreateHandler,
@@ -23,17 +24,19 @@ ensureBootstrapAdmin(
   process.env.OPERATOR_TENANT ?? 'default',
 );
 
-// FileVaultInfra persists the vault-registry when a path is configured (the
-// deployed operator is the sole registry writer); else in-memory for local/dev.
+// Infra selection: KubernetesVaultInfra (in-cluster, real APIs) → FileVaultInfra
+// (local dev with OPERATOR_REGISTRY_PATH) → InMemoryVaultInfra (tests/default).
+const k8sInfra = createKubernetesVaultInfra();
 const registryPath = process.env.OPERATOR_REGISTRY_PATH;
-const infra: VaultInfra = registryPath
-  ? new FileVaultInfra(
-      registryPath,
-      process.env.VAULT_READER_URL ?? 'http://vault-reader:8000',
-      process.env.VAULT_WRITER_URL ?? 'http://vault-writer:8000',
-      { readFileSync, writeFileSync, existsSync },
-    )
-  : new InMemoryVaultInfra();
+const infra: VaultInfra = k8sInfra
+  ?? (registryPath
+    ? new FileVaultInfra(
+        registryPath,
+        process.env.VAULT_READER_URL ?? 'http://vault-reader:8000',
+        process.env.VAULT_WRITER_URL ?? 'http://vault-writer:8000',
+        { readFileSync, writeFileSync, existsSync },
+      )
+    : new InMemoryVaultInfra());
 const handlers: HandlerMap = {
   onboard: onboardHandler(store),
   vault_create: vaultCreateHandler(infra),

@@ -24,6 +24,7 @@ class ResolvedContext:
 def resolve_context_from_graph(
     repo: str,
     graph: GraphClientProtocol,
+    vault_name: str = "default",
 ) -> ResolvedContext:
     """
     Resolve context for a repo using the Neo4j knowledge graph.
@@ -34,10 +35,9 @@ def resolve_context_from_graph(
     """
     ctx = ResolvedContext(repo=repo)
 
-    # Find repo-profile node
     results = graph.query(
-        "MATCH (p:Page {repo: $repo, type: 'repo-profile'}) RETURN p.page_id AS id LIMIT 1",
-        {"repo": repo}
+        "MATCH (p:Page {repo: $repo, type: 'repo-profile', vault_name: $vault_name}) RETURN p.page_id AS id LIMIT 1",
+        {"repo": repo, "vault_name": vault_name}
     )
     if results:
         ctx.repo_profile_id = results[0]["id"]
@@ -45,13 +45,12 @@ def resolve_context_from_graph(
     if not ctx.repo_profile_id:
         return ctx
 
-    # Traverse relevant edges (docs, part_of, related) for operational pages
     related = graph.query("""
-        MATCH (p:Page {page_id: $page_id})-[r:DOCS|PART_OF|RELATED]-(q:Page)
+        MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r:DOCS|PART_OF|RELATED]-(q:Page {vault_name: $vault_name})
         WHERE q.mode = 'operational'
         RETURN DISTINCT q.page_id AS id
         LIMIT 50
-    """, {"page_id": ctx.repo_profile_id})
+    """, {"page_id": ctx.repo_profile_id, "vault_name": vault_name})
 
     ctx.related_page_ids = [r["id"] for r in related]
     return ctx

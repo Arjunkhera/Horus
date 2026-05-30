@@ -153,6 +153,36 @@ def _forward_headers(request: Request) -> dict[str, str]:
     return out
 
 
+def _vault_context_headers(
+    vault_name: str,
+    registry: Optional[VaultRegistry],
+) -> dict[str, str]:
+    """Build X-Vault-* headers so downstream vault services select the
+    correct per-vault Typesense collection and Neo4j scope."""
+    hdrs: dict[str, str] = {"x-vault-namespace": vault_name}
+    if registry:
+        entry = registry.get(vault_name)
+        if entry:
+            if entry.typesense_collection:
+                hdrs["x-vault-collection"] = entry.typesense_collection
+            if entry.git_repo:
+                hdrs["x-vault-git-repo"] = entry.git_repo
+    return hdrs
+
+
+def _build_per_vault_headers(
+    registry: Optional[VaultRegistry],
+    endpoints: dict[str, str],
+) -> dict[str, dict[str, str]]:
+    """Build per-vault X-Vault-* header overrides for fan-out requests."""
+    if registry is None:
+        return {}
+    per_vault: dict[str, dict[str, str]] = {}
+    for ns in endpoints:
+        per_vault[ns] = _vault_context_headers(ns, registry)
+    return per_vault
+
+
 def _read_endpoints(
     settings: VaultRouterSettings, registry: Optional[VaultRegistry]
 ) -> dict[str, str]:
@@ -224,7 +254,8 @@ async def search(
     registry = get_vault_registry(request)
     headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/search", body, vault_filter, headers=headers)
+    read_eps = _read_endpoints(settings, registry)
+    results = await fan_out(vault_client, read_eps, "/search", body, vault_filter, headers=headers, per_vault_headers=_build_per_vault_headers(registry, read_eps))
 
     all_pages: list[dict[str, Any]] = []
     seen_uuids: set[str] = set()
@@ -263,7 +294,8 @@ async def resolve_context(
     registry = get_vault_registry(request)
     headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/resolve-context", body, vault_filter, headers=headers)
+    read_eps = _read_endpoints(settings, registry)
+    results = await fan_out(vault_client, read_eps, "/resolve-context", body, vault_filter, headers=headers, per_vault_headers=_build_per_vault_headers(registry, read_eps))
 
     best_entry: Optional[dict[str, Any]] = None
     best_score: float = -1.0
@@ -313,7 +345,8 @@ async def list_by_scope(
     registry = get_vault_registry(request)
     headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/list-by-scope", body, vault_filter, headers=headers)
+    read_eps = _read_endpoints(settings, registry)
+    results = await fan_out(vault_client, read_eps, "/list-by-scope", body, vault_filter, headers=headers, per_vault_headers=_build_per_vault_headers(registry, read_eps))
 
     seen_uuids: set[str] = set()
     all_pages: list[dict[str, Any]] = []
@@ -354,7 +387,8 @@ async def check_duplicates(
     registry = get_vault_registry(request)
     headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/check-duplicates", body, vault_filter, headers=headers)
+    read_eps = _read_endpoints(settings, registry)
+    results = await fan_out(vault_client, read_eps, "/check-duplicates", body, vault_filter, headers=headers, per_vault_headers=_build_per_vault_headers(registry, read_eps))
 
     all_matches: list[dict[str, Any]] = []
     recommendation = "create"
@@ -389,7 +423,8 @@ async def suggest_metadata(
     registry = get_vault_registry(request)
     headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/suggest-metadata", body, vault_filter, headers=headers)
+    read_eps = _read_endpoints(settings, registry)
+    results = await fan_out(vault_client, read_eps, "/suggest-metadata", body, vault_filter, headers=headers, per_vault_headers=_build_per_vault_headers(registry, read_eps))
 
     merged: dict[str, Any] = {}
 
@@ -431,8 +466,10 @@ async def get_page(
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/get-page"
+    fwd = _forward_headers(request)
+    fwd.update(_vault_context_headers(vault_name, registry))
     try:
-        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
+        response = await vault_client.post(url, json=body, headers=fwd)
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -463,8 +500,10 @@ async def get_related(
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/get-related"
+    fwd = _forward_headers(request)
+    fwd.update(_vault_context_headers(vault_name, registry))
     try:
-        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
+        response = await vault_client.post(url, json=body, headers=fwd)
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -494,8 +533,10 @@ async def schema(
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/schema"
+    fwd = _forward_headers(request)
+    fwd.update(_vault_context_headers(vault_name, registry))
     try:
-        response = await vault_client.get(url, headers=_forward_headers(request))
+        response = await vault_client.get(url, headers=fwd)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -526,8 +567,10 @@ async def write_page(
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/write-page"
+    fwd = _forward_headers(request)
+    fwd.update(_vault_context_headers(vault_name, registry))
     try:
-        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
+        response = await vault_client.post(url, json=body, headers=fwd)
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -555,8 +598,10 @@ async def validate_page(
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/validate-page"
+    fwd = _forward_headers(request)
+    fwd.update(_vault_context_headers(vault_name, registry))
     try:
-        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
+        response = await vault_client.post(url, json=body, headers=fwd)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -585,8 +630,10 @@ async def registry_add(
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/registry/add"
+    fwd = _forward_headers(request)
+    fwd.update(_vault_context_headers(vault_name, registry))
     try:
-        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
+        response = await vault_client.post(url, json=body, headers=fwd)
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -637,8 +684,10 @@ async def _proxy_graph(
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}{path}"
+    fwd = _forward_headers(request)
+    fwd.update(_vault_context_headers(vault_name, registry))
     try:
-        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
+        response = await vault_client.post(url, json=body, headers=fwd)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -732,7 +781,8 @@ async def reindex(
     vault_filter = _parse_vault_filter(body)
     registry = get_vault_registry(request)
     headers = _forward_headers(request)
-    results = await fan_out(vault_client, _all_endpoints(settings, registry), "/reindex", body, vault_filter, headers=headers)
+    all_eps = _all_endpoints(settings, registry)
+    results = await fan_out(vault_client, all_eps, "/reindex", body, vault_filter, headers=headers, per_vault_headers=_build_per_vault_headers(registry, all_eps))
 
     total_indexed = 0
     total_errors = 0

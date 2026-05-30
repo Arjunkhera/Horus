@@ -6,7 +6,7 @@ import type { EmbeddingConfig } from './config.js';
 
 const COLLECTION_NAME = 'horus_documents';
 
-const BASE_SCHEMA: CollectionCreateSchema = {
+export const BASE_SCHEMA: CollectionCreateSchema = {
   name: COLLECTION_NAME,
   fields: [
     { name: 'id', type: 'string' },
@@ -121,6 +121,17 @@ export async function bootstrapCollection(
   }
 
   throw lastError;
+}
+
+/**
+ * Return the Typesense collection-create body as a plain object (no Typesense
+ * client types). The caller provides the per-vault collection name; the fields
+ * match BASE_SCHEMA (single source of truth).
+ */
+export function collectionCreateBody(name: string): Record<string, unknown> {
+  const schema = structuredClone(BASE_SCHEMA);
+  schema.name = name;
+  return schema as unknown as Record<string, unknown>;
 }
 
 function buildSchema(embeddingConfig?: EmbeddingConfig | null): CollectionCreateSchema {

@@ -24,7 +24,7 @@ from .interface import SearchStore, SearchResult, Document
 
 logger = logging.getLogger(__name__)
 
-COLLECTION = "horus_documents"
+DEFAULT_COLLECTION = "horus_documents"
 SOURCE = "vault"
 BODY_MAX_CHARS = 20_000
 
@@ -70,15 +70,33 @@ class TypesenseSearchEngine(SearchStore):
     never creates or alters the collection schema — it just reads/writes documents.
     """
 
-    def __init__(self, collection_paths: dict[str, str]) -> None:
+    def __init__(
+        self,
+        collection_paths: dict[str, str],
+        collection_name: str = DEFAULT_COLLECTION,
+        vault_name: Optional[str] = None,
+    ) -> None:
         """
         Args:
             collection_paths: Maps collection name -> filesystem root.
                 e.g. {"shared": "/data/knowledge-repo", "workspace": "/data/workspace"}
+            collection_name: Typesense collection to query (per-vault).
+            vault_name: Logical vault name stored in every document.
         """
         self._collection_paths = collection_paths
-        self._vault_name: str = os.getenv("VAULT_NAME", "default")
+        self._collection_name = collection_name
+        self._vault_name: str = vault_name or os.getenv("VAULT_NAME", "default")
         self._client: Any = None  # lazily initialised
+
+    def for_vault(self, collection_name: str, vault_name: str) -> "TypesenseSearchEngine":
+        """Return a vault-scoped engine sharing the underlying Typesense client."""
+        engine = TypesenseSearchEngine(
+            collection_paths=self._collection_paths,
+            collection_name=collection_name,
+            vault_name=vault_name,
+        )
+        engine._client = self._client
+        return engine
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -91,7 +109,7 @@ class TypesenseSearchEngine(SearchStore):
         return self._client
 
     def _collection(self) -> Any:
-        return self._get_client().collections[COLLECTION]
+        return self._get_client().collections[self._collection_name]
 
     def _build_document(self, file_path: str, parsed: Any) -> dict:
         """
@@ -394,7 +412,7 @@ class TypesenseSearchEngine(SearchStore):
 
         # Purge stale vault documents before re-indexing
         try:
-            self._get_client().collections[COLLECTION].documents.delete(
+            self._get_client().collections[self._collection_name].documents.delete(
                 {"filter_by": f"source:={SOURCE} && vault_name:={self._vault_name}"}
             )
         except Exception as e:
@@ -447,7 +465,7 @@ class TypesenseSearchEngine(SearchStore):
                 "status": "ok",
                 "engine": "typesense",
                 "indexed_documents": found,
-                "collection": COLLECTION,
+                "collection": self._collection_name,
                 "vault_name": self._vault_name,
             }
         except Exception as exc:

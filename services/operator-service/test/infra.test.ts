@@ -36,6 +36,7 @@ describe('FileVaultInfra (vault-registry writer)', () => {
         writer_endpoint: 'http://vault-writer:8000',
         typesense_collection: 'acme_notes',
         neo4j_db: 'acme_notes',
+        git_repo: 'git-subdir',
       });
 
       // Idempotent re-ensure → single entry.

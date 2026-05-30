@@ -26,12 +26,13 @@ from .config.settings import load_settings
 from .layer1.typesense_engine import TypesenseSearchEngine
 from .layer1.filesystem_store import FilesystemStore
 from .layer2.schema import SchemaLoader
-from .api.routes import router, get_store, get_schema_loader, get_settings, get_graph, get_uuid_registry
+from .api.routes import router, get_store, get_schema_loader, get_settings, get_graph, get_uuid_registry, get_vault_repo_resolver
 from .sync.daemon import start_sync_daemon, stop_sync_daemon
 from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
 from .graph import GraphClient, GraphConnectionError
 from .layer2.graph_export import import_graph
 from .layer2.uuid_registry import UUIDRegistry
+from .layer2.vault_repo_resolver import VaultRepoResolver
 from .security.principal import install_principal_middleware
 from .service_mode import get_vault_mode, should_run_sync, install_read_only_guard
 
@@ -159,12 +160,23 @@ async def lifespan(app: FastAPI):
         logger.warning("Neo4j unavailable at startup (non-fatal): %s", exc)
     app.state.graph = graph_client
 
+    # Per-vault git clone resolver — WRITER only.
+    mode = get_vault_mode()
+    if mode == "writer":
+        repo_resolver = VaultRepoResolver(
+            default_repo_path=settings.knowledge_repo_path,
+            github_token=settings.github_token,
+        )
+        app.state.repo_resolver = repo_resolver
+        logger.info("VaultRepoResolver ready (writer mode)")
+    else:
+        app.state.repo_resolver = None
+
     # Start sync daemon (git pull loop + workspace watcher) — WRITER only.
     # Readers are stateless (no git/PVC), so they skip the sync daemon entirely.
     def _rebuild_registry():
         uuid_registry.build(settings.knowledge_repo_path, collection_paths)
 
-    mode = get_vault_mode()
     if should_run_sync(mode):
         logger.info("Starting sync daemon (mode=%s)...", mode)
         git_pull_task, workspace_observer = await start_sync_daemon(
@@ -252,10 +264,18 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
-# Override the get_store dependency to use app.state.store
 def get_store_override(request: Request):
-    """Dependency override to inject SearchStore from app state."""
-    return request.app.state.store
+    """Dependency override to inject SearchStore from app state.
+
+    When X-Vault-Collection is present (injected by vault-router), returns a
+    vault-scoped engine that queries the per-vault Typesense collection.
+    """
+    base_store = request.app.state.store
+    collection = request.headers.get("x-vault-collection")
+    namespace = request.headers.get("x-vault-namespace")
+    if collection and isinstance(base_store, TypesenseSearchEngine):
+        return base_store.for_vault(collection, namespace or "default")
+    return base_store
 
 
 app.dependency_overrides[get_store] = get_store_override
@@ -291,6 +311,14 @@ def get_uuid_registry_override(request: Request):
 
 
 app.dependency_overrides[get_uuid_registry] = get_uuid_registry_override
+
+
+def get_vault_repo_resolver_override(request: Request):
+    """Dependency override to inject VaultRepoResolver from app state (writer only)."""
+    return getattr(request.app.state, "repo_resolver", None)
+
+
+app.dependency_overrides[get_vault_repo_resolver] = get_vault_repo_resolver_override
 
 # Reader/Writer split: on a reader pod, reject misrouted writes (#8).
 if install_read_only_guard(app, get_vault_mode()):

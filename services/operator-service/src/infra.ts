@@ -57,11 +57,12 @@ export class InMemoryVaultInfra implements VaultInfra {
   }
 }
 
-interface RegistryFileEntry {
+export interface RegistryFileEntry {
   reader_endpoint: string;
   writer_endpoint: string;
   typesense_collection: string;
   neo4j_db: string;
+  git_repo?: string;
 }
 
 /**
@@ -104,12 +105,15 @@ export class FileVaultInfra extends InMemoryVaultInfra {
     await super.ensureRegistryEntry(namespace, _endpoint);
     const doc = this.read();
     const slug = namespaceSlug(namespace);
-    doc.vaults[namespace] = {
+    const entry: RegistryFileEntry = {
       reader_endpoint: this.readerEndpoint,
       writer_endpoint: this.writerEndpoint,
       typesense_collection: slug,
       neo4j_db: slug,
     };
+    const gitAdapter = this.git.get(namespace);
+    if (gitAdapter) entry.git_repo = gitAdapter;
+    doc.vaults[namespace] = entry;
     this.write(doc);
   }
 

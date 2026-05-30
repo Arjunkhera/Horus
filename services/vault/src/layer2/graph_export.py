@@ -14,25 +14,23 @@ logger = logging.getLogger(__name__)
 EXPORT_FILE_RELATIVE = "_graph/edges.json"
 
 
-def export_graph(graph: Any, knowledge_repo_path: str) -> dict:
+def export_graph(graph: Any, knowledge_repo_path: str, vault_name: str = "default") -> dict:
     """
-    Export all nodes and edges from Neo4j to a JSON file in the knowledge-base repo.
+    Export nodes and edges for a vault from Neo4j to a JSON file.
     Returns export stats.
     """
-    # Query all edges
     edges = graph.query("""
-        MATCH (s:Page)-[r]->(t:Page)
+        MATCH (s:Page {vault_name: $vault_name})-[r]->(t:Page {vault_name: $vault_name})
         RETURN s.page_id AS source_id,
                t.page_id AS target_id,
                type(r) AS edge_type,
                properties(r) AS props
-    """)
+    """, {"vault_name": vault_name})
 
-    # Query all nodes (pages known to graph)
     nodes = graph.query("""
-        MATCH (p:Page)
+        MATCH (p:Page {vault_name: $vault_name})
         RETURN p.page_id AS page_id, properties(p) AS props
-    """)
+    """, {"vault_name": vault_name})
 
     export_data = {
         "version": "1",
@@ -59,7 +57,7 @@ def export_graph(graph: Any, knowledge_repo_path: str) -> dict:
     return {"nodes": len(export_data["nodes"]), "edges": len(export_data["edges"]), "path": str(export_path)}
 
 
-def import_graph(graph: Any, knowledge_repo_path: str) -> dict:
+def import_graph(graph: Any, knowledge_repo_path: str, vault_name: str = "default") -> dict:
     """
     Import/seed Neo4j from the JSON export file. Idempotent — uses MERGE.
     Returns import stats.
@@ -71,34 +69,34 @@ def import_graph(graph: Any, knowledge_repo_path: str) -> dict:
 
     data = json.loads(export_path.read_text())
 
-    # Import nodes
     node_count = 0
     for node in data.get("nodes", []):
         page_id = node.get("page_id")
         if not page_id:
             continue
         props = {k: v for k, v in node.items() if k != "page_id"}
+        props["vault_name"] = vault_name
         graph.query(
-            "MERGE (p:Page {page_id: $page_id}) SET p += $props",
-            {"page_id": page_id, "props": props},
+            "MERGE (p:Page {page_id: $page_id, vault_name: $vault_name}) SET p += $props",
+            {"page_id": page_id, "vault_name": vault_name, "props": props},
         )
         node_count += 1
 
-    # Import edges
     edge_count = 0
     for edge in data.get("edges", []):
         edge_type = edge.get("edge_type", "RELATED")
         props = edge.get("properties", {})
         graph.query(
             """
-            MERGE (s:Page {page_id: $source_id})
-            MERGE (t:Page {page_id: $target_id})
+            MERGE (s:Page {page_id: $source_id, vault_name: $vault_name})
+            MERGE (t:Page {page_id: $target_id, vault_name: $vault_name})
             MERGE (s)-[r:%s]->(t)
             SET r += $props
             """ % edge_type,
             {
                 "source_id": edge["source_id"],
                 "target_id": edge["target_id"],
+                "vault_name": vault_name,
                 "props": props,
             },
         )

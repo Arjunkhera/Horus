@@ -46,51 +46,52 @@ class Edge:
     properties: EdgeProperties = field(default_factory=EdgeProperties)
 
 
-def create_edge(graph: Any, edge: Edge) -> bool:
+def create_edge(graph: Any, edge: Edge, vault_name: str = "default") -> bool:
     """Create an edge between two page nodes. Creates nodes if they don't exist (MERGE)."""
     graph.query("""
-        MERGE (s:Page {page_id: $source_id})
-        MERGE (t:Page {page_id: $target_id})
+        MERGE (s:Page {page_id: $source_id, vault_name: $vault_name})
+        MERGE (t:Page {page_id: $target_id, vault_name: $vault_name})
         MERGE (s)-[r:%s]->(t)
         SET r += $props
     """ % edge.edge_type.value, {
         "source_id": edge.source_id,
         "target_id": edge.target_id,
+        "vault_name": vault_name,
         "props": edge.properties.to_dict(),
     })
     return True
 
 
-def get_edges(graph: Any, page_id: str, edge_type: Optional[EdgeType] = None) -> list[dict]:
+def get_edges(graph: Any, page_id: str, edge_type: Optional[EdgeType] = None, vault_name: str = "default") -> list[dict]:
     """Get all edges for a page, optionally filtered by type."""
     if edge_type:
         results = graph.query("""
-            MATCH (p:Page {page_id: $page_id})-[r:%s]->(t:Page)
+            MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r:%s]->(t:Page)
             RETURN t.page_id AS target_id, type(r) AS edge_type, properties(r) AS props
             UNION
-            MATCH (s:Page)-[r:%s]->(p:Page {page_id: $page_id})
+            MATCH (s:Page)-[r:%s]->(p:Page {page_id: $page_id, vault_name: $vault_name})
             RETURN s.page_id AS target_id, type(r) AS edge_type, properties(r) AS props
-        """ % (edge_type.value, edge_type.value), {"page_id": page_id})
+        """ % (edge_type.value, edge_type.value), {"page_id": page_id, "vault_name": vault_name})
     else:
         results = graph.query("""
-            MATCH (p:Page {page_id: $page_id})-[r]->(t:Page)
+            MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r]->(t:Page)
             RETURN t.page_id AS target_id, type(r) AS edge_type, properties(r) AS props
             UNION
-            MATCH (s:Page)-[r]->(p:Page {page_id: $page_id})
+            MATCH (s:Page)-[r]->(p:Page {page_id: $page_id, vault_name: $vault_name})
             RETURN s.page_id AS target_id, type(r) AS edge_type, properties(r) AS props
-        """, {"page_id": page_id})
+        """, {"page_id": page_id, "vault_name": vault_name})
     return [
         {"target_id": r["target_id"], "edge_type": r["edge_type"], "properties": r.get("props", {})}
         for r in results
     ]
 
 
-def delete_edge(graph: Any, source_id: str, target_id: str, edge_type: EdgeType) -> bool:
+def delete_edge(graph: Any, source_id: str, target_id: str, edge_type: EdgeType, vault_name: str = "default") -> bool:
     """Delete a specific edge between two pages."""
     graph.query("""
-        MATCH (s:Page {page_id: $source_id})-[r:%s]->(t:Page {page_id: $target_id})
+        MATCH (s:Page {page_id: $source_id, vault_name: $vault_name})-[r:%s]->(t:Page {page_id: $target_id, vault_name: $vault_name})
         DELETE r
-    """ % edge_type.value, {"source_id": source_id, "target_id": target_id})
+    """ % edge_type.value, {"source_id": source_id, "target_id": target_id, "vault_name": vault_name})
     return True
 
 
@@ -99,6 +100,7 @@ def traverse_graph(
     start_page_id: str,
     edge_types: Optional[list[EdgeType]] = None,
     max_depth: int = 3,
+    vault_name: str = "default",
 ) -> list[dict]:
     """
     Traverse the graph from a starting page up to max_depth hops.
@@ -111,10 +113,10 @@ def traverse_graph(
         rel_pattern = f"[r*1..{max_depth}]"
 
     results = graph.query(f"""
-        MATCH (start:Page {{page_id: $start_id}})-{rel_pattern}-(page:Page)
+        MATCH (start:Page {{page_id: $start_id, vault_name: $vault_name}})-{rel_pattern}-(page:Page {{vault_name: $vault_name}})
         WHERE page.page_id <> $start_id
         RETURN DISTINCT page.page_id AS page_id, page.type AS page_type, page.mode AS mode
         LIMIT 100
-    """, {"start_id": start_page_id})
+    """, {"start_id": start_page_id, "vault_name": vault_name})
 
     return [{"page_id": r["page_id"], "type": r.get("page_type"), "mode": r.get("mode")} for r in results]
