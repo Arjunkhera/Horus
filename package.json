@@ -11,6 +11,7 @@
     "build": "pnpm -r build",
     "dev": "pnpm --parallel -r dev",
     "test": "pnpm -r test",
+    "test:remoting": "pnpm --filter @horus/anvil-router exec vitest run test/integration/",
     "lint": "pnpm -r typecheck",
     "clean": "pnpm -r exec -- rm -rf dist node_modules"
   },

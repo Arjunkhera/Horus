@@ -17,6 +17,9 @@ importers:
 
   packages/anvil:
     dependencies:
+      '@horus/scope':
+        specifier: workspace:*
+        version: link:../scope
       '@horus/search':
         specifier: workspace:*
         version: link:../search
@@ -317,6 +320,34 @@ importers:
 
   packages/horus-ui-client: {}
 
+  packages/router-core:
+    dependencies:
+      '@horus/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@horus/scope':
+        specifier: workspace:*
+        version: link:../scope
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.5
+        version: 20.19.37
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      tsx:
+        specifier: ^4.7.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.0.0
+        version: 1.6.1(@types/node@20.19.37)
+
   packages/scope:
     dependencies:
       '@horus/auth':
@@ -441,6 +472,46 @@ importers:
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+
+  services/anvil-router:
+    dependencies:
+      '@fastify/reply-from':
+        specifier: ^9.8.0
+        version: 9.8.0
+      '@horus/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@horus/router-core':
+        specifier: workspace:*
+        version: link:../../packages/router-core
+      fastify:
+        specifier: ^4.28.1
+        version: 4.29.1
+      fastify-plugin:
+        specifier: ^4.5.1
+        version: 4.5.1
+      node-sqlite3-wasm:
+        specifier: ^0.8.53
+        version: 0.8.55
+      prom-client:
+        specifier: ^15.1.3
+        version: 15.1.3
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.5
+        version: 20.19.37
+      jose:
+        specifier: ^6.2.2
+        version: 6.2.2
+      tsx:
+        specifier: ^4.7.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.2.1
+        version: 1.6.1(@types/node@20.19.37)
 
   services/horus-service:
     dependencies:

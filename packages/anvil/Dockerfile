@@ -8,15 +8,19 @@ WORKDIR /build
 
 COPY pnpm-lock.yaml package.json pnpm-workspace.yaml .npmrc ./
 COPY packages/search/package.json ./packages/search/
+COPY packages/auth/package.json ./packages/auth/
+COPY packages/scope/package.json ./packages/scope/
 COPY packages/anvil/package.json ./packages/anvil/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/search/ ./packages/search/
+COPY packages/auth/ ./packages/auth/
+COPY packages/scope/ ./packages/scope/
 COPY packages/anvil/src/ ./packages/anvil/src/
 COPY packages/anvil/tsconfig.json ./packages/anvil/
 
-RUN pnpm --filter @horus/search build && pnpm --filter anvil-mcp build
+RUN pnpm --filter @horus/auth build && pnpm --filter @horus/scope build && pnpm --filter @horus/search build && pnpm --filter anvil-mcp build
 
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────
@@ -34,11 +38,19 @@ WORKDIR /app
 # pnpm workspace structure (node_modules land under packages/anvil/)
 COPY pnpm-lock.yaml package.json pnpm-workspace.yaml .npmrc ./
 COPY packages/search/package.json ./packages/search/
+COPY packages/auth/package.json ./packages/auth/
+COPY packages/scope/package.json ./packages/scope/
 COPY packages/anvil/package.json ./packages/anvil/
 RUN pnpm install --prod --frozen-lockfile
 
 # Copy pre-built @horus/search dist
 COPY --from=builder /build/packages/search/dist/ ./packages/search/dist/
+
+# Copy pre-built @horus/auth dist
+COPY --from=builder /build/packages/auth/dist/ ./packages/auth/dist/
+
+# Copy pre-built @horus/scope dist
+COPY --from=builder /build/packages/scope/dist/ ./packages/scope/dist/
 
 # Copy anvil dist into the workspace package (where node_modules lives)
 COPY --from=builder /build/packages/anvil/dist/ ./packages/anvil/dist/
