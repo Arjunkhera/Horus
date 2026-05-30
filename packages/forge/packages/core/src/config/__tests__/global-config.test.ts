@@ -442,7 +442,21 @@ describe('Global Config', () => {
       expect(result?.name).toBe('enterprise');
     });
 
-    it('falls back to global when no enterprise registry exists (solo-dev)', () => {
+    it('prefers a writable user registry over the read-only global CDN', () => {
+      // global is always appended (writable: false) and must not shadow a
+      // writable shared registry the user configured for repo writes.
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, user, DEFAULT_GLOBAL_REGISTRY]);
+      expect(result?.name).toBe('team');
+      expect(result?.writable).toBe(true);
+    });
+
+    it('does not pick a read-only user registry over global', () => {
+      const readOnlyUser: RegistryConfig = { type: 'http', name: 'mirror', url: 'http://mirror:8744', writable: false };
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, readOnlyUser, DEFAULT_GLOBAL_REGISTRY]);
+      expect(result?.name).toBe('global');
+    });
+
+    it('falls back to global when no enterprise/writable registry exists (solo-dev)', () => {
       const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, DEFAULT_GLOBAL_REGISTRY]);
       expect(result?.name).toBe('global');
       expect(result?.url).toBe(DEFAULT_GLOBAL_REGISTRY.url);
