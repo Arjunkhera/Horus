@@ -17,7 +17,21 @@ import * as path from 'node:path';
 import { RepoMetadataSchema } from '../types/repo-metadata.js';
 import type { RepoMetadata } from '../types/repo-metadata.js';
 
-export class RepoStorageAdapter {
+/**
+ * Storage contract for repo metadata. Implemented by the filesystem-backed
+ * {@link RepoStorageAdapter} (git/solo-dev) and the S3-backed
+ * `S3RepoStorageAdapter` (deployed shared registry). Both store one mutable
+ * JSON document per repo at repos/{org}/{name}/metadata.json.
+ */
+export interface RepoStorage {
+  write(org: string, name: string, metadata: RepoMetadata): Promise<void>;
+  read(org: string, name: string): Promise<RepoMetadata | null>;
+  delete(org: string, name: string): Promise<boolean>;
+  exists(org: string, name: string): Promise<boolean>;
+  listAll(): Promise<RepoMetadata[]>;
+}
+
+export class RepoStorageAdapter implements RepoStorage {
   /**
    * @param workDir - Root of the local git working tree (or any directory root).
    *                  Repo files are stored at {workDir}/repos/{org}/{name}/metadata.json.

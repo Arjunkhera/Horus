@@ -8,10 +8,14 @@ import {
   saveGlobalConfig,
   addGlobalRegistry,
   removeGlobalRegistry,
+  selectSharedRepoRegistry,
+  DEFAULT_LOCAL_REGISTRY,
+  DEFAULT_GLOBAL_REGISTRY,
   expandPath,
   expandPaths,
 } from '../index.js';
 import { GlobalConfigSchema, type GlobalConfig } from '../../models/global-config.js';
+import type { RegistryConfig } from '../../models/forge-config.js';
 
 describe('Global Config', () => {
   let tmpDir: string;
@@ -422,6 +426,51 @@ describe('Global Config', () => {
       expect(config.workspace.mount_path).toBe(path.join(os.homedir(), 'forge-workspaces'));
       expect(config.mcp_endpoints).toEqual({});
       expect(config.repos.scan_paths).toEqual([]);
+    });
+  });
+
+  describe('selectSharedRepoRegistry()', () => {
+    const user: RegistryConfig = { type: 'http', name: 'team', url: 'http://team:8744', writable: true };
+    const enterprise: RegistryConfig = { type: 'http', name: 'enterprise', url: 'http://ent:8744', writable: true };
+
+    it('returns undefined when no http registry is configured', () => {
+      expect(selectSharedRepoRegistry([])).toBeUndefined();
+    });
+
+    it('prefers enterprise over everything else', () => {
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, user, enterprise, DEFAULT_GLOBAL_REGISTRY]);
+      expect(result?.name).toBe('enterprise');
+    });
+
+    it('prefers a writable user registry over the read-only global CDN', () => {
+      // global is always appended (writable: false) and must not shadow a
+      // writable shared registry the user configured for repo writes.
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, user, DEFAULT_GLOBAL_REGISTRY]);
+      expect(result?.name).toBe('team');
+      expect(result?.writable).toBe(true);
+    });
+
+    it('does not pick a read-only user registry over global', () => {
+      const readOnlyUser: RegistryConfig = { type: 'http', name: 'mirror', url: 'http://mirror:8744', writable: false };
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, readOnlyUser, DEFAULT_GLOBAL_REGISTRY]);
+      expect(result?.name).toBe('global');
+    });
+
+    it('falls back to global when no enterprise/writable registry exists (solo-dev)', () => {
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, DEFAULT_GLOBAL_REGISTRY]);
+      expect(result?.name).toBe('global');
+      expect(result?.url).toBe(DEFAULT_GLOBAL_REGISTRY.url);
+    });
+
+    it('never picks the solo-dev local registry when a shared one exists', () => {
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY, user]);
+      expect(result?.name).toBe('team');
+      expect(result?.url).not.toBe(DEFAULT_LOCAL_REGISTRY.url);
+    });
+
+    it('falls back to local only when it is the sole http registry', () => {
+      const result = selectSharedRepoRegistry([DEFAULT_LOCAL_REGISTRY]);
+      expect(result?.name).toBe('local');
     });
   });
 });
