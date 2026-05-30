@@ -10,14 +10,14 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { RepoStorageAdapter } from '../storage/repo-storage.js';
+import type { RepoStorage } from '../storage/repo-storage.js';
 import type { RepoSearchClient } from '../search/repo-search.js';
 import type { AuthStrategy } from '../auth/types.js';
 import { CreateRepoInputSchema, PatchRepoInputSchema } from '../types/repo-metadata.js';
 import { deepMergeRepo } from '../utils/deep-merge.js';
 
 export interface RepoDeps {
-  repoStorage: RepoStorageAdapter;
+  repoStorage: RepoStorage;
   repoSearch: RepoSearchClient | null;
   auth: AuthStrategy;
 }

@@ -95,10 +95,11 @@ repoCommand
 
 repoCommand
   .command('migrate')
-  .description('Import existing repos.json entries into the remote repo registry')
+  .description('Import existing repos.json entries into the shared repo registry')
   .option('--from <path>', 'Path to repos.json (default: ~/Horus/data/config/repos.json)')
+  .option('--registry <url>', 'Shared registry base URL (overrides enterprise_registry_url)')
   .option('--dry-run', 'Preview what would be migrated without writing to the registry')
-  .action(async (opts: { from?: string; dryRun?: boolean }) => {
+  .action(async (opts: { from?: string; registry?: string; dryRun?: boolean }) => {
     console.log('');
     console.log(chalk.bold('Horus Repo Migrate'));
     console.log(chalk.dim('──────────────────────────────────────'));
@@ -112,9 +113,11 @@ repoCommand
 
     const config = loadConfig();
 
-    // Build the registry base URL: enterprise_registry_url takes precedence,
-    // then fall back to the default local registry-service port (8744).
-    const registryUrl = config.enterprise_registry_url ?? 'http://localhost:8744';
+    // Build the shared registry base URL: explicit --registry flag wins, then
+    // the configured enterprise_registry_url, then the local registry-service
+    // port (8744) as a solo-dev fallback.
+    const registryUrl =
+      opts.registry ?? config.enterprise_registry_url ?? 'http://localhost:8744';
 
     const client = new RepoRegistryClient({ baseUrl: registryUrl });
 

@@ -102,6 +102,32 @@ export function ensureDefaultRegistries(
 }
 
 /**
+ * Select the registry that backs the SHARED repo registry.
+ *
+ * Unlike artifacts (local-first resolution), repo metadata is shared and lives
+ * in the deployed Forge registry, so repo operations must target the shared
+ * endpoint — never the solo-dev `local` (localhost:8744) entry. Preference:
+ *   1. `enterprise` — the deployed registry in enterprise/air-gapped mode (writable).
+ *   2. `global`     — the default public/shared registry (DEFAULT_GLOBAL_REGISTRY).
+ *   3. any non-`local` http registry — a user-configured shared registry.
+ *   4. `local`      — last-resort fallback (solo-dev with no shared registry).
+ *
+ * Returns undefined when no http registry is configured at all.
+ */
+export function selectSharedRepoRegistry(
+  registries: RegistryConfig[],
+): RegistryConfig | undefined {
+  const http = registries.filter(r => r.type === 'http');
+  if (http.length === 0) return undefined;
+  return (
+    http.find(r => r.name === 'enterprise') ??
+    http.find(r => r.name === 'global') ??
+    http.find(r => r.name !== 'local') ??
+    http[0]
+  );
+}
+
+/**
  * Load the global Forge configuration from ~/Horus/data/config/forge.yaml.
  * Returns an empty config (no registries) if the file doesn't exist.
  * Expands all tilde paths to absolute paths.

@@ -12,7 +12,7 @@ import type { AuthStrategy } from './auth/types.js';
 import type { AuditLog } from './audit/audit-log.js';
 import type { PublishPipeline } from './pipeline/publish-pipeline.js';
 import type { RegistrySearchClient } from './search/registry-search.js';
-import type { RepoStorageAdapter } from './storage/repo-storage.js';
+import type { RepoStorage } from './storage/repo-storage.js';
 import type { RepoSearchClient } from './search/repo-search.js';
 import { registerAuthMiddleware } from './auth/middleware.js';
 import { registerRepoRoutes } from './routes/repos.js';
@@ -34,7 +34,7 @@ export interface AppDependencies {
   /** Optional — search route is only registered when this is provided */
   search?: RegistrySearchClient;
   /** Optional — repo storage + search for repo registry routes */
-  repoStorage?: RepoStorageAdapter;
+  repoStorage?: RepoStorage;
   repoSearch?: RepoSearchClient;
   /** Name of the active auth strategy — threaded into every audit entry */
   strategyName?: string;

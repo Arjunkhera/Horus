@@ -4,6 +4,7 @@ export {
   addGlobalRegistry,
   removeGlobalRegistry,
   ensureDefaultRegistries,
+  selectSharedRepoRegistry,
   DEFAULT_LOCAL_REGISTRY,
   DEFAULT_GLOBAL_REGISTRY,
   GLOBAL_CONFIG_DIR,

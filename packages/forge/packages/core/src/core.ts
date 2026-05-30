@@ -35,7 +35,7 @@ import type { ForgeConfig, RegistryConfig } from './models/forge-config.js';
 import type { RepoIndex, RepoIndexEntry, RepoIndexWorkflow } from './models/repo-index.js';
 import type { RepoWorkflow, WorkflowStrategy } from './models/repo-workflow.js';
 import { ForgeError } from './adapters/errors.js';
-import { loadGlobalConfig, saveGlobalConfig } from './config/global-config-loader.js';
+import { loadGlobalConfig, saveGlobalConfig, selectSharedRepoRegistry } from './config/global-config-loader.js';
 import { scan as repoScannerScan } from './repo/repo-scanner.js';
 import { loadRepoIndex, saveRepoIndex } from './repo/repo-index-store.js';
 import { RepoIndexQuery } from './repo/repo-index-query.js';
@@ -193,16 +193,19 @@ export class ForgeCore {
   }
 
   /**
-   * Return a RepoRegistryClient configured from the first http registry in the
-   * global config, or null when no registry is available.
-   * The client uses `~/.horus/repo-registry-cache.json` as an offline cache.
+   * Return a RepoRegistryClient configured from the SHARED repo registry in the
+   * global config (see {@link selectSharedRepoRegistry}), or null when no http
+   * registry is available. The client uses `repo-registry-cache.json` as an
+   * offline cache so name lookups still resolve when the registry is unreachable.
    */
   async getRepoRegistryClient(): Promise<RepoRegistryClient | null> {
     if (this._repoRegistryClient !== undefined) {
       return this._repoRegistryClient;
     }
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
-    const reg = globalConfig.registries.find(r => r.type === 'http');
+    // Repo metadata is SHARED (lives in the deployed registry), so target the
+    // shared endpoint — not the solo-dev `local` (localhost:8744) registry.
+    const reg = selectSharedRepoRegistry(globalConfig.registries);
     if (!reg) {
       this._repoRegistryClient = null;
       return null;

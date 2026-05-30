@@ -10,7 +10,8 @@ import { AuditLog } from './audit/audit-log.js';
 import { PublishPipeline } from './pipeline/publish-pipeline.js';
 import { RegistrySearchClient } from './search/registry-search.js';
 import { RepoSearchClient } from './search/repo-search.js';
-import { RepoStorageAdapter } from './storage/repo-storage.js';
+import { RepoStorageAdapter, type RepoStorage } from './storage/repo-storage.js';
+import { S3RepoStorageAdapter } from './storage/repo-storage-s3.js';
 import { createApp } from './app.js';
 
 async function main(): Promise<void> {
@@ -65,16 +66,18 @@ async function main(): Promise<void> {
     search ?? undefined,
   );
 
-  // 7b. Create repo storage adapter (git backend only — repos live in the local worktree)
-  const repoStorage = config.storage.backend === 'git'
-    ? new RepoStorageAdapter(config.storage.localPath)
-    : null;
+  // 7b. Create repo storage adapter. The repo registry is SHARED, so it lives in
+  // whichever backend the registry is deployed with: S3 for the deployed/shared
+  // registry, filesystem for the git/solo-dev backend. Both serve the /repos API.
+  const repoStorage: RepoStorage = config.storage.backend === 's3'
+    ? new S3RepoStorageAdapter(config.storage)
+    : new RepoStorageAdapter(config.storage.localPath);
 
   // 8. Build Fastify app
   const app = createApp({
     config, storage, auth, auditLog, pipeline,
     search: search ?? undefined,
-    repoStorage: repoStorage ?? undefined,
+    repoStorage,
     repoSearch: repoSearch ?? undefined,
   });
 
@@ -100,7 +103,7 @@ async function main(): Promise<void> {
   }
 
   // 10b. Cold rebuild repo search index from storage
-  if (repoSearch && repoStorage) {
+  if (repoSearch) {
     void repoStorage
       .listAll()
       .then((repos) => repoSearch.rebuildFromStorage(repos))
