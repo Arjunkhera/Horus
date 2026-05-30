@@ -27,6 +27,7 @@ async def fan_out(
     path: str,
     body: dict[str, Any],
     vault_filter: Optional[list[str]] = None,
+    headers: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """
     Send a POST request to all (or filtered) vault instances concurrently.
@@ -53,7 +54,7 @@ async def fan_out(
         url = f"{base_url.rstrip('/')}{path}"
         try:
             response = await asyncio.wait_for(
-                client.post(url, json=body),
+                client.post(url, json=body, headers=headers),
                 timeout=FAN_OUT_TIMEOUT,
             )
             response.raise_for_status()
