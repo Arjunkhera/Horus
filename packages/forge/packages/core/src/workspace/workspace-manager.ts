@@ -28,11 +28,12 @@ registries:
     name: local
     url: http://localhost:8744
     writable: true
-  # Public global registry (read-only fallback, served via CloudFront CDN)
-  # NOTE: CloudFront blocks POST — use EC2 direct (http://34.234.40.171:8744) for writes
+  # Public global registry (read-only fallback): in-cluster forge-registry behind
+  # the Horus gateway. Anonymous reads are public; publishing needs an
+  # authenticated writable entry on the same gateway with a publisher token.
   - type: http
     name: global
-    url: https://d1agcpjabvrj1s.cloudfront.net
+    url: https://horus.arjunkhera.io/api/v1/forge
 
 artifacts:
   skills: {}

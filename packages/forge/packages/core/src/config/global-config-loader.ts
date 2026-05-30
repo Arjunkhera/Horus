@@ -36,15 +36,17 @@ export const DEFAULT_LOCAL_REGISTRY: RegistryConfig = {
  * The default public Forge registry. Always present at the end of the
  * registry list as the last-resort read-only source for community artifacts.
  *
- * Reads are served via CloudFront CDN for low latency.
- * Writes (publish) must go to the EC2 origin directly (http://34.234.40.171:8744)
- * because CloudFront blocks POST requests — configure a writable registry entry
- * pointing at the EC2 origin when you need to publish to the cloud registry.
+ * Served by the in-cluster forge-registry behind the Horus control-plane
+ * gateway (horus-service). Anonymous GET/HEAD reads are public (community-read
+ * model); no token is required, so this entry stays read-only.
+ * Writes (publish) require an authenticated, writable registry entry pointing
+ * at the same gateway with a publisher token — the gateway gates non-read
+ * methods, so a tokenless 'global' entry cannot publish.
  */
 export const DEFAULT_GLOBAL_REGISTRY: RegistryConfig = {
   type: 'http',
   name: 'global',
-  url: 'https://d1agcpjabvrj1s.cloudfront.net',
+  url: 'https://horus.arjunkhera.io/api/v1/forge',
   writable: false,
 };
 
