@@ -44,6 +44,7 @@ spec:
       labels:
         app.kubernetes.io/name: forge-registry
     spec:
+      enableServiceLinks: false
       containers:
         - name: forge-registry
           image: ghcr.io/arjunkhera/horus/forge-registry:0.1.0-alpha
@@ -171,6 +172,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      enableServiceLinks: false
       containers:
         - name: versioning
           image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha

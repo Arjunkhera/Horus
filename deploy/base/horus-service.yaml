@@ -16,6 +16,7 @@ spec:
       labels:
         app.kubernetes.io/name: horus-service
     spec:
+      enableServiceLinks: false
       containers:
         - name: horus-service
           image: ghcr.io/arjunkhera/horus/horus-service:0.1.0-alpha

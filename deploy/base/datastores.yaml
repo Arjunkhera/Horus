@@ -18,6 +18,7 @@ spec:
       labels:
         app.kubernetes.io/name: typesense
     spec:
+      enableServiceLinks: false
       containers:
         - name: typesense
           image: typesense/typesense:0.25.2
@@ -75,6 +76,10 @@ spec:
       labels:
         app.kubernetes.io/name: neo4j
     spec:
+      # k8s injects NEO4J_PORT_7687_TCP_PORT-style service-link env vars (from the
+      # `neo4j` Service); neo4j 5.x reads any NEO4J_-prefixed var as a config
+      # setting and fails strict validation. Disable service links to avoid it.
+      enableServiceLinks: false
       containers:
         - name: neo4j
           image: neo4j:5.26.0

@@ -17,6 +17,7 @@ spec:
       labels:
         app.kubernetes.io/name: operator-service
     spec:
+      enableServiceLinks: false
       containers:
         - name: operator-service
           image: ghcr.io/arjunkhera/horus/operator-service:0.1.0-alpha

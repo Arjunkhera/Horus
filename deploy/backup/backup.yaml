@@ -56,11 +56,14 @@ spec:
               image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha
               command: ["/bin/sh", "-c"]
               args:
+                # operator-service uses node-sqlite3-wasm and ships NO sqlite3
+                # binary, so `kubectl exec … sqlite3` fails. Stream the raw DB file
+                # out and run `.dump` here in the backup image (which has sqlite3).
                 - >
                   set -euo pipefail;
                   TS=$(date -u +%Y%m%dT%H%M%SZ);
-                  kubectl exec operator-service-0 -c operator-service --
-                  sqlite3 /data/operator.db .dump
+                  kubectl exec operator-service-0 -c operator-service -- cat /data/operator.db > /tmp/operator.db;
+                  sqlite3 /tmp/operator.db .dump
                   | gzip
                   | aws s3 cp - "s3://${BACKUP_BUCKET}/operator/operator-${TS}.sql.gz"
               envFrom:
