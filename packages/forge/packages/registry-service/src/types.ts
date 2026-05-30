@@ -4,21 +4,37 @@
 
 /**
  * Roles available within the registry service.
- * - admin: full read + write access
- * - anonymous: read-only access
+ * - admin: full read + write access (builtin/trusted-headers strategies)
+ * - anonymous: read-only access (builtin/trusted-headers strategies)
+ *
+ * Forge-role vocabulary used by the horus-principal strategy:
+ * - registry-admin: full read + write + verify/unverify
+ * - publisher: read + publish
+ * - consumer: read-only
  */
-export type ServiceRole = 'admin' | 'anonymous';
+export type ServiceRole =
+  | 'admin'
+  | 'anonymous'
+  | 'consumer'
+  | 'publisher'
+  | 'registry-admin';
 
 /**
  * Represents a resolved, authenticated service user.
  */
 export interface ServiceUser {
-  /** Stable user identifier (from config, never the key) */
+  /** Stable user identifier (from config, or the principal `user` claim) */
   userId: string;
   /** Display name */
   name: string;
   /** Role that governs what actions are permitted */
   role: ServiceRole;
+  /** Tenant the caller belongs to (from the X-Horus-Principal `tenant` claim). */
+  tenant?: string;
+  /** Additional Horus roles carried on the principal (`roles[]` claim). */
+  roles?: string[];
+  /** Non-standard principal claims (extensions), excluding registered JWT claims. */
+  claims?: Record<string, unknown>;
 }
 
 /**

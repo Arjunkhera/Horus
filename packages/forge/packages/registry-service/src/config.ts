@@ -82,10 +82,33 @@ const WebhookAuthConfigSchema = z.object({
   }),
 });
 
+/**
+ * horus-principal auth — verifies the gateway-minted `X-Horus-Principal` JWT
+ * against the shared internal-signing public JWK and derives identity from its
+ * claims. Mirrors the Vault principal middleware so both services verify the
+ * same token identically. The JWK itself is never stored in YAML; it is
+ * resolved from env (HORUS_PRINCIPAL_PUBLIC_JWK / _FILE) by the loader.
+ */
+const HorusPrincipalAuthConfigSchema = z.object({
+  strategy: z.literal('horus-principal'),
+  /** Public JWK (internal signing key's public half). Injected from env. */
+  publicJwk: z.record(z.unknown()).optional(),
+  /** Header carrying the compact principal JWT (default: x-horus-principal). */
+  header: z.string().min(1).default('x-horus-principal'),
+  /** Clock-skew leeway in seconds applied to exp/nbf validation. */
+  leewaySeconds: z.number().int().nonnegative().default(30),
+  /**
+   * Optional Horus-role → Forge-role overrides. Keys are Horus role strings
+   * (matched case-insensitively); values are the target Forge role.
+   */
+  roleMap: z.record(z.enum(['consumer', 'publisher', 'registry-admin'])).optional(),
+});
+
 const AuthConfigSchema = z.discriminatedUnion('strategy', [
   BuiltinAuthConfigSchema,
   TrustedHeadersAuthConfigSchema,
   WebhookAuthConfigSchema,
+  HorusPrincipalAuthConfigSchema,
 ]);
 
 const S3StorageConfigSchema = z.object({
@@ -174,8 +197,35 @@ export type BuiltinAuthConfig = z.infer<typeof BuiltinAuthConfigSchema>;
 export type TrustedHeadersAuthConfig = z.infer<typeof TrustedHeadersAuthConfigSchema>;
 export type TrustedHeadersJwtConfig = z.infer<typeof TrustedHeadersJwtConfigSchema>;
 export type WebhookAuthConfig = z.infer<typeof WebhookAuthConfigSchema>;
+export type HorusPrincipalAuthConfig = z.infer<typeof HorusPrincipalAuthConfigSchema>;
 export type S3StorageConfig = z.infer<typeof S3StorageConfigSchema>;
 export type GitStorageConfig = z.infer<typeof GitStorageConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// Principal public JWK resolution (env only — same contract as Vault)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the X-Horus-Principal public JWK from the environment. Accepts inline
+ * JSON via HORUS_PRINCIPAL_PUBLIC_JWK or a file path via
+ * HORUS_PRINCIPAL_PUBLIC_JWK_FILE. Returns undefined when neither is set.
+ *
+ * These env var names intentionally match services/vault (principal.py) so the
+ * same Secret can be mounted into both Vault and Forge.
+ */
+export function loadPrincipalPublicJwkFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, unknown> | undefined {
+  const inline = env['HORUS_PRINCIPAL_PUBLIC_JWK'];
+  if (inline) {
+    return JSON.parse(inline) as Record<string, unknown>;
+  }
+  const path = env['HORUS_PRINCIPAL_PUBLIC_JWK_FILE'];
+  if (path) {
+    return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  }
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -293,6 +343,16 @@ export function loadConfig(): ServiceConfig {
       tsConfig['apiKey'] = process.env['FORGE_REGISTRY_TYPESENSE_API_KEY'];
     }
     combined['typesense'] = tsConfig;
+  }
+
+  // horus-principal auth — inject the public JWK from env (never from YAML).
+  const rawAuth = raw['auth'] as Record<string, unknown> | undefined;
+  if (rawAuth && rawAuth['strategy'] === 'horus-principal') {
+    const auth: Record<string, unknown> = { ...rawAuth };
+    const jwk = loadPrincipalPublicJwkFromEnv();
+    if (jwk) auth['publicJwk'] = jwk;
+    else delete auth['publicJwk']; // strip any JWK that leaked into YAML
+    combined['auth'] = auth;
   }
 
   const result = ServiceConfigSchema.safeParse(combined);
