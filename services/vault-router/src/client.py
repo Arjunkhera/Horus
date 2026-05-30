@@ -48,13 +48,21 @@ class VaultClient:
             raise RuntimeError("VaultClient not started — call start() first")
         return self._client
 
-    async def post(self, url: str, json: Any) -> httpx.Response:
-        """POST JSON to an upstream vault endpoint."""
-        return await self.client.post(url, json=json)
+    async def post(
+        self, url: str, json: Any, headers: dict[str, str] | None = None
+    ) -> httpx.Response:
+        """POST JSON to an upstream vault endpoint.
 
-    async def get(self, url: str) -> httpx.Response:
+        ``headers`` carries forwarded request headers (notably X-Horus-Principal,
+        which the upstream vault verifies before serving writes).
+        """
+        return await self.client.post(url, json=json, headers=headers)
+
+    async def get(
+        self, url: str, headers: dict[str, str] | None = None
+    ) -> httpx.Response:
         """GET from an upstream vault endpoint."""
-        return await self.client.get(url)
+        return await self.client.get(url, headers=headers)
 
     async def health_check(self, name: str, base_url: str) -> dict[str, Any]:
         """

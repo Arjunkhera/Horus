@@ -193,13 +193,15 @@ spec:
           ports:
             - containerPort: 8000
           env:
-            # The router selects an upstream by vault NAME (VAULT_ENDPOINTS), not by
-            # read/write method; fan-out read endpoints broadcast to all names. Register
-            # the reader + writer pools as named endpoints; writes default to writer.
+            # The router applies the read/write split from the vault-registry:
+            # reads route to a namespace's reader_endpoint, writes to its
+            # writer_endpoint (services/vault-router/src/registry.py). VAULT_ENDPOINTS
+            # is the fallback name→url map (and the default namespace label) used when
+            # no registry entry matches; it points at the reader pool.
             - name: VAULT_ENDPOINTS
-              value: reader=http://vault-reader.horus-system.svc.cluster.local:8000,writer=http://vault-writer.horus-system.svc.cluster.local:8000
+              value: default=http://vault-reader.horus-system.svc.cluster.local:8000
             - name: VAULT_DEFAULT
-              value: writer
+              value: default
             # App defaults to 8400; pin to 8000 to match containerPort/Service/probe.
             - name: VAULT_ROUTER_PORT
               value: "8000"
@@ -247,5 +249,11 @@ metadata:
     app.kubernetes.io/managed-by: operator-service
 data:
   registry.yaml: |
-    # Populated by operator-service on vault provisioning. Initially empty.
-    vaults: {}
+    # Seeded with the single alpha vault. operator-service is the runtime writer
+    # (adds entries on multi-vault provisioning). The "default" namespace maps the
+    # reader pool (vault-reader, 2 replicas) and the single writer (vault-writer) so
+    # the router can apply the read/write split.
+    vaults:
+      default:
+        reader_endpoint: http://vault-reader.horus-system.svc.cluster.local:8000
+        writer_endpoint: http://vault-writer.horus-system.svc.cluster.local:8000

@@ -20,11 +20,18 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from .client import VaultClient
 from .settings import VaultRouterSettings
 from .uuid_registry import CrossVaultUUIDRegistry
+from .registry import VaultRegistry
 from .fan_out import fan_out
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Request headers forwarded verbatim to upstream vaults. X-Horus-Principal is the
+# short-lived JWT the gateway mints; the upstream vault verifies it before serving
+# writes (reads on the reader pool are not principal-gated). Without forwarding it,
+# principal-authenticated writes fail closed with 401 at the writer.
+_FORWARD_HEADERS = ("x-horus-principal",)
 
 
 # ── Dependency helpers ────────────────────────────────────────────────────────
@@ -41,9 +48,15 @@ def get_uuid_registry(request: Request) -> CrossVaultUUIDRegistry:
     return request.app.state.uuid_registry
 
 
+def get_vault_registry(request: Request) -> Optional[VaultRegistry]:
+    """The namespace→reader/writer routing table, or None when unconfigured."""
+    return getattr(request.app.state, "vault_registry", None)
+
+
 SettingsDepends = Annotated[VaultRouterSettings, Depends(get_settings)]
 ClientDepends = Annotated[VaultClient, Depends(get_vault_client)]
 UUIDRegistryDepends = Annotated[CrossVaultUUIDRegistry, Depends(get_uuid_registry)]
+RegistryDepends = Annotated[Optional[VaultRegistry], Depends(get_vault_registry)]
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -130,6 +143,68 @@ def _resolve_vault_for_write(
     return settings.vault_default
 
 
+def _forward_headers(request: Request) -> dict[str, str]:
+    """Extract the allow-listed headers to propagate to upstream vaults."""
+    out: dict[str, str] = {}
+    for name in _FORWARD_HEADERS:
+        value = request.headers.get(name)
+        if value:
+            out[name] = value
+    return out
+
+
+def _read_endpoints(
+    settings: VaultRouterSettings, registry: Optional[VaultRegistry]
+) -> dict[str, str]:
+    """Fan-out read targets: each vault's READER endpoint when a registry is
+    configured (reads never touch the writer), else the name→url map."""
+    if registry is not None and registry.namespaces():
+        return {
+            ns: entry.reader_endpoint
+            for ns in registry.namespaces()
+            if (entry := registry.get(ns)) is not None
+        }
+    return settings.vault_endpoints
+
+
+def _all_endpoints(
+    settings: VaultRouterSettings, registry: Optional[VaultRegistry]
+) -> dict[str, str]:
+    """Every distinct upstream (reader + writer pools) — used by admin fan-out
+    (reindex) and health, where both pools must be reached."""
+    if registry is not None and registry.namespaces():
+        out: dict[str, str] = {}
+        for ns in registry.namespaces():
+            entry = registry.get(ns)
+            if entry is None:
+                continue
+            out[f"{ns}#reader"] = entry.reader_endpoint
+            if entry.writer_endpoint and entry.writer_endpoint != entry.reader_endpoint:
+                out[f"{ns}#writer"] = entry.writer_endpoint
+        return out or settings.vault_endpoints
+    return settings.vault_endpoints
+
+
+def _resolve_endpoint(
+    body: dict[str, Any],
+    *,
+    write: bool,
+    settings: VaultRouterSettings,
+    registry: Optional[VaultRegistry],
+    uuid_registry: CrossVaultUUIDRegistry,
+) -> tuple[str, Optional[str]]:
+    """Resolve (vault_label, base_url) for a routed request, honoring the
+    read/write split: when a registry entry exists, reads go to its reader
+    endpoint and writes to its writer endpoint. Falls back to the name-based
+    VAULT_ENDPOINTS map when no registry entry matches."""
+    name = _resolve_vault_for_write(body, uuid_registry, settings)
+    if registry is not None:
+        endpoint = registry.resolve(name, write=write)
+        if endpoint:
+            return name, endpoint
+    return name, settings.vault_endpoints.get(name)
+
+
 # ── Fan-out read endpoints (B3) ───────────────────────────────────────────────
 
 @router.post("/search")
@@ -146,8 +221,10 @@ async def search(
     """
     body = await request.json()
     vault_filter = _parse_vault_filter(body)
+    registry = get_vault_registry(request)
+    headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, settings.vault_endpoints, "/search", body, vault_filter)
+    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/search", body, vault_filter, headers=headers)
 
     all_pages: list[dict[str, Any]] = []
     seen_uuids: set[str] = set()
@@ -183,8 +260,10 @@ async def resolve_context(
     """
     body = await request.json()
     vault_filter = _parse_vault_filter(body)
+    registry = get_vault_registry(request)
+    headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, settings.vault_endpoints, "/resolve-context", body, vault_filter)
+    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/resolve-context", body, vault_filter, headers=headers)
 
     best_entry: Optional[dict[str, Any]] = None
     best_score: float = -1.0
@@ -231,8 +310,10 @@ async def list_by_scope(
     """
     body = await request.json()
     vault_filter = _parse_vault_filter(body)
+    registry = get_vault_registry(request)
+    headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, settings.vault_endpoints, "/list-by-scope", body, vault_filter)
+    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/list-by-scope", body, vault_filter, headers=headers)
 
     seen_uuids: set[str] = set()
     all_pages: list[dict[str, Any]] = []
@@ -270,8 +351,10 @@ async def check_duplicates(
     """
     body = await request.json()
     vault_filter = _parse_vault_filter(body)
+    registry = get_vault_registry(request)
+    headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, settings.vault_endpoints, "/check-duplicates", body, vault_filter)
+    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/check-duplicates", body, vault_filter, headers=headers)
 
     all_matches: list[dict[str, Any]] = []
     recommendation = "create"
@@ -303,8 +386,10 @@ async def suggest_metadata(
     """
     body = await request.json()
     vault_filter = _parse_vault_filter(body)
+    registry = get_vault_registry(request)
+    headers = _forward_headers(request)
 
-    results = await fan_out(vault_client, settings.vault_endpoints, "/suggest-metadata", body, vault_filter)
+    results = await fan_out(vault_client, _read_endpoints(settings, registry), "/suggest-metadata", body, vault_filter, headers=headers)
 
     merged: dict[str, Any] = {}
 
@@ -338,14 +423,16 @@ async def get_page(
     in the registry. Falls back to default vault if UUID is not found.
     """
     body = await request.json()
-    vault_name = _resolve_vault_for_write(body, uuid_registry, settings)
-    base_url = settings.vault_endpoints.get(vault_name)
+    registry = get_vault_registry(request)
+    vault_name, base_url = _resolve_endpoint(
+        body, write=False, settings=settings, registry=registry, uuid_registry=uuid_registry
+    )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/get-page"
     try:
-        response = await vault_client.post(url, json=body)
+        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -368,14 +455,16 @@ async def get_related(
     within the same vault only.
     """
     body = await request.json()
-    vault_name = _resolve_vault_for_write(body, uuid_registry, settings)
-    base_url = settings.vault_endpoints.get(vault_name)
+    registry = get_vault_registry(request)
+    vault_name, base_url = _resolve_endpoint(
+        body, write=False, settings=settings, registry=registry, uuid_registry=uuid_registry
+    )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/get-related"
     try:
-        response = await vault_client.post(url, json=body)
+        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -397,14 +486,16 @@ async def schema(
     Proxies to upstream as GET /schema (knowledge-service uses GET for schema).
     """
     body = await request.json()
-    vault_name = body.get("vault") or settings.vault_default
-    base_url = settings.vault_endpoints.get(vault_name)
+    registry = get_vault_registry(request)
+    vault_name, base_url = _resolve_endpoint(
+        body, write=False, settings=settings, registry=registry, uuid_registry=request.app.state.uuid_registry
+    )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/schema"
     try:
-        response = await vault_client.get(url)
+        response = await vault_client.get(url, headers=_forward_headers(request))
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -427,14 +518,16 @@ async def write_page(
     on its next refresh cycle (or immediately on a create, via the default vault).
     """
     body = await request.json()
-    vault_name = _resolve_vault_for_write(body, uuid_registry, settings)
-    base_url = settings.vault_endpoints.get(vault_name)
+    registry = get_vault_registry(request)
+    vault_name, base_url = _resolve_endpoint(
+        body, write=True, settings=settings, registry=registry, uuid_registry=uuid_registry
+    )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/write-page"
     try:
-        response = await vault_client.post(url, json=body)
+        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -454,14 +547,16 @@ async def validate_page(
     Route /validate-page to the owning vault (by UUID) or to default.
     """
     body = await request.json()
-    vault_name = _resolve_vault_for_write(body, uuid_registry, settings)
-    base_url = settings.vault_endpoints.get(vault_name)
+    registry = get_vault_registry(request)
+    vault_name, base_url = _resolve_endpoint(
+        body, write=True, settings=settings, registry=registry, uuid_registry=uuid_registry
+    )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/validate-page"
     try:
-        response = await vault_client.post(url, json=body)
+        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -482,14 +577,16 @@ async def registry_add(
     vault's internal registry.
     """
     body = await request.json()
-    vault_name = _resolve_vault_for_write(body, uuid_registry, settings)
-    base_url = settings.vault_endpoints.get(vault_name)
+    registry = get_vault_registry(request)
+    vault_name, base_url = _resolve_endpoint(
+        body, write=True, settings=settings, registry=registry, uuid_registry=uuid_registry
+    )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}/registry/add"
     try:
-        response = await vault_client.post(url, json=body)
+        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
         response.raise_for_status()
         data = response.json()
         data["source_vault"] = vault_name
@@ -520,17 +617,28 @@ async def _proxy_graph(
     request: Request,
     settings: "VaultRouterSettings",
     vault_client: "VaultClient",
+    *,
+    write: bool,
 ) -> dict[str, Any]:
-    """Forward a graph request to the appropriate upstream vault."""
+    """Forward a graph request to the appropriate upstream vault.
+
+    Mutating graph operations route to the writer pool; read-only traversals to
+    the reader pool. X-Horus-Principal is forwarded so the upstream can verify it.
+    """
     body = await request.json()
+    registry = get_vault_registry(request)
     vault_name = _resolve_vault_for_graph(body, settings)
-    base_url = settings.vault_endpoints.get(vault_name)
+    base_url = None
+    if registry is not None:
+        base_url = registry.resolve(vault_name, write=write)
+    if not base_url:
+        base_url = settings.vault_endpoints.get(vault_name)
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
     url = f"{base_url.rstrip('/')}{path}"
     try:
-        response = await vault_client.post(url, json=body)
+        response = await vault_client.post(url, json=body, headers=_forward_headers(request))
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -544,7 +652,7 @@ async def graph_create_edge(
     vault_client: ClientDepends,
 ) -> dict[str, Any]:
     """Create a directed edge between two knowledge pages in Neo4j."""
-    return await _proxy_graph("/graph/edges", request, settings, vault_client)
+    return await _proxy_graph("/graph/edges", request, settings, vault_client, write=True)
 
 
 @router.post("/graph/edges/get")
@@ -554,7 +662,7 @@ async def graph_get_edges(
     vault_client: ClientDepends,
 ) -> dict[str, Any]:
     """Get all edges for a knowledge page, optionally filtered by edge type."""
-    return await _proxy_graph("/graph/edges/get", request, settings, vault_client)
+    return await _proxy_graph("/graph/edges/get", request, settings, vault_client, write=False)
 
 
 @router.post("/graph/edges/delete")
@@ -564,7 +672,7 @@ async def graph_delete_edge(
     vault_client: ClientDepends,
 ) -> dict[str, Any]:
     """Delete a specific directed edge between two knowledge pages."""
-    return await _proxy_graph("/graph/edges/delete", request, settings, vault_client)
+    return await _proxy_graph("/graph/edges/delete", request, settings, vault_client, write=True)
 
 
 @router.post("/graph/traverse")
@@ -574,7 +682,7 @@ async def graph_traverse(
     vault_client: ClientDepends,
 ) -> dict[str, Any]:
     """Traverse the knowledge graph from a starting page up to max_depth hops."""
-    return await _proxy_graph("/graph/traverse", request, settings, vault_client)
+    return await _proxy_graph("/graph/traverse", request, settings, vault_client, write=False)
 
 
 @router.post("/graph/export")
@@ -584,7 +692,7 @@ async def graph_export(
     vault_client: ClientDepends,
 ) -> dict[str, Any]:
     """Export all Neo4j graph nodes and edges to the knowledge-base repo."""
-    return await _proxy_graph("/graph/export", request, settings, vault_client)
+    return await _proxy_graph("/graph/export", request, settings, vault_client, write=True)
 
 
 @router.post("/graph/import")
@@ -594,7 +702,7 @@ async def graph_import(
     vault_client: ClientDepends,
 ) -> dict[str, Any]:
     """Import/seed Neo4j from the graph export file in the knowledge-base repo."""
-    return await _proxy_graph("/graph/import", request, settings, vault_client)
+    return await _proxy_graph("/graph/import", request, settings, vault_client, write=True)
 
 
 # ── Admin endpoints ───────────────────────────────────────────────────────────
@@ -622,7 +730,9 @@ async def reindex(
         body = {}
 
     vault_filter = _parse_vault_filter(body)
-    results = await fan_out(vault_client, settings.vault_endpoints, "/reindex", body, vault_filter)
+    registry = get_vault_registry(request)
+    headers = _forward_headers(request)
+    results = await fan_out(vault_client, _all_endpoints(settings, registry), "/reindex", body, vault_filter, headers=headers)
 
     total_indexed = 0
     total_errors = 0
