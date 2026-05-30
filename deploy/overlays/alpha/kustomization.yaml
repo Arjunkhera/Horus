@@ -11,3 +11,8 @@ resources:
   - ../../base
 
 # Alpha keeps base replica counts and pinned tags. Re-pin images here per release.
+# horus-service re-pinned ahead of the rest: ships the anonymous forge-read
+# change (EC2→K8s cutover, story 2828ffb7) without a full alpha re-tag.
+images:
+  - name: ghcr.io/arjunkhera/horus/horus-service
+    newTag: sha-d132db0
