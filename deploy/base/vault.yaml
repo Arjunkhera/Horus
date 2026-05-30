@@ -21,17 +21,9 @@ spec:
         app.kubernetes.io/name: vault-reader
     spec:
       enableServiceLinks: false
-      initContainers:
-        # entrypoint.sh fails fast unless a git repo exists at KNOWLEDGE_REPO_PATH
-        # (or VAULT_KNOWLEDGE_REPO_URL is set). For a self-contained start, init one.
-        - name: init-knowledge-repo
-          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
-          command: ["sh", "-c", "test -d /data/knowledge-repo/.git || git init -q /data/knowledge-repo"]
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: knowledge-data
-              mountPath: /data
+      # No git-init initContainer: entrypoint.sh clones the GitHub-backed knowledge
+      # repo (derived from GITHUB_REPO in vault-secrets) into the emptyDir on start.
+      # A pre-created empty .git would suppress that clone, leaving readers content-less.
       containers:
         - name: vault-reader
           image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
@@ -100,18 +92,10 @@ spec:
         app.kubernetes.io/name: vault-writer
     spec:
       enableServiceLinks: false
-      initContainers:
-        # entrypoint.sh fails fast unless a git repo exists at KNOWLEDGE_REPO_PATH
-        # (or VAULT_KNOWLEDGE_REPO_URL is set). For a self-contained start, init one
-        # on the writer's PVC (idempotent — only inits if absent).
-        - name: init-knowledge-repo
-          image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha
-          command: ["sh", "-c", "test -d /data/knowledge-repo/.git || git init -q /data/knowledge-repo"]
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: data
-              mountPath: /data
+      # No git-init initContainer: entrypoint.sh clones the GitHub-backed knowledge
+      # repo (derived from GITHUB_REPO in vault-secrets) onto the PVC on first start
+      # and pushes the _schema bootstrap. A pre-created empty .git would suppress the
+      # clone. The PVC persists the checkout across restarts.
       containers:
         - name: vault-writer
           image: ghcr.io/arjunkhera/horus/vault:0.1.0-alpha

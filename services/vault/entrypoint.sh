@@ -25,6 +25,7 @@ VAULT_SYNC_INTERVAL=${VAULT_SYNC_INTERVAL:-300}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 GITHUB_REPO=${GITHUB_REPO:-}
 GITHUB_BASE_BRANCH=${GITHUB_BASE_BRANCH:-master}
+VAULT_MODE=${VAULT_MODE:-}
 HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
 PULL_PID=""
 PYTHON_PID=""
@@ -97,9 +98,19 @@ if [ "$HORUS_RUNTIME" = "podman" ]; then
   git config --global --replace-all safe.directory '*'
 fi
 
+# GitHub-backed provisioning: when no explicit repo URL is given but GITHUB_REPO
+# is configured (vault-secrets), derive the HTTPS clone URL. This is the proper
+# replacement for the git-init stopgap — the writer clones the real remote and
+# pushes knowledge PRs; readers clone + pull content. Without a remote the writer
+# could not open PRs and readers would serve nothing.
+if [ -z "$VAULT_KNOWLEDGE_REPO_URL" ] && [ -n "$GITHUB_REPO" ]; then
+  VAULT_KNOWLEDGE_REPO_URL="https://github.com/${GITHUB_REPO}.git"
+  log "Derived VAULT_KNOWLEDGE_REPO_URL from GITHUB_REPO: $VAULT_KNOWLEDGE_REPO_URL"
+fi
+
 # Fail fast if no repo configured and no data present
 if [ -z "$VAULT_KNOWLEDGE_REPO_URL" ] && [ ! -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
-  log_err "VAULT_KNOWLEDGE_REPO_URL is not set and $KNOWLEDGE_REPO_PATH has no .git directory. Cannot start."
+  log_err "Neither VAULT_KNOWLEDGE_REPO_URL nor GITHUB_REPO is set and $KNOWLEDGE_REPO_PATH has no .git directory. Provide a GitHub-backed knowledge repo (GITHUB_REPO + GITHUB_TOKEN). Cannot start."
   exit 1
 fi
 
@@ -162,7 +173,10 @@ if [ ! -f "$KNOWLEDGE_REPO_PATH/_schema/schema.yaml" ]; then
   cp /app/defaults/_schema/schema.yaml "$KNOWLEDGE_REPO_PATH/_schema/"
   cp /app/defaults/_schema/registries/*.yaml "$KNOWLEDGE_REPO_PATH/_schema/registries/"
   log "_schema/ bootstrapped"
-  if [ -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
+  # Only the writer pushes the bootstrap commit to the remote — readers bootstrap
+  # _schema locally (so they can serve immediately) but must never push, otherwise
+  # multiple reader replicas race to initialize the same remote.
+  if [ "$VAULT_MODE" != "reader" ] && [ -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
     git -C "$KNOWLEDGE_REPO_PATH" add "_schema/" 2>/dev/null || true
     git -C "$KNOWLEDGE_REPO_PATH" commit -m "bootstrap: add default _schema" 2>/dev/null || true
     git -C "$KNOWLEDGE_REPO_PATH" push 2>/dev/null || log_err "Bootstrap push failed (non-fatal)"
