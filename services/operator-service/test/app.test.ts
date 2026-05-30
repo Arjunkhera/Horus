@@ -74,4 +74,30 @@ describe('operator-service HTTP API', () => {
     expect(res.statusCode).toBe(400);
     await app.close();
   });
+
+  it('exports the principal bundle for admin (private + public keys) and 403s non-admin', async () => {
+    const { keys, app } = await setup();
+
+    const ok = await app.inject({
+      method: 'GET',
+      url: '/admin/principal-bundle',
+      headers: { 'x-operator-role': 'admin', 'x-operator-user': 'admin' },
+    });
+    expect(ok.statusCode).toBe(200);
+    const bundle = ok.json();
+    expect(bundle.clientJwks).toEqual(keys.clientJwks());
+    expect(bundle.internalSigningKey.kid).toBe(keys.internalSigningKey().kid);
+    // The signing key must carry the EC private scalar 'd'; the published pub jwk must not.
+    expect(bundle.internalSigningKey.privateJwk).toHaveProperty('d');
+    expect(bundle.internalPublicJwk).not.toHaveProperty('d');
+    expect(bundle.internalPublicJwk.kty).toBe('EC');
+
+    const denied = await app.inject({
+      method: 'GET',
+      url: '/admin/principal-bundle',
+      headers: { 'x-operator-role': 'user', 'x-operator-user': 'mallory' },
+    });
+    expect(denied.statusCode).toBe(403);
+    await app.close();
+  });
 });
