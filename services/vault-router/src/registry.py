@@ -35,6 +35,7 @@ class VaultEntry:
     writer_endpoint: str
     typesense_collection: Optional[str] = None
     neo4j_db: Optional[str] = None
+    git_repo: Optional[str] = None
 
     def resolve(self, *, write: bool) -> str:
         """Reads go to the reader pool, writes to the single writer."""
@@ -59,6 +60,7 @@ def parse_registry(text: str) -> dict[str, VaultEntry]:
             writer_endpoint=writer or reader,
             typesense_collection=cfg.get("typesense_collection"),
             neo4j_db=cfg.get("neo4j_db"),
+            git_repo=cfg.get("git_repo"),
         )
     return table
 

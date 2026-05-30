@@ -1,4 +1,39 @@
 # operator-service — privileged provisioning. ClusterIP + port-forward only, NO ingress.
+# B3: ServiceAccount + RBAC grants ConfigMap patch on vault-registry,
+# env wires GitHub/Typesense/k8s config for real provisioning adapters.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: operator-service
+  labels:
+    app.kubernetes.io/name: operator-service
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: operator-service-registry-writer
+  labels:
+    app.kubernetes.io/name: operator-service
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["vault-registry"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: operator-service-registry-writer
+  labels:
+    app.kubernetes.io/name: operator-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: operator-service-registry-writer
+subjects:
+  - kind: ServiceAccount
+    name: operator-service
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -17,6 +52,7 @@ spec:
       labels:
         app.kubernetes.io/name: operator-service
     spec:
+      serviceAccountName: operator-service
       enableServiceLinks: false
       containers:
         - name: operator-service
@@ -28,6 +64,33 @@ spec:
               value: "8090"
             - name: OPERATOR_DB_PATH
               value: /data/operator.db
+            # B3: vault-registry ConfigMap target
+            - name: VAULT_REGISTRY_CONFIGMAP
+              value: vault-registry
+            - name: VAULT_REGISTRY_NAMESPACE
+              value: horus-system
+            - name: VAULT_REGISTRY_KEY
+              value: registry.yaml
+            # B3: Typesense provisioning
+            - name: TYPESENSE_URL
+              value: http://typesense.horus-system.svc.cluster.local:8108
+            - name: TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: TYPESENSE_API_KEY
+            # B3: GitHub repo provisioning (one repo per vault)
+            - name: GITHUB_OWNER
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: GITHUB_OWNER
+                  optional: true
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: GITHUB_TOKEN
           envFrom:
             - configMapRef:
                 name: operator-service-config

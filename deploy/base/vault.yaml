@@ -241,3 +241,6 @@ data:
       default:
         reader_endpoint: http://vault-reader.horus-system.svc.cluster.local:8000
         writer_endpoint: http://vault-writer.horus-system.svc.cluster.local:8000
+        typesense_collection: horus_documents
+        neo4j_db: default
+        # git_repo: owner/knowledge-base  # set by operator on provisioning

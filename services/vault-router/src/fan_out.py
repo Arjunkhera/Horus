@@ -28,6 +28,7 @@ async def fan_out(
     body: dict[str, Any],
     vault_filter: Optional[list[str]] = None,
     headers: Optional[dict[str, str]] = None,
+    per_vault_headers: Optional[dict[str, dict[str, str]]] = None,
 ) -> dict[str, Any]:
     """
     Send a POST request to all (or filtered) vault instances concurrently.
@@ -38,6 +39,9 @@ async def fan_out(
         path: REST path (e.g. "/search")
         body: JSON request body
         vault_filter: if set, only fan out to these vault names
+        headers: headers forwarded to every sub-request
+        per_vault_headers: vault_name → extra headers merged per sub-request
+            (used by the router to inject X-Vault-Namespace / X-Vault-Collection)
 
     Returns:
         dict mapping vault_name → response JSON (or error dict on failure)
@@ -52,9 +56,12 @@ async def fan_out(
 
     async def _call_one(name: str, base_url: str) -> tuple[str, Any]:
         url = f"{base_url.rstrip('/')}{path}"
+        merged = dict(headers or {})
+        if per_vault_headers and name in per_vault_headers:
+            merged.update(per_vault_headers[name])
         try:
             response = await asyncio.wait_for(
-                client.post(url, json=body, headers=headers),
+                client.post(url, json=body, headers=merged or None),
                 timeout=FAN_OUT_TIMEOUT,
             )
             response.raise_for_status()

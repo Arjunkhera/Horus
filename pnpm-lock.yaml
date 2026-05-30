@@ -555,6 +555,9 @@ importers:
       '@horus/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@horus/search':
+        specifier: workspace:*
+        version: link:../../packages/search
       fastify:
         specifier: ^4.28.1
         version: 4.29.1

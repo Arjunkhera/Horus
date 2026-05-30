@@ -27,7 +27,7 @@ Admin path (1 operation):
 
 import asyncio
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from typing import Annotated, Any, Optional
 
 from ..config.settings import VaultSettings
@@ -48,6 +48,7 @@ from ..layer2.suggester import MetadataSuggester
 from ..layer2.dedup import DuplicateChecker
 from ..layer2.git_writer import GitWriter
 from ..layer2.graph_export import export_graph, import_graph, commit_graph_export
+from ..layer2.vault_repo_resolver import VaultRepoResolver
 from ..errors import not_found, parse_error, schema_not_loaded, internal_error, registry_not_found, duplicate_entry, validation_error, VaultError, ErrorCode
 from .graph_models import (
     CreateEdgeRequest,
@@ -195,6 +196,34 @@ def get_graph() -> Optional[Any]:
 GraphDepends = Annotated[Optional[Any], Depends(get_graph)]
 
 
+def get_vault_namespace(request: Request) -> str:
+    """Extract vault namespace from X-Vault-Namespace header (default: "default")."""
+    return request.headers.get("x-vault-namespace", "default")
+
+
+VaultNamespaceDepends = Annotated[str, Depends(get_vault_namespace)]
+
+
+def get_vault_git_repo(request: Request) -> Optional[str]:
+    """Extract per-vault GitHub repo slug from X-Vault-Git-Repo header."""
+    return request.headers.get("x-vault-git-repo")
+
+
+VaultGitRepoDepends = Annotated[Optional[str], Depends(get_vault_git_repo)]
+
+
+def get_vault_repo_resolver() -> Optional[VaultRepoResolver]:
+    """Dependency injection for VaultRepoResolver (writer-only).
+
+    Placeholder replaced via dependency_overrides in main.py on the writer.
+    Returns None on readers (they never write to git).
+    """
+    return None
+
+
+RepoResolverDepends = Annotated[Optional[VaultRepoResolver], Depends(get_vault_repo_resolver)]
+
+
 # ============================================================================
 # Synchronous handler implementations.
 # Each is called via asyncio.to_thread() from the async route handler so that
@@ -295,7 +324,7 @@ def _resolve_context_search_sync(request: ResolveContextRequest, store: SearchSt
     )
 
 
-def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore, graph=None) -> ResolveContextResponse:
+def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore, graph=None, vault_name: str = "default") -> ResolveContextResponse:
     """Synchronous implementation of resolve-context.
 
     Dispatches to search mode (default) or exact mode based on request.mode.
@@ -314,7 +343,7 @@ def _resolve_context_sync(request: ResolveContextRequest, store: SearchStore, gr
     if graph is not None:
         # Graph path: resolve context via Neo4j traversal
         try:
-            ctx = resolve_context_from_graph(request.repo, graph)
+            ctx = resolve_context_from_graph(request.repo, graph, vault_name=vault_name)
             scope_dict = {"repo": ctx.repo}
             if ctx.repo_profile_id:
                 scope_dict["repo_profile_id"] = ctx.repo_profile_id
@@ -365,6 +394,7 @@ async def resolve_context(
     request: ResolveContextRequest,
     store: StoreDepends,
     graph: GraphDepends,
+    vault_ns: VaultNamespaceDepends,
 ) -> ResolveContextResponse:
     """
     Resolve the scope for a repo and return operational pages.
@@ -379,7 +409,7 @@ async def resolve_context(
     via get_graph dependency, wired in main.py); falls back to legacy
     path-based scope resolution otherwise.
     """
-    return await asyncio.to_thread(_resolve_context_sync, request, store, graph)
+    return await asyncio.to_thread(_resolve_context_sync, request, store, graph, vault_ns)
 
 
 def _search_sync(request: SearchRequest, store: SearchStore) -> SearchResponse:
@@ -459,7 +489,7 @@ async def get_page(request: GetPageRequest, store: StoreDepends, registry: UUIDR
     return await asyncio.to_thread(_get_page_sync, request, store, registry)
 
 
-def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None, registry=None) -> GetRelatedResponse:
+def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None, registry=None, vault_name: str = "default") -> GetRelatedResponse:
     """Synchronous implementation of get-related.
 
     Tries graph-based edge traversal first (when graph client is available),
@@ -480,11 +510,11 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None
         try:
             results = graph.query(
                 """
-                MATCH (p:Page {page_id: $page_id})-[r:DOCS|PART_OF|RELATED|DEPENDS_ON|CONSUMED_BY|APPLIES_TO]-(q:Page)
+                MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r:DOCS|PART_OF|RELATED|DEPENDS_ON|CONSUMED_BY|APPLIES_TO]-(q:Page {vault_name: $vault_name})
                 RETURN DISTINCT q.page_id AS id
                 LIMIT 50
                 """,
-                {"page_id": file_path}
+                {"page_id": file_path, "vault_name": vault_name}
             )
             doc_cache = store.get_all_documents()
             for row in results:
@@ -520,6 +550,7 @@ async def get_related(
     request: GetRelatedRequest,
     store: StoreDepends,
     graph: GraphDepends,
+    vault_ns: VaultNamespaceDepends,
     registry: UUIDRegistryDepends = None,
 ) -> GetRelatedResponse:
     """Follow links from a page to find related pages.
@@ -527,7 +558,7 @@ async def get_related(
     Uses Neo4j graph edge traversal when the graph client is available;
     falls back to link_navigator (frontmatter-based) otherwise.
     """
-    return await asyncio.to_thread(_get_related_sync, request, store, graph, registry)
+    return await asyncio.to_thread(_get_related_sync, request, store, graph, registry, vault_ns)
 
 
 def _list_by_scope_sync(request: ListByScopeRequest, store: SearchStore) -> ListByScopeResponse:
@@ -712,6 +743,9 @@ def _registry_add_sync(
     request: RegistryAddRequest,
     loader: SchemaLoader,
     settings: "VaultSettings | None" = None,
+    resolver: Optional[VaultRepoResolver] = None,
+    vault_namespace: str = "default",
+    vault_git_repo: Optional[str] = None,
 ) -> RegistryAddResponse:
     """Synchronous implementation of registry/add."""
     if not loader.registries:
@@ -758,10 +792,12 @@ def _registry_add_sync(
         commit_message = f"chore(registry): add '{entry.id}' to {request.registry} registry"
         pr_title = f"Registry: add '{entry.id}' to {request.registry}"
 
+        repo_path = resolver.resolve(vault_namespace, vault_git_repo) if resolver else settings.knowledge_repo_path
+        github_repo = vault_git_repo or settings.github_repo
         writer = GitWriter(
-            repo_path=settings.knowledge_repo_path,
+            repo_path=repo_path,
             github_token=settings.github_token,
-            github_repo=settings.github_repo,
+            github_repo=github_repo,
             base_branch=settings.github_base_branch,
             github_api_host=settings.github_api_host,
         )
@@ -794,6 +830,9 @@ async def registry_add(
     request: RegistryAddRequest,
     loader: SchemaLoaderDepends,
     settings: SettingsDepends,
+    vault_ns: VaultNamespaceDepends,
+    vault_git_repo: VaultGitRepoDepends = None,
+    resolver: RepoResolverDepends = None,
 ) -> RegistryAddResponse:
     """
     Add a new entry to a named registry.
@@ -802,10 +841,21 @@ async def registry_add(
     the in-memory registry. When `via_pr=True`, writes the updated registry to a
     new git branch and opens a GitHub PR for review instead.
     """
-    return await asyncio.to_thread(_registry_add_sync, request, loader, settings)
+    return await asyncio.to_thread(
+        _registry_add_sync, request, loader, settings,
+        resolver, vault_ns, vault_git_repo,
+    )
 
 
-def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: VaultSettings, registry=None) -> WritePageResponse:
+def _write_page_sync(
+    request: WritePageRequest,
+    loader: SchemaLoader,
+    settings: VaultSettings,
+    registry=None,
+    resolver: Optional[VaultRepoResolver] = None,
+    vault_namespace: str = "default",
+    vault_git_repo: Optional[str] = None,
+) -> WritePageResponse:
     """Synchronous implementation of write-page."""
     import uuid as _uuid
     import frontmatter as fm
@@ -823,6 +873,15 @@ def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: 
             "GitHub repo not configured",
             details={"setting": "github_repo"}
         )
+
+    # Resolve the per-vault knowledge repo path
+    if resolver:
+        repo_path = resolver.resolve(vault_namespace, vault_git_repo)
+    else:
+        repo_path = settings.knowledge_repo_path
+
+    # The GitHub repo slug for PRs: use per-vault git_repo if provided, else default
+    github_repo = vault_git_repo or settings.github_repo
 
     # Parse and validate frontmatter
     try:
@@ -878,12 +937,12 @@ def _write_page_sync(request: WritePageRequest, loader: SchemaLoader, settings: 
     commit_message = request.commit_message or f"Add/update page: {path}"
     pr_title = request.pr_title or f"Add/update knowledge page: {path}"
 
-    # Initialize GitWriter and write page
     writer = GitWriter(
-        repo_path=settings.knowledge_repo_path,
+        repo_path=repo_path,
         github_token=settings.github_token,
-        github_repo=settings.github_repo,
+        github_repo=github_repo,
         base_branch=settings.github_base_branch,
+        github_api_host=settings.github_api_host,
     )
 
     pr_url, commit_sha = writer.write_page(
@@ -920,7 +979,10 @@ async def write_page(
     request: WritePageRequest,
     loader: SchemaLoaderDepends,
     settings: SettingsDepends,
+    vault_ns: VaultNamespaceDepends,
+    vault_git_repo: VaultGitRepoDepends = None,
     registry: UUIDRegistryDepends = None,
+    resolver: RepoResolverDepends = None,
 ) -> WritePageResponse:
     """
     Write a validated knowledge page to the knowledge-base repo, commit it to a new branch,
@@ -937,7 +999,10 @@ async def write_page(
 
     Requires GitHub configuration (GITHUB_TOKEN, GITHUB_REPO).
     """
-    return await asyncio.to_thread(_write_page_sync, request, loader, settings, registry)
+    return await asyncio.to_thread(
+        _write_page_sync, request, loader, settings, registry,
+        resolver, vault_ns, vault_git_repo,
+    )
 
 
 # ============================================================================
@@ -975,7 +1040,7 @@ def _graph_unavailable_response():
     )
 
 
-def _create_edge_sync(request: CreateEdgeRequest, graph: Any, registry=None) -> EdgeResponse:
+def _create_edge_sync(request: CreateEdgeRequest, graph: Any, registry=None, vault_name: str = "default") -> EdgeResponse:
     """Synchronous implementation of POST /graph/edges."""
     source_id = _resolve_id(request.source_id, registry)
     target_id = _resolve_id(request.target_id, registry)
@@ -990,7 +1055,7 @@ def _create_edge_sync(request: CreateEdgeRequest, graph: Any, registry=None) -> 
         edge_type=edge_type,
         properties=props,
     )
-    _create_edge(graph, edge)
+    _create_edge(graph, edge, vault_name=vault_name)
     return EdgeResponse(
         source_id=source_id,
         target_id=target_id,
@@ -1000,7 +1065,7 @@ def _create_edge_sync(request: CreateEdgeRequest, graph: Any, registry=None) -> 
 
 
 @router.post("/graph/edges", response_model=EdgeResponse)
-async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
+async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends, vault_ns: VaultNamespaceDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Create a directed edge between two knowledge pages in Neo4j.
 
@@ -1009,16 +1074,16 @@ async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends, reg
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_create_edge_sync, request, graph, registry)
+    return await asyncio.to_thread(_create_edge_sync, request, graph, registry, vault_ns)
 
 
-def _get_edges_sync(request: GetEdgesRequest, graph: Any, registry=None) -> GetEdgesResponse:
+def _get_edges_sync(request: GetEdgesRequest, graph: Any, registry=None, vault_name: str = "default") -> GetEdgesResponse:
     """Synchronous implementation of POST /graph/edges/get."""
     page_id = _resolve_id(request.page_id, registry)
     edge_type: "EdgeType | None" = None
     if request.edge_type:
         edge_type = EdgeType.from_str(request.edge_type)
-    raw_edges = _get_edges(graph, page_id, edge_type)
+    raw_edges = _get_edges(graph, page_id, edge_type, vault_name=vault_name)
     edges = [
         EdgeResponse(
             source_id=page_id,
@@ -1032,7 +1097,7 @@ def _get_edges_sync(request: GetEdgesRequest, graph: Any, registry=None) -> GetE
 
 
 @router.post("/graph/edges/get", response_model=GetEdgesResponse)
-async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
+async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends, vault_ns: VaultNamespaceDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Get all edges for a page, optionally filtered by edge type.
 
@@ -1041,20 +1106,20 @@ async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends, registr
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_get_edges_sync, request, graph, registry)
+    return await asyncio.to_thread(_get_edges_sync, request, graph, registry, vault_ns)
 
 
-def _delete_edge_sync(request: DeleteEdgeRequest, graph: Any, registry=None) -> dict:
+def _delete_edge_sync(request: DeleteEdgeRequest, graph: Any, registry=None, vault_name: str = "default") -> dict:
     """Synchronous implementation of POST /graph/edges/delete."""
     source_id = _resolve_id(request.source_id, registry)
     target_id = _resolve_id(request.target_id, registry)
     edge_type = EdgeType.from_str(request.edge_type)
-    _delete_edge(graph, source_id, target_id, edge_type)
+    _delete_edge(graph, source_id, target_id, edge_type, vault_name=vault_name)
     return {"deleted": True, "source_id": source_id, "target_id": target_id, "edge_type": edge_type.value}
 
 
 @router.post("/graph/edges/delete")
-async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
+async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends, vault_ns: VaultNamespaceDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Delete a specific directed edge between two pages.
 
@@ -1062,16 +1127,16 @@ async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends, reg
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_delete_edge_sync, request, graph, registry)
+    return await asyncio.to_thread(_delete_edge_sync, request, graph, registry, vault_ns)
 
 
-def _traverse_graph_sync(request: TraverseGraphRequest, graph: Any, registry=None) -> TraverseGraphResponse:
+def _traverse_graph_sync(request: TraverseGraphRequest, graph: Any, registry=None, vault_name: str = "default") -> TraverseGraphResponse:
     """Synchronous implementation of POST /graph/traverse."""
     start_id = _resolve_id(request.start_page_id, registry)
     edge_types: "list[EdgeType] | None" = None
     if request.edge_types:
         edge_types = [EdgeType.from_str(et) for et in request.edge_types]
-    pages = _traverse_graph(graph, start_id, edge_types, request.max_depth)
+    pages = _traverse_graph(graph, start_id, edge_types, request.max_depth, vault_name=vault_name)
     return TraverseGraphResponse(
         start_page_id=start_id,
         pages=pages,
@@ -1080,7 +1145,7 @@ def _traverse_graph_sync(request: TraverseGraphRequest, graph: Any, registry=Non
 
 
 @router.post("/graph/traverse", response_model=TraverseGraphResponse)
-async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDepends, registry: UUIDRegistryDepends = None) -> Any:
+async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDepends, vault_ns: VaultNamespaceDepends, registry: UUIDRegistryDepends = None) -> Any:
     """
     Traverse the knowledge graph from a starting page up to max_depth hops.
 
@@ -1089,7 +1154,7 @@ async def traverse_knowledge_graph(request: TraverseGraphRequest, graph: GraphDe
     """
     if graph is None:
         return _graph_unavailable_response()
-    return await asyncio.to_thread(_traverse_graph_sync, request, graph, registry)
+    return await asyncio.to_thread(_traverse_graph_sync, request, graph, registry, vault_ns)
 
 
 # ============================================================================
@@ -1101,9 +1166,15 @@ def _service_unavailable(resource: str) -> VaultError:
 
 
 @router.post("/graph/export", response_model=GraphExportResponse)
-async def graph_export(graph: GraphDepends, settings: SettingsDepends) -> GraphExportResponse:
+async def graph_export(
+    graph: GraphDepends,
+    settings: SettingsDepends,
+    vault_ns: VaultNamespaceDepends,
+    vault_git_repo: VaultGitRepoDepends = None,
+    resolver: RepoResolverDepends = None,
+) -> GraphExportResponse:
     """
-    Export all Neo4j graph nodes and edges to the knowledge-base repo as a JSON file.
+    Export Neo4j graph nodes and edges for the current vault to a JSON file.
 
     The export is written to ``_graph/edges.json`` inside the knowledge-base repo,
     enabling git-backed cloud sync and bootstrapping of new instances.
@@ -1113,17 +1184,23 @@ async def graph_export(graph: GraphDepends, settings: SettingsDepends) -> GraphE
     """
     if graph is None:
         raise _service_unavailable("Graph client")
-    stats = await asyncio.to_thread(export_graph, graph, settings.knowledge_repo_path)
-    # Auto-commit and push the export to git
+    repo_path = resolver.resolve(vault_ns, vault_git_repo) if resolver else settings.knowledge_repo_path
+    stats = await asyncio.to_thread(export_graph, graph, repo_path, vault_name=vault_ns)
     commit_result = await asyncio.to_thread(
-        commit_graph_export, settings.knowledge_repo_path, settings.github_base_branch
+        commit_graph_export, repo_path, settings.github_base_branch
     )
     stats["git"] = commit_result
     return GraphExportResponse(**stats)
 
 
 @router.post("/graph/import", response_model=GraphImportResponse)
-async def graph_import(graph: GraphDepends, settings: SettingsDepends) -> GraphImportResponse:
+async def graph_import(
+    graph: GraphDepends,
+    settings: SettingsDepends,
+    vault_ns: VaultNamespaceDepends,
+    vault_git_repo: VaultGitRepoDepends = None,
+    resolver: RepoResolverDepends = None,
+) -> GraphImportResponse:
     """
     Import/seed Neo4j from the JSON export file in the knowledge-base repo.
 
@@ -1136,7 +1213,8 @@ async def graph_import(graph: GraphDepends, settings: SettingsDepends) -> GraphI
     """
     if graph is None:
         raise _service_unavailable("Graph client")
-    stats = await asyncio.to_thread(import_graph, graph, settings.knowledge_repo_path)
+    repo_path = resolver.resolve(vault_ns, vault_git_repo) if resolver else settings.knowledge_repo_path
+    stats = await asyncio.to_thread(import_graph, graph, repo_path, vault_name=vault_ns)
     return GraphImportResponse(**stats)
 
 
