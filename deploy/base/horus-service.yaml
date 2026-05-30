@@ -19,7 +19,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: horus-service
-          image: ghcr.io/arjunkhera/horus/horus-service:0.1.0-alpha
+          image: ghcr.io/arjunkhera/horus/horus-service:0.1.0-alpha.1
           ports:
             - containerPort: 8080
           env:
@@ -72,6 +72,11 @@ spec:
       targetPort: 8080
 ---
 # Public ingress — the single externally-reachable surface.
+# TLS via cert-manager (A2). Switch the cluster-issuer annotation to
+# letsencrypt-staging first to validate DNS/HTTP-01 without burning the LE prod
+# rate limit, then flip to letsencrypt-prod. The Cloudflare A-record for
+# horus.arjunkhera.io must be "DNS only" (grey cloud, NOT proxied) so the
+# HTTP-01 challenge and Traefik see the real client/EIP.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -80,9 +85,14 @@ metadata:
     app.kubernetes.io/name: horus-service
   annotations:
     kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
+  tls:
+    - hosts:
+        - horus.arjunkhera.io
+      secretName: horus-service-tls
   rules:
-    - host: horus.local
+    - host: horus.arjunkhera.io
       http:
         paths:
           - path: /

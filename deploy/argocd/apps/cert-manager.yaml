@@ -1,0 +1,35 @@
+# cert-manager controller (A2 — TLS via Let's Encrypt).
+# sync-wave -2: the controller + its CRDs must exist before any ClusterIssuer
+# or Certificate (wave -1) and before the app workloads (wave 0).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.15.3
+    helm:
+      releaseName: cert-manager
+      values: |
+        crds:
+          enabled: true
+        # k3s ships Traefik; HTTP-01 solves through the traefik ingress class.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # CRDs can exceed the annotation size limit; apply server-side.
+      - ServerSideApply=true

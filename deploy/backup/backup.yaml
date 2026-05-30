@@ -53,7 +53,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: backup
-              image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha
+              image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha.1
               command: ["/bin/sh", "-c"]
               args:
                 # operator-service uses node-sqlite3-wasm and ships NO sqlite3
@@ -88,7 +88,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: versioning
-          image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha
+          image: ghcr.io/arjunkhera/horus/backup:0.1.0-alpha.1
           command: ["/bin/sh", "-c"]
           args:
             - >

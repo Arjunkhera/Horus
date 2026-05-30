@@ -10,13 +10,13 @@ This runbook is executed by an operator with Docker, GHCR push rights, AWS, and
 `kubectl`/ArgoCD access to a k3s cluster. It is **not** runnable from the agent
 sandbox (no Docker daemon, GHCR push blocked, no cluster).
 
-> **Validation status of the image builds:** the forge-registry image uses the
-> pre-existing, EC2-proven Dockerfile. The horus-service, operator-service, and
-> backup Dockerfiles + CI jobs are **new in this branch** and are first validated
-> at build time (step 2) — this PR targets `claude/seq2-control-plane`, not
-> `master`, so `docker-publish.yml` does not CI-build them until the chain merges
-> to master. Build them manually first (step 2) and fix any build issues before
-> proceeding.
+> **Status:** the alpha chain (#353–#356) is merged to `master`, so all six
+> Dockerfiles + CI jobs are live. Images are CI-built by `docker-publish.yml` on
+> a `v*` tag — cut `v0.1.0-alpha.1` (step 2) rather than building by hand. This
+> runbook now targets a **persistent** k3s control plane (Track A): real domain
+> + TLS (cert-manager), Sealed Secrets, and the full app-of-apps. The A1
+> substrate-provisioning section (EC2/EIP/EBS/k3s install) is appended when the
+> node is stood up.
 
 ---
 
@@ -24,8 +24,12 @@ sandbox (no Docker daemon, GHCR push blocked, no cluster).
 
 - A running **k3s** (or k8s) cluster with **ArgoCD** installed, and `kubectl`
   context pointing at it.
-- **Traefik** ingress (k3s default) — horus-service publishes an Ingress on host
-  `horus.local`.
+- **Traefik** ingress (k3s default) — horus-service publishes an HTTPS Ingress on
+  host `horus.arjunkhera.io`, TLS issued by cert-manager / Let's Encrypt.
+- **cert-manager** + **sealed-secrets** controllers (installed as ArgoCD Helm
+  apps, sync-wave -2). A Cloudflare A-record `horus.arjunkhera.io → <Elastic IP>`
+  set to **DNS only** (grey cloud, not proxied) so HTTP-01 and Traefik see the
+  real client/EIP.
 - Docker with **buildx** + QEMU (multi-arch amd64/arm64), logged in to GHCR with
   `write:packages` (`gh auth login -s write:packages` or a PAT).
 - AWS account + an IAM user with S3 access for two buckets:
@@ -38,7 +42,7 @@ sandbox (no Docker daemon, GHCR push blocked, no cluster).
 
 ## 1. Images to publish (pinned tags, ADR-0007)
 
-All six control-plane images, tag `0.1.0-alpha` (must match
+All six control-plane images, tag `0.1.0-alpha.1` (must match
 `deploy/base/kustomization.yaml` + `deploy/forge-registry/kustomization.yaml`):
 
 | Image | Dockerfile | Context |
@@ -55,49 +59,54 @@ All six control-plane images, tag `0.1.0-alpha` (must match
 
 ## 2. Build & push
 
-**Preferred (CI):** once this chain is merged to `master`, push a tag
-`v0.1.0-alpha` — `docker-publish.yml` builds every changed image and, on a `v*`
-tag, *all* of them. Then re-pin the kustomization tags to the published SHA/tag
-if not using `0.1.0-alpha`.
+**Preferred (CI):** the chain is on `master`. Tag current `master` HEAD and push:
+`git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1`. `docker-publish.yml`
+builds *all six* images on the `v*` tag. The kustomizations are already pinned to
+`0.1.0-alpha.1` (`deploy/base`, `deploy/forge-registry`, and the inline `backup`
+image) — keep them in lockstep on any future re-pin.
 
-**Manual (pre-merge / first validation):** build the four root-context images
-from the monorepo root, the two self-context ones from their dirs. Example:
+**Manual (fallback only):** build the four root-context images from the monorepo
+root, the two self-context ones from their dirs. Example:
 
 ```bash
 # from repo root
 for svc in horus-service operator-service; do
   docker buildx build --platform linux/amd64,linux/arm64 \
     -f services/$svc/Dockerfile \
-    -t ghcr.io/arjunkhera/horus/$svc:0.1.0-alpha --push .
+    -t ghcr.io/arjunkhera/horus/$svc:0.1.0-alpha.1 --push .
 done
 
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f packages/forge/packages/registry-service/Dockerfile \
-  -t ghcr.io/arjunkhera/horus/forge-registry:0.1.0-alpha --push .
+  -t ghcr.io/arjunkhera/horus/forge-registry:0.1.0-alpha.1 --push .
 
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f services/vault/Dockerfile \
-  -t ghcr.io/arjunkhera/horus/vault:0.1.0-alpha --push services/vault
+  -t ghcr.io/arjunkhera/horus/vault:0.1.0-alpha.1 --push services/vault
 
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f services/vault-router/Dockerfile \
-  -t ghcr.io/arjunkhera/horus/vault-router:0.1.0-alpha --push services/vault-router
+  -t ghcr.io/arjunkhera/horus/vault-router:0.1.0-alpha.1 --push services/vault-router
 
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f deploy/backup/Dockerfile \
-  -t ghcr.io/arjunkhera/horus/backup:0.1.0-alpha --push deploy/backup
+  -t ghcr.io/arjunkhera/horus/backup:0.1.0-alpha.1 --push deploy/backup
 ```
 
-## 3. Namespace + datastore secrets
+## 3. Secrets — Sealed Secrets (A3)
 
-```bash
-kubectl create namespace horus-system
-```
+Secrets are **not** created imperatively. Once the cluster + `sealed-secrets`
+controller exist (the controller is the `sealed-secrets` ArgoCD app), seal each
+of the six secrets and commit the encrypted `*.sealed.yaml` to `deploy/secrets/`;
+the `horus-secrets` ArgoCD app (sync-wave -1) applies them and the controller
+unseals them into real `Secret`s in `horus-system` before the workloads start.
 
-Create `vault-secrets` (NEO4J_AUTH/PASSWORD, TYPESENSE_API_KEY, GITHUB_TOKEN,
-GITHUB_REPO) and `forge-registry-secrets` (S3 access key id/secret) and
-`backup-credentials` (AWS creds + `BACKUP_BUCKET`) from real values — see
-`deploy/secrets.example.yaml` for the exact keys. **Do not commit real values.**
+**Full procedure: `deploy/secrets/README.md`.** The six:
+`vault-secrets` (NEO4J_AUTH/PASSWORD, TYPESENSE_API_KEY, GITHUB_TOKEN,
+GITHUB_REPO=`Arjunkhera/horus-knowledge`), `forge-registry-secrets` (S3 key
+id/secret for `horus-forge-registry`), `backup-credentials` (AWS creds +
+`BACKUP_BUCKET`), `grafana-admin` (password), plus the two principal secrets in
+step 4. `deploy/secrets.example.yaml` still documents the plaintext key shapes.
 
 > The Forge registry and Vault both use the cluster **Typesense**, started with
 > `vault-secrets.TYPESENSE_API_KEY` — the same key Forge reads via
@@ -116,10 +125,13 @@ key + internal **public** jwk), and applies `horus-service-secrets` +
 `horus-principal-pub`:
 
 ```bash
+# GitOps (this cluster): seal, commit, let ArgoCD apply — never direct-apply.
+horus operator init --namespace horus-system --dry-run \
+  | kubeseal --controller-namespace sealed-secrets --format yaml \
+  > deploy/secrets/principal-secrets.sealed.yaml   # then uncomment in kustomization.yaml
+
+# Direct-apply (non-GitOps / quick bring-up only):
 horus operator init --namespace horus-system
-# or inspect first:
-horus operator init --dry-run        # print the Secret manifests
-horus operator init --out secrets.yaml
 ```
 
 The private signing key is exported only over the cluster-internal port-forward
@@ -159,12 +171,16 @@ kubectl apply -f deploy/argocd/app-of-apps.yaml
 `horus-root` recursively syncs every child Application under
 `deploy/argocd/apps`:
 
-| App | Path | What |
-|-----|------|------|
-| `horus-control-plane` | `deploy/overlays/alpha` | gateway, operator, Vault r/w + router, datastores |
-| `horus-forge-registry` | `deploy/forge-registry` | Forge registry (this migration) |
-| `horus-observability` | `deploy/observability` | metrics/logs |
-| `horus-backup` | `deploy/backup` | operator SQLite→S3 CronJob + bucket-versioning Jobs |
+| App | Path | Wave | What |
+|-----|------|------|------|
+| `cert-manager` | Helm (charts.jetstack.io) | -2 | TLS controller + CRDs |
+| `sealed-secrets` | Helm (bitnami-labs) | -2 | secret-unseal controller + CRDs |
+| `cluster-issuers` | `deploy/cluster-issuers` | -1 | LE staging/prod ClusterIssuers |
+| `horus-secrets` | `deploy/secrets` | -1 | the six SealedSecrets (no-op until sealed) |
+| `horus-control-plane` | `deploy/overlays/alpha` | 0 | gateway, operator, Vault r/w + router, datastores |
+| `horus-forge-registry` | `deploy/forge-registry` | 0 | Forge registry (in-cluster, S3 `horus-forge-registry`) |
+| `horus-observability` | `deploy/observability` | 0 | Prometheus + Alertmanager + Grafana + blackbox-exporter |
+| `horus-backup` | `deploy/backup` | 0 | operator SQLite→S3 CronJob + bucket-versioning Jobs |
 
 Watch them go green:
 
@@ -180,15 +196,18 @@ plus observability + the backup CronJob.
 ## 6. Smoke the contract surface
 
 ```bash
-# Gateway is the only public surface (Ingress host horus.local).
-HOST=horus.local
-curl -s http://$HOST/health
-curl -s http://$HOST/api/v1/aggregate/status   # federates Vault + Forge /health
+# Gateway is the only public surface (HTTPS Ingress host horus.arjunkhera.io).
+HOST=horus.arjunkhera.io
+curl -s https://$HOST/health
+curl -s https://$HOST/api/v1/aggregate/status   # federates Vault + Forge /health
 
 # Forge reachable through the gateway, principal-authenticated:
 #   horus-service mints X-Horus-Principal and injects it; forge-registry verifies
 #   it against horus-principal-pub before serving writes.
-curl -s http://$HOST/api/v1/forge/health
+curl -s https://$HOST/api/v1/forge/health
+
+# TLS issuance check (cert-manager): Ready=True once HTTP-01 completes.
+kubectl -n horus-system get certificate horus-service-tls
 ```
 
 A read with no/invalid principal still succeeds (registry reads are public); a
@@ -214,14 +233,18 @@ scraping and the backup CronJob has produced at least one versioned S3 object.
 
 ## 8. Known caveats
 
-- **New Dockerfiles unproven until step 2.** horus-service/operator-service/backup
-  images are new; build them manually first and fix issues before ArgoCD sync.
-- **`horus operator init`** now automates the principal Secret wiring (step 4)
-  via the admin-only `GET /admin/principal-bundle` endpoint; the manual flow
-  remains as a fallback.
-- **Pre-existing test failure** unrelated to this work: `registry-service`
-  `tests/search.test.ts > rebuild() > creates the collection when it does not
-  exist` (stale Typesense mock). It will show red in CI on the master merge —
-  fix or quarantine separately.
-- **Image tags** are pinned to `0.1.0-alpha` across `deploy/base` and
-  `deploy/forge-registry`; keep them in lockstep when re-pinning per release.
+- **Cloudflare must be DNS-only for `horus.arjunkhera.io`.** A proxied (orange
+  cloud) record breaks HTTP-01 issuance and hides the client IP from Traefik. Set
+  the A-record to grey cloud, pointing at the Elastic IP, before flipping the
+  Ingress issuer from `letsencrypt-staging` to `letsencrypt-prod`.
+- **Observability covers up/down for all services, not full metrics.** Only
+  `horus-service` exposes `/metrics`; the others are monitored via
+  blackbox-exporter probing `/health` (`probe_success`, alert `ServiceProbeDown`).
+  Per-service RED metrics need app instrumentation — separate app-track work.
+- **`horus operator init`** automates the principal Secret wiring (step 4) via
+  the admin-only `GET /admin/principal-bundle`; pipe through `kubeseal` for GitOps.
+- **Sealing key is single-point-of-loss.** Back up the sealed-secrets controller
+  key offline (see `deploy/secrets/README.md`); losing it forces re-sealing all
+  six secrets against a new cluster key.
+- **Image tags** are pinned to `0.1.0-alpha.1` across `deploy/base`,
+  `deploy/forge-registry`, and the inline `backup` image; keep them in lockstep.

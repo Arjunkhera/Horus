@@ -30,6 +30,44 @@ data:
             action: replace
             target_label: __metrics_path__
             regex: (.+)
+      # Gap #9 closure: only horus-service exposes /metrics. Probe every other
+      # service's /health via blackbox-exporter so the whole control plane has
+      # up/down + latency coverage (probe_success). Full RED metrics for the
+      # un-instrumented services is separate app-track work.
+      - job_name: blackbox-http-health
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        static_configs:
+          - targets:
+              - http://horus-service.horus-system.svc.cluster.local:8080/health
+              - http://operator-service.horus-system.svc.cluster.local:8090/health
+              - http://vault-reader.horus-system.svc.cluster.local:8000/health
+              - http://vault-writer.horus-system.svc.cluster.local:8000/health
+              - http://vault-router.horus-system.svc.cluster.local:8000/health
+              - http://forge-registry.horus-system.svc.cluster.local:8080/health
+              - http://typesense.horus-system.svc.cluster.local:8108/health
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.horus-system.svc.cluster.local:9115
+      - job_name: blackbox-tcp-datastores
+        metrics_path: /probe
+        params:
+          module: [tcp_connect]
+        static_configs:
+          - targets:
+              - neo4j.horus-system.svc.cluster.local:7687
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.horus-system.svc.cluster.local:9115
   rules.yml: |
     groups:
       - name: horus-control-plane
@@ -50,6 +88,20 @@ data:
               severity: warning
             annotations:
               summary: "horus-service 5xx ratio above 5% for 5m"
+          - alert: ServiceProbeDown
+            expr: probe_success == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Control-plane probe failing: {{ $labels.instance }}"
+          - alert: ServiceProbeSlow
+            expr: probe_duration_seconds > 5
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Control-plane probe slow (>5s): {{ $labels.instance }}"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -76,3 +128,21 @@ data:
         access: proxy
         url: http://prometheus.horus-system.svc.cluster.local:9090
         isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-exporter-config
+data:
+  blackbox.yml: |
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 5s
+        http:
+          valid_status_codes: []  # defaults to 2xx
+          method: GET
+          preferred_ip_protocol: ip4
+      tcp_connect:
+        prober: tcp
+        timeout: 5s

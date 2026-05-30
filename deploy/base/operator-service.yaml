@@ -20,7 +20,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: operator-service
-          image: ghcr.io/arjunkhera/horus/operator-service:0.1.0-alpha
+          image: ghcr.io/arjunkhera/horus/operator-service:0.1.0-alpha.1
           ports:
             - containerPort: 8090
           env:

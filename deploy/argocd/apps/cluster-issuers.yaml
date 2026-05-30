@@ -1,0 +1,27 @@
+# Let's Encrypt ClusterIssuers (A2).
+# sync-wave -1: after the cert-manager controller/CRDs (wave -2), before the
+# app workloads + their Ingress/Certificate (wave 0).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-issuers
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/arjunkhera/horus.git
+    targetRevision: HEAD
+    path: deploy/cluster-issuers
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: horus-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

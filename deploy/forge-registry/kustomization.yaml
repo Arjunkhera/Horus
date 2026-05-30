@@ -10,7 +10,7 @@ commonLabels:
 # Pinned image tag (ADR-0007 — never :latest).
 images:
   - name: ghcr.io/arjunkhera/horus/forge-registry
-    newTag: 0.1.0-alpha
+    newTag: 0.1.0-alpha.1
 
 resources:
   - forge-registry.yaml
