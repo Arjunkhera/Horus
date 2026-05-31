@@ -1,20 +1,19 @@
 {
   "name": "@arkhera30/cli",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "CLI for managing the Horus AI development stack",
   "type": "module",
   "bin": {
     "horus": "./dist/index.js"
   },
   "scripts": {
-    "build": "npm run build:guides && tsup src/index.ts --format esm --dts",
+    "build": "npm run build:guides && tsup",
     "build:guides": "node scripts/build-guides.mjs",
     "dev": "tsup src/index.ts --format esm --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@forge/core": "workspace:*",
     "@inquirer/prompts": "^7.0.0",
     "chalk": "^5.0.0",
     "commander": "^12.0.0",
@@ -24,6 +23,7 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@forge/core": "workspace:*",
     "@types/node": "^20.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
