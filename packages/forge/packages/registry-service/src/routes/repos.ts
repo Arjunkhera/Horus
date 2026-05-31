@@ -213,7 +213,16 @@ export function registerRepoRoutes(app: FastifyInstance, deps: RepoDeps): void {
     if (!existed) {
       return reply.status(404).send({ error: 'REPO_NOT_FOUND', message: `${org}/${name} not found` });
     }
-    if (repoSearch) await repoSearch.remove(org, name);
+    // Best-effort search cleanup: remove() is idempotent and absorbs errors
+    // internally, but we guard here too so a buggy search layer never turns a
+    // successful storage delete into a 500.
+    if (repoSearch) {
+      try {
+        await repoSearch.remove(org, name);
+      } catch {
+        // ignore — storage delete already succeeded
+      }
+    }
 
     return reply.status(204).send();
   });
