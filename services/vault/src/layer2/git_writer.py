@@ -55,6 +55,33 @@ class GitWriter:
         else:
             self._api_base = f"https://{host}/api/v3"
 
+    def _detect_default_branch(self) -> str:
+        """
+        Detect the actual default branch of the cloned repo by inspecting the
+        remote HEAD reference.  Falls back to self.base_branch (config value,
+        default "master") if detection fails so the horus-knowledge vault — which
+        uses master — keeps working.
+
+        Returns:
+            Detected default branch name (e.g. "main" or "master").
+        """
+        try:
+            # Prefer symbolic-ref: returns "origin/main" or "origin/master".
+            result = self._git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+            if result.startswith("origin/"):
+                return result[len("origin/"):]
+        except Exception:
+            pass
+        try:
+            # Fallback: rev-parse --abbrev-ref also works for older git versions.
+            result = self._git("rev-parse", "--abbrev-ref", "origin/HEAD")
+            if result.startswith("origin/"):
+                return result[len("origin/"):]
+        except Exception:
+            pass
+        # Could not detect — fall back to configured base_branch.
+        return self.base_branch
+
     def write_page(
         self,
         page_path: str,
@@ -68,13 +95,14 @@ class GitWriter:
         Write a page to a feature branch and create a GitHub PR.
 
         Steps:
-        1. Checkout base_branch (ensure clean state)
-        2. Create and checkout feature branch
-        3. Write page content to disk
-        4. Stage and commit
-        5. Push to origin
-        6. Create PR via GitHub API
-        7. Return to base_branch
+        1. Detect the repo's actual default branch (handles "main" vs "master")
+        2. Checkout the detected base branch (ensure clean state)
+        3. Create and checkout feature branch
+        4. Write page content to disk
+        5. Stage and commit
+        6. Push to origin
+        7. Create PR via GitHub API
+        8. Return to base branch
 
         Args:
             page_path: Relative path within repo (e.g., "repos/anvil.md")
@@ -91,9 +119,13 @@ class GitWriter:
             VaultError(GIT_ERROR) if git operations fail
             VaultError(GITHUB_API_ERROR) if PR creation fails
         """
+        # Resolve the effective base branch from the clone, not from config.
+        # Operator-created repos default to "main"; horus-knowledge uses "master".
+        effective_base = self._detect_default_branch()
+
         try:
             # Ensure we're on a clean base
-            self._git("checkout", self.base_branch)
+            self._git("checkout", effective_base)
 
             # Create and checkout feature branch
             self._git("checkout", "-b", branch)
@@ -114,17 +146,17 @@ class GitWriter:
             self._git("push", "origin", branch)
 
             # Create PR via GitHub API
-            pr_url = self._create_pr(branch, pr_title, pr_body or "")
+            pr_url = self._create_pr(branch, pr_title, pr_body or "", effective_base)
 
             # Return to base branch
-            self._git("checkout", self.base_branch)
+            self._git("checkout", effective_base)
 
             return pr_url, commit_sha
 
         except Exception as e:
-            # If something goes wrong, try to return to base_branch
+            # If something goes wrong, try to return to effective_base
             try:
-                self._git("checkout", self.base_branch)
+                self._git("checkout", effective_base)
             except Exception:
                 pass  # Ignore cleanup errors
             raise
@@ -185,14 +217,15 @@ class GitWriter:
                 }
             )
 
-    def _create_pr(self, branch: str, title: str, body: str) -> str:
+    def _create_pr(self, branch: str, title: str, body: str, base: Optional[str] = None) -> str:
         """
         Create a GitHub pull request via the REST API.
 
         Args:
-            branch: Feature branch name (will be merged into base_branch)
+            branch: Feature branch name (will be merged into base)
             title: PR title
             body: PR description
+            base: Base branch for the PR (defaults to self.base_branch if not provided)
 
         Returns:
             GitHub PR URL
@@ -205,6 +238,7 @@ class GitWriter:
         except ImportError:
             raise github_api_error("httpx library not available")
 
+        pr_base = base if base is not None else self.base_branch
         try:
             url = f"{self._api_base}/repos/{self.github_repo}/pulls"
             headers = {
@@ -216,7 +250,7 @@ class GitWriter:
                 "title": title,
                 "body": body,
                 "head": branch,
-                "base": self.base_branch,
+                "base": pr_base,
             }
 
             response = httpx.post(url, json=payload, headers=headers, timeout=30.0)

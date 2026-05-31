@@ -526,6 +526,86 @@ describe('KubernetesVaultInfra', () => {
     });
   });
 
+  // ── readConfigMap / YAML-seed preservation (Defect 4) ────────────────────
+
+  describe('readConfigMap — YAML-seed preservation', () => {
+    it('parses YAML-seed format and returns the default entry intact', async () => {
+      // Simulate the git-seeded YAML format (with comments, no JSON wrapper).
+      const yamlSeed =
+        '# vault-registry\nvaults:\n  default:\n    reader_endpoint: http://vault-reader:8000\n    writer_endpoint: http://vault-writer:8000\n';
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: {
+          status: 200,
+          body: { data: { 'registry.yaml': yamlSeed } },
+        },
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      // ensureRegistryEntry triggers a readConfigMap then patchConfigMap.
+      await infra.ensureRegistryEntry('acme/notes', 'ignored');
+
+      expect(calls).toHaveLength(2);
+      const patch = JSON.parse(calls[1].body!);
+      const registry = JSON.parse(patch.data['registry.yaml']);
+      // The seeded `default` entry must survive into the patched ConfigMap.
+      expect(registry.vaults['default']).toBeDefined();
+      expect(registry.vaults['default'].reader_endpoint).toBe('http://vault-reader:8000');
+      // The new entry should also be present.
+      expect(registry.vaults['acme/notes']).toBeDefined();
+    });
+
+    it('parses operator JSON output format correctly', async () => {
+      // After the first operator write the ConfigMap contains JSON (valid YAML).
+      const jsonContent = JSON.stringify({ vaults: { default: { reader_endpoint: 'http://r:8000' } } }, null, 2);
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: {
+          status: 200,
+          body: { data: { 'registry.yaml': jsonContent } },
+        },
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await infra.ensureRegistryEntry('acme/notes', 'ignored');
+
+      const patch = JSON.parse(calls[1].body!);
+      const registry = JSON.parse(patch.data['registry.yaml']);
+      expect(registry.vaults['default']).toBeDefined();
+      expect(registry.vaults['acme/notes']).toBeDefined();
+    });
+
+    it('returns empty vaults when ConfigMap data is absent or whitespace', async () => {
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: {
+          status: 200,
+          body: { data: { 'registry.yaml': '   ' } },
+        },
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await infra.ensureRegistryEntry('acme/notes', 'ignored');
+
+      const patch = JSON.parse(calls[1].body!);
+      const registry = JSON.parse(patch.data['registry.yaml']);
+      expect(registry.vaults['acme/notes']).toBeDefined();
+    });
+
+    it('throws (does NOT silently return empty) when non-empty data is malformed', async () => {
+      // 'key: [unclosed bracket' is invalid YAML (unclosed flow sequence) — the yaml
+      // package throws a parse error on this, which readConfigMap must re-throw rather
+      // than swallowing as an empty registry (the original bug).
+      const { fetch } = createFake({
+        [`GET ${CM_GET_URL}`]: {
+          status: 200,
+          body: { data: { 'registry.yaml': 'key: [unclosed bracket' } },
+        },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await expect(infra.ensureRegistryEntry('acme/notes', 'ignored')).rejects.toThrow(
+        /ConfigMap registry parse failed/,
+      );
+    });
+  });
+
   describe('dropTypesenseCollection', () => {
     it('deletes the collection', async () => {
       const { fetch, calls } = createFake({
