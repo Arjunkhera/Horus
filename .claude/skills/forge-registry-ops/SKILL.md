@@ -5,6 +5,21 @@ description: Use this skill when the user asks about deploying, redeploying, tro
 
 # forge-registry-ops
 
+> **⚠️ RETIRED (2026-05-31). The EC2 + CloudFront + Terraform deployment described below has been DECOMMISSIONED.**
+> The Forge Remote Registry now runs **in-cluster on Kubernetes** (`horus-system`), deployed via ArgoCD from
+> `deploy/forge-registry/` (app `horus-forge-registry`), against the **unchanged** S3 bucket `horus-forge-registry`.
+> It is exposed through the Horus gateway at **`https://horus.arjunkhera.io/api/v1/forge`** — anonymous community
+> reads (GET/HEAD), JWT-gated writes. **Do NOT run the Terraform / EC2 / SSH-to-instance / CloudFront procedures
+> below; that infrastructure no longer exists.**
+>
+> For registry ops now:
+> - Cluster: `ssh -i ~/.ssh/horus-track-a.pem ubuntu@13.219.32.204` → `sudo k3s kubectl -n horus-system ...`
+> - Health/rollout: `kubectl -n horus-system rollout status deploy/forge-registry`; ArgoCD app `horus-forge-registry`.
+> - Redeploy = push to `master` (CI builds `ghcr.io/arjunkhera/horus/forge-registry`) → ArgoCD syncs.
+>
+> Background: story `2828ffb7`; Alpha Program journal "Forge registry EC2→K8s cutover complete" (`13855a87`).
+> The sections below are retained for historical reference only.
+
 ## When this skill fires
 
 Trigger phrases:
