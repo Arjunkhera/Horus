@@ -1040,7 +1040,17 @@ function buildServer(workspaceRoot: string): Server {
               isError: true,
             };
           }
-          const developResult = await forge.repoDevelop({ repo, workItem, branch, localPath, defaultRemote, workflow, prompt, agent });
+          // Forward only the known agent tuning fields — keep the MCP boundary
+          // explicit and avoid leaking unvetted keys (e.g. claudeBin) into the spawn.
+          const agentTuning = agent
+            ? {
+                ...(agent.permissionMode !== undefined ? { permissionMode: agent.permissionMode } : {}),
+                ...(agent.allowedTools !== undefined ? { allowedTools: agent.allowedTools } : {}),
+                ...(agent.maxTurns !== undefined ? { maxTurns: agent.maxTurns } : {}),
+                ...(agent.timeoutMs !== undefined ? { timeoutMs: agent.timeoutMs } : {}),
+              }
+            : undefined;
+          const developResult = await forge.repoDevelop({ repo, workItem, branch, localPath, defaultRemote, workflow, prompt, agent: agentTuning });
           if (
             developResult.status === 'needs_workflow_confirmation' ||
             developResult.status === 'needs_remote_confirmation' ||

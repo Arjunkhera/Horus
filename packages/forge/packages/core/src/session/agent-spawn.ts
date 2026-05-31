@@ -93,6 +93,7 @@ export async function spawnAgentSession(opts: SpawnAgentOptions): Promise<SpawnA
       cwd: opts.cwd,
       timeout: opts.timeoutMs ?? 0,
       maxBuffer: MAX_BUFFER,
+      encoding: 'utf8', // guarantee string stdout (and string err.stdout on the salvage path)
     });
     stdout = res.stdout;
   } catch (err: any) {
