@@ -10,6 +10,8 @@ import { RequestService } from './service.js';
 import { KeyManager } from './keys.js';
 import type { Store } from './store.js';
 import type { ClientTokenMinter } from './tokens.js';
+import { CollisionError, ConfigError } from './infra-k8s.js';
+import { InMemoryCollisionError } from './infra.js';
 
 export interface AppDeps {
   service: RequestService;
@@ -44,14 +46,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!parsed.success) {
       return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: parsed.error.message } });
     }
-    const out = await deps.service.create({
-      kind: parsed.data.kind,
-      payload: parsed.data.payload,
-      tenant: parsed.data.tenant,
-      requester: requester(req),
-      requesterRole: requesterRole(req),
-    });
-    return reply.status(201).send(out);
+    try {
+      const out = await deps.service.create({
+        kind: parsed.data.kind,
+        payload: parsed.data.payload,
+        tenant: parsed.data.tenant,
+        requester: requester(req),
+        requesterRole: requesterRole(req),
+      });
+      return reply.status(201).send(out);
+    } catch (err) {
+      if (err instanceof CollisionError || err instanceof InMemoryCollisionError) {
+        // 409 Conflict — resource is already owned by another vault.
+        return reply.status(409).send({
+          error: { code: err.code, message: err.message, details: err.details },
+        });
+      }
+      if (err instanceof ConfigError) {
+        // 400 Bad Request — owner is not resolvable; caller must supply git_org or
+        // the operator must configure GITHUB_OWNER.
+        return reply.status(400).send({
+          error: { code: 'CONFIG_ERROR', message: err.message },
+        });
+      }
+      throw err; // unexpected — let Fastify's default 500 handler take it
+    }
   });
 
   app.get('/requests', async () => deps.service.list());
