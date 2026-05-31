@@ -101,9 +101,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@forge/core':
-        specifier: workspace:*
-        version: link:../forge/packages/core
       '@inquirer/prompts':
         specifier: ^7.0.0
         version: 7.10.1(@types/node@20.19.37)
@@ -126,6 +123,9 @@ importers:
         specifier: ^3.25.0
         version: 3.25.76
     devDependencies:
+      '@forge/core':
+        specifier: workspace:*
+        version: link:../forge/packages/core
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.37
