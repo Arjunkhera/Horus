@@ -69,6 +69,18 @@ function cmGetResponse(vaults: Record<string, unknown> = {}): {
   };
 }
 
+/** Standard GET /user response for an org-type owner (not the token user). */
+const GH_USER_ORG_OWNER = {
+  status: 200,
+  body: { login: 'tokenuser', type: 'User' },
+};
+
+/** GET /user response where login matches 'testorg' (config owner IS the token user). */
+const GH_USER_IS_TESTORG = {
+  status: 200,
+  body: { login: 'testorg', type: 'User' },
+};
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('KubernetesVaultInfra', () => {
@@ -83,18 +95,63 @@ describe('KubernetesVaultInfra', () => {
           status: 200,
           body: { full_name: 'testorg/vault-acme_notes' },
         },
+        // GET /user is NOT reached because we return early before the create step.
       });
       const infra = new KubernetesVaultInfra(baseConfig(), fetch);
       await infra.ensureGitBackingStore('acme/notes', 'git');
-      // Reads ConfigMap (1) + checks GitHub (1) = 2 calls.
+      // Reads ConfigMap (1) + checks GitHub (1) = 2 calls. No /user call since no create.
       expect(calls).toHaveLength(2);
       expect(calls[1].method).toBe('GET');
     });
 
-    it('creates repo via org endpoint when owner is an org (empty registry)', async () => {
+    // ── Test A: owner equals token login → use /user/repos ──────────────────
+    it('Test A: creates repo via /user/repos when git_org matches the token login', async () => {
+      // Config owner is 'testorg'; GET /user returns login 'testorg' → same person.
       const { fetch, calls } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_IS_TESTORG,
+        'POST https://api.github.com/user/repos': {
+          status: 201,
+          body: { full_name: 'testorg/vault-acme_notes' },
+        },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      // ConfigMap read (1) + GitHub existence check (2) + GET /user (3) + POST /user/repos (4)
+      expect(calls).toHaveLength(4);
+      const createCall = calls[3];
+      expect(createCall.method).toBe('POST');
+      expect(createCall.url).toBe('https://api.github.com/user/repos');
+      const body = JSON.parse(createCall.body!);
+      expect(body.name).toBe('vault-acme_notes');
+      expect(body.private).toBe(true);
+      expect(body.auto_init).toBe(true);
+    });
+
+    // ── Test A: login comparison is case-insensitive ──────────────────────────
+    it('Test A (case-insensitive): routes to /user/repos when login differs only in case', async () => {
+      // Config owner has capital 'T'; GitHub login is all-lowercase.
+      const config = { ...baseConfig(), githubOwner: 'Testorg' };
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/Testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': { status: 200, body: { login: 'testorg', type: 'User' } },
+        'POST https://api.github.com/user/repos': { status: 201, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(config, fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      const createCall = calls[3];
+      expect(createCall.url).toBe('https://api.github.com/user/repos');
+    });
+
+    // ── Test B: owner is a different name (an org) → use /orgs/{org}/repos ───
+    it('Test B: creates repo via /orgs/{org}/repos when git_org is different from token login', async () => {
+      // Config owner is 'testorg'; GET /user returns login 'tokenuser' → different.
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
         'POST https://api.github.com/orgs/testorg/repos': {
           status: 201,
           body: { full_name: 'testorg/vault-acme_notes' },
@@ -102,9 +159,97 @@ describe('KubernetesVaultInfra', () => {
       });
       const infra = new KubernetesVaultInfra(baseConfig(), fetch);
       await infra.ensureGitBackingStore('acme/notes', 'git');
-      expect(calls).toHaveLength(3);
-      const createCall = calls[2];
+      // ConfigMap read (1) + GitHub existence check (2) + GET /user (3) + POST /orgs/ (4)
+      expect(calls).toHaveLength(4);
+      const createCall = calls[3];
       expect(createCall.method).toBe('POST');
+      expect(createCall.url).toBe('https://api.github.com/orgs/testorg/repos');
+      const body = JSON.parse(createCall.body!);
+      expect(body.name).toBe('vault-acme_notes');
+      expect(body.private).toBe(true);
+      expect(body.auto_init).toBe(true);
+    });
+
+    // ── Test C: GET /user returns non-200 → falls back to org endpoint ────────
+    it('Test C: falls back to /orgs/{org}/repos when GET /user returns non-200', async () => {
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': { status: 401, body: { message: 'Bad credentials' } },
+        'POST https://api.github.com/orgs/testorg/repos': {
+          status: 201,
+          body: { full_name: 'testorg/vault-acme_notes' },
+        },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      // Should NOT throw — non-200 /user means we fall back to org endpoint, no error from identity step.
+      await expect(infra.ensureGitBackingStore('acme/notes', 'git')).resolves.not.toThrow();
+      const createCall = calls.find(c => c.method === 'POST');
+      expect(createCall?.url).toBe('https://api.github.com/orgs/testorg/repos');
+    });
+
+    // ── Test C: GET /user network failure → falls back to org endpoint ────────
+    it('Test C (network error): falls back to org endpoint when GET /user throws', async () => {
+      let callCount = 0;
+      const fakeFetch: HttpFetch = async (url, init) => {
+        const method = init?.method ?? 'GET';
+        callCount++;
+        if (url === 'https://api.github.com/user') {
+          throw new Error('network timeout');
+        }
+        if (method === 'GET' && url === CM_GET_URL) {
+          return {
+            status: 200, ok: true,
+            json: async () => ({ data: { 'registry.yaml': JSON.stringify({ vaults: {} }, null, 2) } }),
+            text: async () => '',
+          };
+        }
+        if (method === 'GET' && url === 'https://api.github.com/repos/testorg/vault-acme_notes') {
+          return { status: 404, ok: false, json: async () => ({}), text: async () => '' };
+        }
+        if (method === 'POST' && url === 'https://api.github.com/orgs/testorg/repos') {
+          return { status: 201, ok: true, json: async () => ({}), text: async () => '' };
+        }
+        return { status: 404, ok: false, json: async () => ({}), text: async () => '' };
+      };
+      const infra = new KubernetesVaultInfra(baseConfig(), fakeFetch);
+      await expect(infra.ensureGitBackingStore('acme/notes', 'git')).resolves.not.toThrow();
+    });
+
+    // ── GET /user is cached — second provision reuses the cached login ─────────
+    it('caches GET /user result — second ensureGitBackingStore does not re-fetch identity', async () => {
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/repos/testorg/vault-other_ns': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
+        'POST https://api.github.com/orgs/testorg/repos': { status: 201, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      await infra.ensureGitBackingStore('other/ns', 'git');
+      // GET /user should appear exactly once in calls
+      const userCalls = calls.filter(c => c.url === 'https://api.github.com/user');
+      expect(userCalls).toHaveLength(1);
+    });
+
+    it('creates repo via org endpoint when owner is an org (empty registry)', async () => {
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
+        'POST https://api.github.com/orgs/testorg/repos': {
+          status: 201,
+          body: { full_name: 'testorg/vault-acme_notes' },
+        },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      // ConfigMap read (1) + GitHub existence check (2) + GET /user (3) + create (4)
+      expect(calls).toHaveLength(4);
+      const createCall = calls[3];
+      expect(createCall.method).toBe('POST');
+      expect(createCall.url).toBe('https://api.github.com/orgs/testorg/repos');
       const body = JSON.parse(createCall.body!);
       expect(body.name).toBe('vault-acme_notes');
       expect(body.private).toBe(true);
@@ -115,6 +260,7 @@ describe('KubernetesVaultInfra', () => {
       const { fetch, calls } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/custom-org/my-vault': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
         'POST https://api.github.com/orgs/custom-org/repos': {
           status: 201,
           body: { full_name: 'custom-org/my-vault' },
@@ -125,18 +271,20 @@ describe('KubernetesVaultInfra', () => {
         gitOrg: 'custom-org',
         repoName: 'my-vault',
       });
-      // ConfigMap read (1) + GitHub check (2) + create (3).
-      expect(calls).toHaveLength(3);
+      // ConfigMap read (1) + GitHub check (2) + GET /user (3) + create (4).
+      expect(calls).toHaveLength(4);
       expect(calls[1].url).toBe('https://api.github.com/repos/custom-org/my-vault');
-      expect(calls[2].url).toBe('https://api.github.com/orgs/custom-org/repos');
-      const body = JSON.parse(calls[2].body!);
+      expect(calls[3].url).toBe('https://api.github.com/orgs/custom-org/repos');
+      const body = JSON.parse(calls[3].body!);
       expect(body.name).toBe('my-vault');
     });
 
-    it('does NOT fall back to user/repos — throws on non-OK org create', async () => {
+    it('throws on non-OK create including the endpoint used in the error message', async () => {
+      // owner !== token login → org endpoint; org endpoint returns 403.
       const { fetch } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
         'POST https://api.github.com/orgs/testorg/repos': {
           status: 403,
           body: { message: 'forbidden' },
@@ -144,7 +292,23 @@ describe('KubernetesVaultInfra', () => {
       });
       const infra = new KubernetesVaultInfra(baseConfig(), fetch);
       await expect(infra.ensureGitBackingStore('acme/notes', 'git')).rejects.toThrow(
-        /GitHub repo create failed for org "testorg": HTTP 403/,
+        /GitHub repo create failed for owner "testorg" via \/orgs\/testorg\/repos: HTTP 403/,
+      );
+    });
+
+    it('error message includes /user/repos when owner is the token user', async () => {
+      const { fetch } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_IS_TESTORG,
+        'POST https://api.github.com/user/repos': {
+          status: 403,
+          body: { message: 'forbidden' },
+        },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await expect(infra.ensureGitBackingStore('acme/notes', 'git')).rejects.toThrow(
+        /GitHub repo create failed for owner "testorg" via \/user\/repos: HTTP 403/,
       );
     });
 
@@ -152,6 +316,7 @@ describe('KubernetesVaultInfra', () => {
       const { fetch } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
         'POST https://api.github.com/orgs/testorg/repos': {
           status: 422,
           body: { message: 'name already exists' },
@@ -305,31 +470,10 @@ describe('KubernetesVaultInfra', () => {
     });
 
     it('includes git_repo when ensureGitBackingStore was called first', async () => {
-      const { fetch, calls } = createFake({
-        // First call: registry is empty (for ensureGitBackingStore check).
-        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
-        'GET https://api.github.com/repos/testorg/vault-acme_notes': {
-          status: 200,
-          body: { full_name: 'testorg/vault-acme_notes' },
-        },
-        // ensureRegistryEntry reads the map again (now also empty, no collision).
-        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
-      });
-      // Make CM_GET_URL return empty registry on BOTH calls (GET happens twice).
-      const { fetch: fetch2, calls: calls2 } = createFake({
-        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
-        'GET https://api.github.com/repos/testorg/vault-acme_notes': {
-          status: 200,
-          body: { full_name: 'testorg/vault-acme_notes' },
-        },
-        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
-      });
-      const infra = new KubernetesVaultInfra(baseConfig(), fetch2);
-      // For the repo-exists+no-registry path: we need the registry to have this namespace
-      // to avoid REPO_PATH_IN_USE. Let's use the create path instead (repo doesn't exist).
       const { fetch: fetch3, calls: calls3 } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
         'POST https://api.github.com/orgs/testorg/repos': {
           status: 201,
           body: { full_name: 'testorg/vault-acme_notes' },
@@ -408,6 +552,7 @@ describe('KubernetesVaultInfra', () => {
       const { fetch, calls } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
         'POST https://api.github.com/orgs/testorg/repos': { status: 201, body: {} },
         'GET http://typesense:8108/collections/acme_notes': { status: 404 },
         'POST http://typesense:8108/collections': { status: 201, body: {} },
@@ -420,7 +565,7 @@ describe('KubernetesVaultInfra', () => {
       await infra.ensureNeo4jDatabase('acme/notes');
       await infra.ensureRegistryEntry('acme/notes', 'ignored');
 
-      // Calls: GET CM (git check) + GET GH + POST GH + GET CM (ts check) + GET TS + POST TS + GET CM (reg) + PATCH CM
+      // Calls: GET CM + GET GH check + GET /user + POST GH + GET CM (ts) + GET TS + POST TS + GET CM (reg) + PATCH CM
       expect(calls.length).toBeGreaterThanOrEqual(7);
       const patchCall = calls[calls.length - 1];
       expect(patchCall.method).toBe('PATCH');
@@ -434,6 +579,7 @@ describe('KubernetesVaultInfra', () => {
       const { fetch, calls } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/myorg/myvault': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
         'POST https://api.github.com/orgs/myorg/repos': { status: 201, body: {} },
         'GET http://typesense:8108/collections/acme_notes': { status: 404 },
         'POST http://typesense:8108/collections': { status: 201, body: {} },
@@ -453,6 +599,35 @@ describe('KubernetesVaultInfra', () => {
       const patch = JSON.parse(patchCall.body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes'].git_repo).toBe('myorg/myvault');
+    });
+
+    it('user-account owner flow: uses /user/repos and registry git_repo is correct', async () => {
+      // Owner 'Arjunkhera' matches the token login — production scenario.
+      const config = { ...baseConfig(), githubOwner: 'Arjunkhera' };
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/Arjunkhera/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': { status: 200, body: { login: 'arjunkhera', type: 'User' } },
+        'POST https://api.github.com/user/repos': { status: 201, body: { full_name: 'Arjunkhera/vault-acme_notes' } },
+        'GET http://typesense:8108/collections/acme_notes': { status: 404 },
+        'POST http://typesense:8108/collections': { status: 201, body: {} },
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(config, fetch);
+
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      await infra.ensureTypesenseCollection('acme/notes');
+      await infra.ensureNeo4jDatabase('acme/notes');
+      await infra.ensureRegistryEntry('acme/notes', 'ignored');
+
+      // Assert /user/repos was used (not /orgs/)
+      const createCall = calls.find(c => c.method === 'POST' && c.url.includes('github.com'));
+      expect(createCall?.url).toBe('https://api.github.com/user/repos');
+
+      const patchCall = calls[calls.length - 1];
+      const patch = JSON.parse(patchCall.body!);
+      const registry = JSON.parse(patch.data['registry.yaml']);
+      expect(registry.vaults['acme/notes'].git_repo).toBe('Arjunkhera/vault-acme_notes');
     });
   });
 });
