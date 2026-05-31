@@ -60,6 +60,11 @@ spec:
           ports:
             - containerPort: 8090
           env:
+            # Trust the in-cluster API server CA so Node's fetch can call the
+            # Kubernetes API (vault-registry ConfigMap read/patch) over TLS.
+            # Without this, fetch fails with "self-signed certificate in chain".
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - name: OPERATOR_PORT
               value: "8090"
             - name: OPERATOR_DB_PATH
