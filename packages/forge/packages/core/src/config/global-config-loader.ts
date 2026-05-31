@@ -42,11 +42,24 @@ export const DEFAULT_LOCAL_REGISTRY: RegistryConfig = {
  * Writes (publish) require an authenticated, writable registry entry pointing
  * at the same gateway with a publisher token — the gateway gates non-read
  * methods, so a tokenless 'global' entry cannot publish.
+ *
+ * Runtime env overrides (applied in loadGlobalConfig):
+ *   FORGE_REGISTRY_GATEWAY_URL — if set, overrides the 'global' registry URL directly.
+ *   HORUS_CONTROL_PLANE_URL    — if FORGE_REGISTRY_GATEWAY_URL is absent, derived as
+ *                                 ${HORUS_CONTROL_PLANE_URL}/api/v1/forge.
  */
+export function resolveDefaultGlobalRegistryUrl(): string {
+  const explicit = process.env.FORGE_REGISTRY_GATEWAY_URL;
+  if (explicit) return explicit;
+  const cpUrl = process.env.HORUS_CONTROL_PLANE_URL;
+  if (cpUrl) return `${cpUrl.replace(/\/$/, '')}/api/v1/forge`;
+  return 'https://horus.arjunkhera.io/api/v1/forge';
+}
+
 export const DEFAULT_GLOBAL_REGISTRY: RegistryConfig = {
   type: 'http',
   name: 'global',
-  url: 'https://horus.arjunkhera.io/api/v1/forge',
+  url: resolveDefaultGlobalRegistryUrl(),
   writable: false,
 };
 
@@ -162,6 +175,16 @@ export async function loadGlobalConfig(
     // Ensure default registries are present (enterprise-aware)
     config.registries = ensureDefaultRegistries(config.registries, enterpriseRegistryUrl);
 
+    // Re-resolve the 'global' registry URL in case FORGE_REGISTRY_GATEWAY_URL or
+    // HORUS_CONTROL_PLANE_URL is set at runtime (horus-ui in-process mode).
+    const globalRegistryUrl = resolveDefaultGlobalRegistryUrl();
+    if (globalRegistryUrl !== 'https://horus.arjunkhera.io/api/v1/forge') {
+      const globalEntry = config.registries.find(r => r.name === 'global');
+      if (globalEntry) {
+        globalEntry.url = globalRegistryUrl;
+      }
+    }
+
     // Expand all tilde paths to absolute paths
     if (config.workspace.mount_path) {
       config.workspace.mount_path = expandPath(config.workspace.mount_path);
@@ -183,12 +206,23 @@ export async function loadGlobalConfig(
     }
     config.repos.scan_paths = config.repos.scan_paths.map(expandPath);
 
+    // Apply runtime env overrides for in-process (horus-ui) use.
+    // These allow the host to wire container-volume paths without modifying forge.yaml.
+    if (process.env.FORGE_SESSIONS_ROOT) {
+      config.workspace.sessions_root = process.env.FORGE_SESSIONS_ROOT;
+    }
+    if (process.env.FORGE_MANAGED_REPOS_PATH) {
+      config.workspace.managed_repos_path = process.env.FORGE_MANAGED_REPOS_PATH;
+    }
+
     return config;
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
       // No global config — return defaults with default registries
       const config = GlobalConfigSchema.parse({});
       config.registries = ensureDefaultRegistries(config.registries, enterpriseRegistryUrl);
+      if (process.env.FORGE_SESSIONS_ROOT) config.workspace.sessions_root = process.env.FORGE_SESSIONS_ROOT;
+      if (process.env.FORGE_MANAGED_REPOS_PATH) config.workspace.managed_repos_path = process.env.FORGE_MANAGED_REPOS_PATH;
       return config;
     }
     // File exists but is malformed — warn and return defaults
@@ -197,6 +231,8 @@ export async function loadGlobalConfig(
     );
     const config = GlobalConfigSchema.parse({});
     config.registries = ensureDefaultRegistries(config.registries, enterpriseRegistryUrl);
+    if (process.env.FORGE_SESSIONS_ROOT) config.workspace.sessions_root = process.env.FORGE_SESSIONS_ROOT;
+    if (process.env.FORGE_MANAGED_REPOS_PATH) config.workspace.managed_repos_path = process.env.FORGE_MANAGED_REPOS_PATH;
     return config;
   }
 }
