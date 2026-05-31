@@ -15,6 +15,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { parse as parseYaml } from 'yaml';
 import {
   namespaceSlug,
   type VaultInfra,
@@ -366,11 +367,21 @@ export class KubernetesVaultInfra implements VaultInfra {
     }
     const cm = (await res.json()) as { data?: Record<string, string> };
     const raw = cm.data?.[this.config.configMapKey] ?? '';
-    try {
-      const parsed = JSON.parse(raw);
-      return { vaults: parsed.vaults ?? {} };
-    } catch {
+    if (!raw.trim()) {
+      // Legitimately empty ConfigMap — nothing seeded yet.
       return { vaults: {} };
+    }
+    try {
+      // Use YAML parser: handles both the YAML seed (with comments) and the
+      // operator's own JSON writes (JSON is valid YAML). Never silently swallow
+      // a non-empty parse failure — that caused the seeded `default` entry to
+      // be clobbered on the first write.
+      const parsed = parseYaml(raw) as { vaults?: Record<string, RegistryFileEntry> } | null;
+      return { vaults: parsed?.vaults ?? {} };
+    } catch (err) {
+      throw new Error(
+        `ConfigMap registry parse failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
