@@ -38,11 +38,7 @@ async function ensureBooted() {
     const mcpServerMod = await import('@forge/mcp-server');
     const sdkMod = await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
     _buildServer = mcpServerMod.buildServer;
-    _runStartupMigrations = mcpServerMod.startMcpServer
-      // runStartupMigrations is exported from @forge/core, re-exported through @forge/mcp-server
-      ? null
-      : null;
-    // Import runStartupMigrations from @forge/core directly
+    // runStartupMigrations lives in @forge/core (creates forge.yaml on first boot).
     const coreMod = await import('@forge/core');
     _runStartupMigrations = coreMod.runStartupMigrations;
     _StreamableHTTPServerTransport = sdkMod.StreamableHTTPServerTransport;
@@ -110,7 +106,8 @@ forgeMcpRouter.all('/mcp', async (req, res) => {
     return res.status(503).json({ error: 'Forge MCP engine failed to initialize', detail: err.message });
   }
 
-  const workspaceRoot = process.env.FORGE_WORKSPACE_PATH ?? process.cwd();
+  const workspaceRoot =
+    process.env.FORGE_WORKSPACE_PATH ?? process.env.FORGE_WORKSPACES_PATH ?? process.cwd();
 
   try {
     const sessionId = req.headers['mcp-session-id'];

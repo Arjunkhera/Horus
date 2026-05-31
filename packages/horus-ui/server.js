@@ -32,7 +32,12 @@ const ANVIL_PORT = process.env.ANVIL_PORT || '8100';
 const READER_STATIC = process.env.READER_STATIC || path.join(__dirname, '../horus-ui-client');
 
 const app = express();
-app.use(express.json());
+// Body parsing is applied PER-ROUTE, never globally. The /forge MCP router and
+// the /vault + /api proxies must receive the raw request stream: the MCP
+// StreamableHTTP transport reads the POST body itself, and the proxies stream
+// it through untouched. A global parser would drain the stream and silently
+// break every MCP tool call. Only horus-ui's own JSON routes use jsonParser.
+const jsonParser = express.json();
 
 // Health check
 app.get('/health', (_req, res) => res.send('ok'));
@@ -108,7 +113,7 @@ app.delete('/api/notes/:id', async (req, res) => {
 });
 
 // PATCH /api/notes/:id — update note body; must be registered before the proxy
-app.patch('/api/notes/:id', async (req, res) => {
+app.patch('/api/notes/:id', jsonParser, async (req, res) => {
   const { id } = req.params;
   const body = req.body?.body;
   if (typeof body !== 'string') {
@@ -189,7 +194,7 @@ app.get('/api/system/status', async (_req, res) => {
 });
 
 // POST /api/ai/ask — NLP agent search with SSE streaming (Anthropic + Anvil MCP)
-app.post('/api/ai/ask', async (req, res) => {
+app.post('/api/ai/ask', jsonParser, async (req, res) => {
   const { question, agentId: reqAgentId } = req.body;
 
   if (!question) {
