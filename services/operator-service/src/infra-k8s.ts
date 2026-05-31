@@ -77,10 +77,43 @@ export class KubernetesVaultInfra implements VaultInfra {
    */
   private readonly gitRepos = new Map<string, string>();
 
+  /**
+   * Cached login of the authenticated GitHub token (lowercased).
+   * Resolved on first call to resolveTokenLogin(); null = not yet fetched,
+   * '' (empty) = fetch failed or returned non-200.
+   */
+  private _tokenLogin: string | null = null;
+
   constructor(
     private readonly config: KubernetesVaultInfraConfig,
     private readonly _fetch: HttpFetch = globalThis.fetch.bind(globalThis),
   ) {}
+
+  // ── GitHub identity resolution ────────────────────────────────────────────
+
+  /**
+   * Returns the lowercase login of the authenticated GitHub token, or ''
+   * if the identity lookup fails (non-200 or network error).  Cached after
+   * the first successful fetch so repeated provisions do not re-query.
+   */
+  private async resolveTokenLogin(): Promise<string> {
+    if (this._tokenLogin !== null) return this._tokenLogin;
+    try {
+      const res = await this._fetch(
+        'https://api.github.com/user',
+        { method: 'GET', headers: this.githubHeaders() },
+      );
+      if (res.status === 200) {
+        const data = (await res.json()) as { login?: string };
+        this._tokenLogin = (data.login ?? '').toLowerCase();
+      } else {
+        this._tokenLogin = '';
+      }
+    } catch {
+      this._tokenLogin = '';
+    }
+    return this._tokenLogin;
+  }
 
   // ── Registry pre-flight ───────────────────────────────────────────────────
 
@@ -105,8 +138,10 @@ export class KubernetesVaultInfra implements VaultInfra {
    *     (No silent adoption — a pre-existing unowned repo must be explicitly dealt with.)
    *   - If the namespace already owns this path (same request retry) → idempotent success.
    *
-   * NEVER falls back to /user/repos on a 404 from /orgs — that was the source of
-   * ambiguity. A 404 from the org endpoint means the token cannot create there; fail fast.
+   * Endpoint selection: before creating, the method calls GET /user to determine
+   * whether the resolved owner is the authenticated token's own personal account.
+   * If so, POST /user/repos is used (GitHub rejects POST /orgs/{personal} with 404).
+   * Otherwise POST /orgs/{org}/repos is used. The result is cached per instance.
    */
   async ensureGitBackingStore(
     namespace: string,
@@ -176,18 +211,27 @@ export class KubernetesVaultInfra implements VaultInfra {
       auto_init: true,
     });
 
-    // Use the org endpoint ONLY — no /user/repos fallback (see function doc).
+    // Resolve whether `org` is the authenticated token's own user account.
+    // If so, repos must be created via POST /user/repos (GitHub rejects
+    // POST /orgs/{personal-login}/repos with 404).
+    const tokenLogin = await this.resolveTokenLogin();
+    const isTokenUser = tokenLogin !== '' && tokenLogin === org.toLowerCase();
+    const createUrl = isTokenUser
+      ? 'https://api.github.com/user/repos'
+      : `https://api.github.com/orgs/${org}/repos`;
+
     const createRes = await this._fetch(
-      `https://api.github.com/orgs/${org}/repos`,
+      createUrl,
       { method: 'POST', headers: this.githubHeaders(), body },
     );
 
     if (!createRes.ok && createRes.status !== 422) {
       // 422 = repo name already exists (race), treat as success.
       const detail = await createRes.text();
+      const endpointLabel = isTokenUser ? '/user/repos' : `/orgs/${org}/repos`;
       throw new Error(
-        `GitHub repo create failed for org "${org}": HTTP ${createRes.status} — ${detail}. ` +
-          `Ensure the token has repo creation rights in this org.`,
+        `GitHub repo create failed for owner "${org}" via ${endpointLabel}: ` +
+          `HTTP ${createRes.status} — ${detail}`,
       );
     }
 
