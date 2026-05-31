@@ -147,8 +147,12 @@ if [ -n "$GITHUB_TOKEN" ] && [ -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
   git -C "$KNOWLEDGE_REPO_PATH" config credential.helper "store"
   echo "https://oauth2:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
 fi
-git -C "$KNOWLEDGE_REPO_PATH" config user.email "horus@local" 2>/dev/null || true
-git -C "$KNOWLEDGE_REPO_PATH" config user.name "Horus Vault Sync" 2>/dev/null || true
+# Set the git identity --global (this script runs as appuser via gosu) so it
+# applies to BOTH the default knowledge-repo AND the per-vault clones created at
+# runtime by VaultRepoResolver. Per-repo config covered only the default vault,
+# so commits to provisioned vaults failed with "empty ident name".
+git config --global user.email "horus@local" 2>/dev/null || true
+git config --global user.name "Horus Vault Sync" 2>/dev/null || true
 
 # Reconcile remote URL — if existing clone has SSH remote but VAULT_KNOWLEDGE_REPO_URL is HTTPS, update it
 if [ -n "$VAULT_KNOWLEDGE_REPO_URL" ] && [ -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
