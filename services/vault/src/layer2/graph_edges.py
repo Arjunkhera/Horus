@@ -355,24 +355,20 @@ def create_wiki_link_edges(
                 # Direct UUID reference
                 target_uuid = target
             else:
-                # Title-based resolution via search
+                # Title-based resolution via search — require exact case-insensitive title match
                 try:
                     results = search_fn(target)
-                    if results:
-                        # Prefer exact title match
-                        exact = next(
-                            (r for r in results if (r.id or "") and
-                             r.file_path),
-                            None,
-                        )
-                        if exact and exact.id:
-                            target_uuid = exact.id
-                        elif results[0].id:
-                            target_uuid = results[0].id
-                except Exception as search_exc:
-                    _logger.debug(
-                        "Wiki-link title search failed for %r: %s", target, search_exc
+                    match = next(
+                        (r for r in results
+                         if getattr(r, "title", None)
+                         and r.title.strip().lower() == target.strip().lower()
+                         and r.id),
+                        None,
                     )
+                    if match:
+                        target_uuid = match.id
+                except Exception as search_exc:
+                    _logger.debug("Wiki-link title search failed for %r: %s", target, search_exc)
 
             if not target_uuid:
                 _logger.debug(

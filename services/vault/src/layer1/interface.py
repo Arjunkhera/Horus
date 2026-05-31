@@ -20,6 +20,7 @@ class SearchResult:
     snippet: str
     collection: str
     id: Optional[str] = None  # UUIDv4 page identity (None for unmigrated pages)
+    title: Optional[str] = None  # Page title (for exact wiki-link matching)
 
 
 @dataclass

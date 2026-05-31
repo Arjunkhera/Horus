@@ -79,14 +79,21 @@ class TestCreateWikiLinkEdges:
         g.query = MagicMock(return_value=[])
         return g
 
-    def _make_search(self, uuid_for_title: str = ""):
-        """Return a search_fn that returns a single result with the given UUID."""
+    def _make_search(self, uuid_for_title: str = "", title: str = ""):
+        """Return a search_fn that returns a single result with the given UUID.
+
+        The result's ``title`` attribute is set to *title* when provided, or to
+        the search query (so that exact-match comparison works by default when
+        the caller passes uuid_for_title without an explicit title override).
+        """
         def search_fn(query):
             if not uuid_for_title:
                 return []
             result = MagicMock()
             result.id = uuid_for_title
             result.file_path = f"pages/{uuid_for_title}.md"
+            # Use explicit title if supplied, else mirror the query so exact match passes
+            result.title = title if title else query
             return [result]
         return search_fn
 
@@ -165,3 +172,44 @@ class TestCreateWikiLinkEdges:
         body = f"[[{_UUID_B}]]"
         created = create_wiki_link_edges(graph, _UUID_A, body, registry, self._make_search())
         assert _UUID_B in created
+
+    def test_exact_title_match_resolves_to_correct_page(self):
+        """[[Exact Title]] resolves only to the page whose title matches exactly
+        (case-insensitive).  A result whose title differs must not be used."""
+        graph = self._make_graph()
+
+        def search_fn(query):
+            # Return two results: one with a wrong title, one with the exact title.
+            wrong = MagicMock()
+            wrong.id = _UUID_C
+            wrong.file_path = f"pages/{_UUID_C}.md"
+            wrong.title = "Something Else"
+
+            exact = MagicMock()
+            exact.id = _UUID_B
+            exact.file_path = f"pages/{_UUID_B}.md"
+            exact.title = "Exact Title"
+
+            return [wrong, exact]
+
+        body = "See [[Exact Title]] for context."
+        created = create_wiki_link_edges(graph, _UUID_A, body, None, search_fn)
+        assert _UUID_B in created
+        assert _UUID_C not in created
+
+    def test_nonexistent_title_creates_no_edge(self):
+        """[[Nonexistent]] with no results whose title matches creates no edge."""
+        graph = self._make_graph()
+
+        def search_fn(query):
+            # Results exist but none match the title exactly
+            close = MagicMock()
+            close.id = _UUID_B
+            close.file_path = f"pages/{_UUID_B}.md"
+            close.title = "Not The Same Title"
+            return [close]
+
+        body = "Reference [[Nonexistent]]."
+        created = create_wiki_link_edges(graph, _UUID_A, body, None, search_fn)
+        assert created == []
+        assert graph.query.call_count == 0

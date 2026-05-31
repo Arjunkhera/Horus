@@ -530,7 +530,7 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None
         try:
             results = graph.query(
                 """
-                MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r:DOCS|PART_OF|RELATED|DEPENDS_ON|CONSUMED_BY|APPLIES_TO]-(q:Page {vault_name: $vault_name})
+                MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r:DOCS|PART_OF|RELATED|DEPENDS_ON|CONSUMED_BY|APPLIES_TO|MENTIONS|REFERENCES]-(q:Page {vault_name: $vault_name})
                 RETURN DISTINCT q.page_id AS id
                 LIMIT 50
                 """,
@@ -538,13 +538,14 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None
             )
             doc_cache = store.get_all_documents()
             for row in results:
-                related_path = row.get("id")
-                if not related_path:
+                related_uuid = row.get("id")
+                if not related_uuid:
                     continue
-                page_content = doc_cache.get(related_path) or store.get_document(related_path)
+                flat_path = f"pages/{related_uuid}.md" if _UUID_RE.match(related_uuid) else related_uuid
+                page_content = doc_cache.get(flat_path) or store.get_document(related_uuid)
                 if page_content:
                     rel_parsed = parse_page(page_content)
-                    related_pages_tuples.append((rel_parsed, related_path))
+                    related_pages_tuples.append((rel_parsed, flat_path))
         except Exception:
             logger.warning(
                 "Graph-based get-related failed for page '%s', falling back to link_navigator",

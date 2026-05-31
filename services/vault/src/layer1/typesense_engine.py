@@ -231,12 +231,14 @@ class TypesenseSearchEngine(SearchStore):
             logger.warning("upsert_document failed for '%s': %s", file_path, exc)
 
     def delete_document(self, file_path: str) -> None:
-        """
-        Delete a single document from Typesense.
-
-        Fire-and-forget: failures are logged but never raised.
-        """
-        self._delete_raw(file_path)
+        """Delete a document from Typesense. Resolves flat/UUID ids to the bare UUID
+        (the Typesense doc id); legacy paths are passed through best-effort."""
+        doc_id = file_path
+        if file_path and _UUID_RE_SIMPLE.match(file_path):
+            doc_id = file_path
+        elif file_path and file_path.startswith("pages/") and file_path.endswith(".md"):
+            doc_id = file_path[len("pages/"):-len(".md")]
+        self._delete_raw(doc_id)
 
     # ------------------------------------------------------------------
     # SearchStore interface — search methods
@@ -295,6 +297,7 @@ class TypesenseSearchEngine(SearchStore):
                         snippet=snippet,
                         collection="",
                         id=doc_id if doc_id else None,
+                        title=doc.get("title") or None,
                     )
                 )
                 if len(results) >= limit:
@@ -343,6 +346,7 @@ class TypesenseSearchEngine(SearchStore):
                         snippet=(doc.get("body") or "")[:200],
                         collection="",
                         id=doc_id if doc_id else None,
+                        title=doc.get("title") or None,
                     )
                 )
             return results
