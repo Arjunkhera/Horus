@@ -8,10 +8,11 @@ commonLabels:
   app.kubernetes.io/component: forge
 
 # Pinned image tag (ADR-0007 — never :latest).
-# sha-270b977 = master build of PR #361 (shared S3-backed repo registry).
+# sha-f607219 = master build of PR #363 (bug b18ccd0e: DELETE /repos no longer
+# 500s / orphans the Typesense index). Supersedes sha-270b977 (PR #361).
 images:
   - name: ghcr.io/arjunkhera/horus/forge-registry
-    newTag: sha-270b977
+    newTag: sha-f607219
 
 resources:
   - forge-registry.yaml
