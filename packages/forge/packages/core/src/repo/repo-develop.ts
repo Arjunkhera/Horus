@@ -8,6 +8,7 @@ import type { SessionRecord, SessionWorkflow, RepoSource } from '../models/sessi
 import type { GlobalConfig } from '../models/global-config.js';
 import type { RepoMetadataRecord } from './repo-registry-client.js';
 import { SessionStoreManager } from '../session/session-store.js';
+import { spawnAgentSession, type SpawnAgentOptions } from '../session/agent-spawn.js';
 import { ForgeError } from '../adapters/errors.js';
 import { installEnforcementHooks } from './git-enforcement.js';
 import { VaultClient } from '../vault/vault-client.js';
@@ -58,6 +59,19 @@ export interface RepoDevelopOptions {
    * default remote resolution chain (before Vault lookup).
    */
   registryMeta?: RepoMetadataRecord;
+  /**
+   * Optional task prompt. When provided, after the worktree is ensured (created
+   * or resumed) a NON-BARE headless Claude Code session is spawned rooted at the
+   * worktree (cwd = sessionPath) — the Shape-1 edit flow. The captured Claude
+   * session_id is persisted to the session record and returned. When omitted,
+   * forge_develop behaves exactly as before (worktree only, no spawn).
+   */
+  prompt?: string;
+  /**
+   * Tuning for the spawned agent session (permission mode, allowed tools, max
+   * turns, timeout, binary path). cwd/prompt/resume are set by repoDevelop.
+   */
+  agent?: Omit<SpawnAgentOptions, 'prompt' | 'cwd' | 'resume'>;
 }
 
 /** Session created or resumed successfully */
@@ -77,6 +91,18 @@ export interface RepoDevelopResult {
    * The session is created regardless; caller should surface this to the user.
    */
   warning?: string;
+  /**
+   * Claude Code session_id, present only when an agent was spawned
+   * (i.e. opts.prompt was provided). Resumable via the agent flow.
+   */
+  claudeSessionId?: string;
+  /** Summary of the spawned agent run, present only when opts.prompt was provided. */
+  agentRun?: {
+    result: string;
+    isError: boolean;
+    costUsd?: number;
+    numTurns?: number;
+  };
 }
 
 /** Workflow not yet confirmed for this repo */
@@ -446,6 +472,39 @@ async function fixWorktreePathsForHost(
  * 6. Install enforcement hooks and scripts
  * 7. Save session record
  */
+/** Extra fields layered onto a RepoDevelopResult when the edit-flow agent is spawned. */
+type SpawnExtras = Pick<RepoDevelopResult, 'claudeSessionId' | 'agentRun'>;
+
+/**
+ * Spawn the Shape-1 edit-flow agent rooted at the worktree, persist the captured
+ * Claude session_id onto the session record, and return the result fields to
+ * merge into the RepoDevelopResult. Only called when opts.prompt is provided.
+ */
+async function runEditFlowSpawn(
+  opts: RepoDevelopOptions,
+  sessionStore: SessionStoreManager,
+  localSessionId: string,
+  worktreeCwd: string,
+  resumeClaudeSessionId: string | undefined,
+): Promise<SpawnExtras> {
+  const spawnResult = await spawnAgentSession({
+    ...(opts.agent ?? {}),
+    prompt: opts.prompt!,
+    cwd: worktreeCwd,
+    resume: resumeClaudeSessionId,
+  });
+  await sessionStore.setClaudeSessionId(localSessionId, spawnResult.claudeSessionId);
+  return {
+    claudeSessionId: spawnResult.claudeSessionId,
+    agentRun: {
+      result: spawnResult.result,
+      isError: spawnResult.isError,
+      costUsd: spawnResult.costUsd,
+      numTurns: spawnResult.numTurns,
+    },
+  };
+}
+
 export async function repoDevelop(
   opts: RepoDevelopOptions,
   globalConfig: GlobalConfig,
@@ -547,6 +606,15 @@ export async function repoDevelop(
       await fs.access(existing.sessionPath);
       // Update lastModified on resume
       await sessionStore.touch(existing.sessionId);
+      const spawnExtras: SpawnExtras = opts.prompt
+        ? await runEditFlowSpawn(
+            opts,
+            sessionStore,
+            existing.sessionId,
+            existing.sessionPath,
+            existing.claudeSessionId,
+          )
+        : {};
       return {
         status: 'resumed',
         sessionId: existing.sessionId,
@@ -558,6 +626,7 @@ export async function repoDevelop(
         repoSource: existing.repoSource,
         workflow: existing.workflow,
         agentSlot: existing.agentSlot,
+        ...spawnExtras,
       };
     } catch {
       // Session path gone (manually deleted?) — treat as new session
@@ -861,6 +930,10 @@ export async function repoDevelop(
   };
   await sessionStore.add(record);
 
+  const spawnExtras: SpawnExtras = opts.prompt
+    ? await runEditFlowSpawn(opts, sessionStore, sessionId, sessionPath, undefined)
+    : {};
+
   return {
     status: 'created',
     sessionId,
@@ -873,5 +946,6 @@ export async function repoDevelop(
     workflow: sessionWorkflow,
     agentSlot,
     ...(sessionCeilingWarning ? { warning: sessionCeilingWarning } : {}),
+    ...spawnExtras,
   };
 }

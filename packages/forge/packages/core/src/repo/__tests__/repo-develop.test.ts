@@ -86,6 +86,21 @@ vi.mock('child_process', async () => {
       ) => {
         // Use the callback if provided (promisify path), else return a fake child process
         if (typeof cb === 'function') {
+          // Edit-flow spawn: a non-bare `claude -p ... --output-format json` run.
+          if (cmd === 'claude') {
+            cb(null, {
+              stdout: JSON.stringify({
+                type: 'result',
+                is_error: false,
+                result: 'edit-flow agent done',
+                session_id: 'claude-sess-test',
+                total_cost_usd: 0.05,
+                num_turns: 3,
+              }),
+              stderr: '',
+            });
+            return {} as any;
+          }
           // git remote → empty, git fetch → success, git worktree add → success
           const joined = args.join(' ');
           if (joined.startsWith('remote')) {
@@ -137,6 +152,72 @@ describe('repoDevelop', () => {
   afterEach(async () => {
     vi.clearAllMocks();
     await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  // ── Edit-flow spawn (Shape 1, CI-6) ────────────────────────────────────────
+
+  describe('edit-flow spawn (Shape 1)', () => {
+    it('does NOT spawn an agent when no prompt is given (worktree-only, legacy behaviour)', async () => {
+      const { execFile } = await import('child_process');
+      const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const opts: RepoDevelopOptions = { repo: 'TestRepo', workItem: 'wi-noprompt' };
+
+      const result = await repoDevelop(opts, globalConfig, { repos: [entry] }, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.claudeSessionId).toBeUndefined();
+        expect(result.agentRun).toBeUndefined();
+      }
+      const claudeCalls = vi.mocked(execFile).mock.calls.filter(c => c[0] === 'claude');
+      expect(claudeCalls).toHaveLength(0);
+    });
+
+    it('spawns a non-bare claude session rooted at the worktree when a prompt is given', async () => {
+      const { execFile } = await import('child_process');
+      const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const opts: RepoDevelopOptions = {
+        repo: 'TestRepo',
+        workItem: 'wi-spawn',
+        prompt: 'Implement the auth guard',
+      };
+
+      const result = await repoDevelop(opts, globalConfig, { repos: [entry] }, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.claudeSessionId).toBe('claude-sess-test');
+        expect(result.agentRun).toMatchObject({ isError: false, result: 'edit-flow agent done', numTurns: 3 });
+
+        const claudeCalls = vi.mocked(execFile).mock.calls.filter(c => c[0] === 'claude');
+        expect(claudeCalls).toHaveLength(1);
+        const [, args, spawnOpts] = claudeCalls[0] as any;
+        // rooted at the worktree (the Note-9 fix)
+        expect(spawnOpts.cwd).toBe(result.sessionPath);
+        // non-bare headless JSON run
+        expect(args).not.toContain('--bare');
+        expect(args.slice(0, 2)).toEqual(['-p', 'Implement the auth guard']);
+        expect(args).toContain('--output-format');
+        expect(args).toContain('json');
+      }
+    });
+
+    it('persists the captured claudeSessionId onto the session record', async () => {
+      const entry = makeRepoEntry({ localPath: fakeRepoPath, workflow: CONFIRMED_WORKFLOW });
+      const opts: RepoDevelopOptions = {
+        repo: 'TestRepo',
+        workItem: 'wi-persist',
+        prompt: 'do work',
+      };
+
+      await repoDevelop(opts, globalConfig, { repos: [entry] }, async () => {});
+
+      const raw = await fs.readFile(globalConfig.workspace.sessions_path, 'utf-8');
+      const store = JSON.parse(raw);
+      const rec = store.sessions.find((s: any) => s.workItem === 'wi-persist');
+      expect(rec).toBeDefined();
+      expect(rec.claudeSessionId).toBe('claude-sess-test');
+    });
   });
 
   // ── Tier-1: User repo index ────────────────────────────────────────────────
