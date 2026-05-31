@@ -3,10 +3,24 @@
  *
  * Each ensure* is idempotent (create-if-absent). External I/O goes through the
  * injected `fetch` so unit tests substitute a fake.
+ *
+ * Collision semantics (P2):
+ *   - vault-registry ConfigMap is the source of truth for what is provisioned.
+ *   - Before creating any new resource, ensureGitBackingStore / ensureTypesenseCollection
+ *     check whether the resolved path is already owned by a DIFFERENT namespace.
+ *   - A retry of the SAME namespace re-entering an already-started step is NOT a collision
+ *     (idempotent resume — the provisioner's steps ledger guarantees each step only runs
+ *     once per request, so if this method is called it's either the first attempt or a
+ *     retry of a step that had not yet been marked complete).
  */
 
 import { readFileSync } from 'node:fs';
-import { namespaceSlug, type VaultInfra, type RegistryFileEntry } from './infra.js';
+import {
+  namespaceSlug,
+  type VaultInfra,
+  type RegistryFileEntry,
+  type GitBackingStoreOpts,
+} from './infra.js';
 import { collectionCreateBody } from '@horus/search';
 
 export interface KubernetesVaultInfraConfig {
@@ -32,7 +46,35 @@ interface FetchResponse {
 
 export type HttpFetch = (url: string, init?: RequestInit) => Promise<FetchResponse>;
 
+/** Structured error thrown when a resource is already owned by another namespace. */
+export class CollisionError extends Error {
+  constructor(
+    public readonly code:
+      | 'NAMESPACE_EXISTS'
+      | 'REPO_PATH_IN_USE'
+      | 'COLLECTION_IN_USE'
+      | 'NEO4J_DB_IN_USE',
+    message: string,
+    public readonly details: Record<string, string>,
+  ) {
+    super(message);
+    this.name = 'CollisionError';
+  }
+}
+
+/** Thrown when the GitHub owner is empty/unresolvable — a config error, not a collision. */
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
 export class KubernetesVaultInfra implements VaultInfra {
+  /**
+   * Per-instance record of namespace → resolved "org/repoName" path.
+   * Populated in ensureGitBackingStore; consumed in ensureRegistryEntry.
+   */
   private readonly gitRepos = new Map<string, string>();
 
   constructor(
@@ -40,56 +82,163 @@ export class KubernetesVaultInfra implements VaultInfra {
     private readonly _fetch: HttpFetch = globalThis.fetch.bind(globalThis),
   ) {}
 
+  // ── Registry pre-flight ───────────────────────────────────────────────────
+
+  /** Returns true if the namespace key already exists in the vault-registry ConfigMap. */
+  async isNamespaceRegistered(namespace: string): Promise<boolean> {
+    const doc = await this.readConfigMap();
+    return namespace in doc.vaults;
+  }
+
   // ── GitHub repo (one per vault, B1 decision) ─────────────────────────────
 
-  async ensureGitBackingStore(namespace: string, _adapter: string): Promise<void> {
+  /**
+   * Ensures the GitHub repo exists.
+   *
+   * Resolution order:
+   *   org  = opts.gitOrg  ?? config.githubOwner  (error if still empty)
+   *   name = opts.repoName ?? `vault-${slug}`
+   *
+   * Collision rules (vault-registry ConfigMap is source of truth):
+   *   - If a DIFFERENT namespace already owns this org/name path → REPO_PATH_IN_USE 409.
+   *   - If the repo exists on GitHub but is NOT owned by this namespace → REPO_PATH_IN_USE 409.
+   *     (No silent adoption — a pre-existing unowned repo must be explicitly dealt with.)
+   *   - If the namespace already owns this path (same request retry) → idempotent success.
+   *
+   * NEVER falls back to /user/repos on a 404 from /orgs — that was the source of
+   * ambiguity. A 404 from the org endpoint means the token cannot create there; fail fast.
+   */
+  async ensureGitBackingStore(
+    namespace: string,
+    _adapter: string,
+    opts?: GitBackingStoreOpts,
+  ): Promise<void> {
     const slug = namespaceSlug(namespace);
-    const repoName = `vault-${slug}`;
 
+    // Resolve org and name — fail fast on empty owner.
+    const org = opts?.gitOrg ?? this.config.githubOwner;
+    if (!org || org.trim() === '') {
+      throw new ConfigError(
+        'GITHUB_OWNER is not configured and no git_org was provided in the payload. ' +
+          'Set the GITHUB_OWNER env var or pass git_org in the vault_create payload.',
+      );
+    }
+    const name = opts?.repoName ?? `vault-${slug}`;
+    const repoPath = `${org}/${name}`;
+
+    // ── Registry-level collision check ────────────────────────────────────
+    // Read the current registry and verify the resolved path is not already
+    // owned by a different namespace. Owning this namespace (a retry) is allowed.
+    const registryDoc = await this.readConfigMap();
+    for (const [existingNs, entry] of Object.entries(registryDoc.vaults)) {
+      if (existingNs === namespace) continue; // same namespace = retry, not a collision
+      if (entry.git_repo === repoPath) {
+        throw new CollisionError(
+          'REPO_PATH_IN_USE',
+          `Git repo ${repoPath} is already owned by namespace "${existingNs}". ` +
+            `Choose a different git_org/repo_name or delete the existing vault first.`,
+          { conflicting_namespace: existingNs, repo_path: repoPath },
+        );
+      }
+    }
+
+    // ── GitHub existence check ────────────────────────────────────────────
     const checkRes = await this._fetch(
-      `https://api.github.com/repos/${this.config.githubOwner}/${repoName}`,
+      `https://api.github.com/repos/${org}/${name}`,
       { method: 'GET', headers: this.githubHeaders() },
     );
+
     if (checkRes.status === 200) {
-      this.gitRepos.set(namespace, `${this.config.githubOwner}/${repoName}`);
+      // Repo exists on GitHub. Accept it only if this namespace already owns it
+      // (the registry check above would have thrown if another namespace did).
+      // If no registry entry exists for this namespace yet, the repo is unowned
+      // on GitHub but exists — that's a collision (no silent adoption).
+      const thisEntry = registryDoc.vaults[namespace];
+      if (!thisEntry) {
+        // Repo exists on GitHub but not in registry → pre-existing unowned repo.
+        throw new CollisionError(
+          'REPO_PATH_IN_USE',
+          `Git repo ${repoPath} already exists on GitHub but is not registered to any vault. ` +
+            `Delete or rename the repo, or pass a different repo_name in the payload.`,
+          { repo_path: repoPath, github_status: '200' },
+        );
+      }
+      // Namespace already has a registry entry (retry path) — accept it.
+      this.gitRepos.set(namespace, repoPath);
       return;
     }
 
+    // ── Create the repo ───────────────────────────────────────────────────
     const body = JSON.stringify({
-      name: repoName,
+      name,
       description: `Horus vault backing store for ${namespace}`,
       private: true,
       auto_init: true,
     });
 
-    // Try org endpoint first, fall back to user endpoint.
-    let createRes = await this._fetch(
-      `https://api.github.com/orgs/${this.config.githubOwner}/repos`,
+    // Use the org endpoint ONLY — no /user/repos fallback (see function doc).
+    const createRes = await this._fetch(
+      `https://api.github.com/orgs/${org}/repos`,
       { method: 'POST', headers: this.githubHeaders(), body },
     );
-    if (createRes.status === 404) {
-      createRes = await this._fetch(
-        'https://api.github.com/user/repos',
-        { method: 'POST', headers: this.githubHeaders(), body },
+
+    if (!createRes.ok && createRes.status !== 422) {
+      // 422 = repo name already exists (race), treat as success.
+      const detail = await createRes.text();
+      throw new Error(
+        `GitHub repo create failed for org "${org}": HTTP ${createRes.status} — ${detail}. ` +
+          `Ensure the token has repo creation rights in this org.`,
       );
     }
-    if (!createRes.ok && createRes.status !== 422) {
-      // 422 = already exists (race), treat as success
-      throw new Error(`GitHub repo create failed: ${createRes.status} ${await createRes.text()}`);
-    }
-    this.gitRepos.set(namespace, `${this.config.githubOwner}/${repoName}`);
+
+    this.gitRepos.set(namespace, repoPath);
   }
 
   // ── Typesense per-vault collection ────────────────────────────────────────
 
+  /**
+   * Ensures the Typesense collection exists.
+   *
+   * Collision rule: if the collection slug is already referenced by a DIFFERENT
+   * registry entry, throw COLLECTION_IN_USE. If it exists in Typesense but is
+   * unregistered (unowned), throw COLLECTION_IN_USE — no silent adoption.
+   */
   async ensureTypesenseCollection(namespace: string): Promise<void> {
     const slug = namespaceSlug(namespace);
+
+    // ── Registry-level collision check ────────────────────────────────────
+    const registryDoc = await this.readConfigMap();
+    for (const [existingNs, entry] of Object.entries(registryDoc.vaults)) {
+      if (existingNs === namespace) continue; // retry — not a collision
+      if (entry.typesense_collection === slug) {
+        throw new CollisionError(
+          'COLLECTION_IN_USE',
+          `Typesense collection "${slug}" is already owned by namespace "${existingNs}". ` +
+            `The namespace slug collides — choose a different namespace.`,
+          { conflicting_namespace: existingNs, collection: slug },
+        );
+      }
+    }
 
     const checkRes = await this._fetch(
       `${this.config.typesenseUrl}/collections/${slug}`,
       { method: 'GET', headers: this.typesenseHeaders() },
     );
-    if (checkRes.status === 200) return;
+
+    if (checkRes.status === 200) {
+      // Collection exists. If this namespace already owns it (retry), that's fine.
+      // If there is no registry entry for this namespace yet, it's unowned → collision.
+      const thisEntry = registryDoc.vaults[namespace];
+      if (!thisEntry) {
+        throw new CollisionError(
+          'COLLECTION_IN_USE',
+          `Typesense collection "${slug}" already exists but is not registered to any vault. ` +
+            `Drop the collection manually or choose a different namespace.`,
+          { collection: slug, typesense_status: '200' },
+        );
+      }
+      return; // retry — idempotent
+    }
 
     const schema = collectionCreateBody(slug);
     const createRes = await this._fetch(
@@ -115,8 +264,18 @@ export class KubernetesVaultInfra implements VaultInfra {
 
   // ── vault-registry ConfigMap ──────────────────────────────────────────────
 
+  /**
+   * Ensures the registry entry exists.
+   *
+   * NAMESPACE_EXISTS pre-flight is handled by the `check_namespace_collision`
+   * step in vaultCreateHandler (via isNamespaceRegistered) before this step
+   * runs. This method simply writes the entry, relying on the Provisioner's
+   * steps ledger to ensure it runs at most once per request.
+   */
   async ensureRegistryEntry(namespace: string, _endpoint: string): Promise<void> {
     const slug = namespaceSlug(namespace);
+    const doc = await this.readConfigMap();
+
     const entry: RegistryFileEntry = {
       reader_endpoint: this.config.readerEndpoint,
       writer_endpoint: this.config.writerEndpoint,
@@ -126,7 +285,6 @@ export class KubernetesVaultInfra implements VaultInfra {
     const gitRepo = this.gitRepos.get(namespace);
     if (gitRepo) entry.git_repo = gitRepo;
 
-    const doc = await this.readConfigMap();
     doc.vaults[namespace] = entry;
     await this.patchConfigMap(doc);
   }

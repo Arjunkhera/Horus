@@ -12,8 +12,21 @@
  * Provisioner tests assert against.
  */
 
+/** Options for the git backing-store ensure step. */
+export interface GitBackingStoreOpts {
+  /** GitHub org/owner to create the repo under. Defaults to the configured GITHUB_OWNER. */
+  gitOrg?: string;
+  /** Explicit repo name. Defaults to `vault-${namespaceSlug(namespace)}`. */
+  repoName?: string;
+}
+
 export interface VaultInfra {
-  ensureGitBackingStore(namespace: string, adapter: string): Promise<void>;
+  /**
+   * Checks whether the namespace is already registered in the vault-registry.
+   * Used for NAMESPACE_EXISTS pre-flight before provisioning steps begin.
+   */
+  isNamespaceRegistered(namespace: string): Promise<boolean>;
+  ensureGitBackingStore(namespace: string, adapter: string, opts?: GitBackingStoreOpts): Promise<void>;
   ensureTypesenseCollection(namespace: string): Promise<void>;
   ensureNeo4jDatabase(namespace: string): Promise<void>;
   ensureRegistryEntry(namespace: string, endpoint: string): Promise<void>;
@@ -27,33 +40,133 @@ export function namespaceSlug(namespace: string): string {
   return namespace.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-/** In-memory, idempotent VaultInfra. Tracks state so create-if-absent is observable. */
+/**
+ * In-memory, idempotent VaultInfra. Tracks state so create-if-absent is observable.
+ *
+ * This class mirrors the collision semantics of KubernetesVaultInfra without
+ * making real HTTP calls. It is used by unit tests and as the default infra when
+ * neither K8s nor a file registry path is configured.
+ *
+ * Collision detection mirrors KubernetesVaultInfra:
+ *   - gitRepos:     namespace → "org/repoName"
+ *   - repoIndex:    "org/repoName" → owning namespace (reverse index for collision lookup)
+ *   - collectionIndex: collection slug → owning namespace
+ *   - registry:     namespace → endpoint (the "ConfigMap" in memory)
+ *   - registryGitRepo: namespace → git_repo (parallel to registry for collision comparison)
+ */
 export class InMemoryVaultInfra implements VaultInfra {
-  readonly git = new Map<string, string>();
+  /** namespace → "org/repoName" (set by ensureGitBackingStore). */
+  readonly gitRepos = new Map<string, string>();
+  /**
+   * Alias for gitRepos kept for backwards compatibility with existing tests
+   * that use `infra.git.has(namespace)`. Same Map instance after construction.
+   */
+  readonly git: Map<string, string> = this.gitRepos;
+  /** "org/repoName" → owning namespace (reverse lookup for REPO_PATH_IN_USE). */
+  private readonly repoIndex = new Map<string, string>();
+  /** collection slug → owning namespace (for COLLECTION_IN_USE). */
+  private readonly collectionIndex = new Map<string, string>();
+  /**
+   * namespace → registered git_repo as written to the registry.
+   * Used by NAMESPACE_EXISTS idempotency check (same git_repo = retry).
+   */
+  private readonly registryGitRepo = new Map<string, string | undefined>();
   readonly collections = new Set<string>();
   readonly databases = new Set<string>();
+  /** namespace → endpoint (the mock registry). */
   readonly registry = new Map<string, string>();
 
-  async ensureGitBackingStore(namespace: string, adapter: string): Promise<void> {
-    if (!this.git.has(namespace)) this.git.set(namespace, adapter);
+  async isNamespaceRegistered(namespace: string): Promise<boolean> {
+    return this.registry.has(namespace);
   }
+
+  async ensureGitBackingStore(
+    namespace: string,
+    _adapter: string,
+    opts?: GitBackingStoreOpts,
+  ): Promise<void> {
+    const slug = namespaceSlug(namespace);
+    const org = opts?.gitOrg ?? 'default-org';
+    const name = opts?.repoName ?? `vault-${slug}`;
+    const repoPath = `${org}/${name}`;
+
+    // REPO_PATH_IN_USE: check if another namespace already owns this path.
+    const existingOwner = this.repoIndex.get(repoPath);
+    if (existingOwner !== undefined && existingOwner !== namespace) {
+      throw new InMemoryCollisionError(
+        'REPO_PATH_IN_USE',
+        `Git repo ${repoPath} is already owned by namespace "${existingOwner}".`,
+        { conflicting_namespace: existingOwner, repo_path: repoPath },
+      );
+    }
+
+    if (!this.gitRepos.has(namespace)) {
+      this.gitRepos.set(namespace, repoPath);
+      this.repoIndex.set(repoPath, namespace);
+    }
+  }
+
   async ensureTypesenseCollection(namespace: string): Promise<void> {
+    const slug = namespaceSlug(namespace);
+
+    // COLLECTION_IN_USE: check if another namespace already owns this slug.
+    const existingOwner = this.collectionIndex.get(slug);
+    if (existingOwner !== undefined && existingOwner !== namespace) {
+      throw new InMemoryCollisionError(
+        'COLLECTION_IN_USE',
+        `Typesense collection "${slug}" is already owned by namespace "${existingOwner}".`,
+        { conflicting_namespace: existingOwner, collection: slug },
+      );
+    }
+
     this.collections.add(namespace);
+    if (!this.collectionIndex.has(slug)) {
+      this.collectionIndex.set(slug, namespace);
+    }
   }
+
   async ensureNeo4jDatabase(namespace: string): Promise<void> {
     this.databases.add(namespace);
   }
+
   async ensureRegistryEntry(namespace: string, endpoint: string): Promise<void> {
     this.registry.set(namespace, endpoint);
+    this.registryGitRepo.set(namespace, this.gitRepos.get(namespace));
   }
+
   async removeRegistryEntry(namespace: string): Promise<void> {
+    const gitRepo = this.registryGitRepo.get(namespace);
+    if (gitRepo) this.repoIndex.delete(gitRepo);
+    this.collectionIndex.delete(namespaceSlug(namespace));
     this.registry.delete(namespace);
+    this.registryGitRepo.delete(namespace);
+    this.gitRepos.delete(namespace);
   }
   async dropTypesenseCollection(namespace: string): Promise<void> {
     this.collections.delete(namespace);
   }
   async dropNeo4jDatabase(namespace: string): Promise<void> {
     this.databases.delete(namespace);
+  }
+}
+
+/**
+ * Collision error for InMemoryVaultInfra — structurally identical to the
+ * KubernetesVaultInfra CollisionError so tests and the provisioner re-throw
+ * path work uniformly.
+ */
+export class InMemoryCollisionError extends Error {
+  constructor(
+    public readonly code:
+      | 'NAMESPACE_EXISTS'
+      | 'REPO_PATH_IN_USE'
+      | 'COLLECTION_IN_USE'
+      | 'NEO4J_DB_IN_USE',
+    message: string,
+    public readonly details: Record<string, string>,
+  ) {
+    super(message);
+    this.name = 'CollisionError'; // same name as KubernetesVaultInfra's CollisionError
   }
 }
 
@@ -111,8 +224,8 @@ export class FileVaultInfra extends InMemoryVaultInfra {
       typesense_collection: slug,
       neo4j_db: slug,
     };
-    const gitAdapter = this.git.get(namespace);
-    if (gitAdapter) entry.git_repo = gitAdapter;
+    const gitRepo = this.gitRepos.get(namespace);
+    if (gitRepo) entry.git_repo = gitRepo;
     doc.vaults[namespace] = entry;
     this.write(doc);
   }

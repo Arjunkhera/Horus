@@ -79,13 +79,11 @@ spec:
                 secretKeyRef:
                   name: vault-secrets
                   key: TYPESENSE_API_KEY
-            # B3: GitHub repo provisioning (one repo per vault)
+            # B3: GitHub repo provisioning (one repo per vault).
+            # GITHUB_OWNER is the default org/user and is not a secret — it is a
+            # plain account name. Override per-vault via vault_create payload.git_org.
             - name: GITHUB_OWNER
-              valueFrom:
-                secretKeyRef:
-                  name: vault-secrets
-                  key: GITHUB_OWNER
-                  optional: true
+              value: "Arjunkhera"
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:

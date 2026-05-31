@@ -3,10 +3,16 @@
  * kind's ordered steps with "ensure" (create-if-absent) semantics. Each step's
  * completion is recorded in the request's `steps` ledger and persisted, so a
  * `failed` retry re-enters here and SKIPS already-completed steps.
+ *
+ * Structured errors (CollisionError, ConfigError) are saved to req.error AND
+ * re-thrown so the call-site (app.ts) can return a precise HTTP status code.
+ * Non-structured errors are only saved to req.error (request stays `failed`).
  */
 
 import { type ProvisioningRequest, type RequestKind, terminalSuccess } from './model.js';
 import type { Store } from './store.js';
+import { CollisionError, ConfigError } from './infra-k8s.js';
+import { InMemoryCollisionError } from './infra.js';
 
 export interface Step {
   name: string;
@@ -55,6 +61,10 @@ export class Provisioner {
         req.error = err instanceof Error ? err.message : String(err);
         this.store.saveRequest(req);
         this.store.audit('provisioner', 'request.failed', `${id}:${step.name}:${req.error}`);
+        // Re-throw structured errors so the HTTP layer can map them to precise
+        // status codes (409 for collisions, 400/500 for config errors).
+        // The request is already persisted in `failed` state above.
+        if (err instanceof CollisionError || err instanceof ConfigError || err instanceof InMemoryCollisionError) throw err;
         return req;
       }
     }
