@@ -56,6 +56,7 @@ export {
   repoStatePath,
 } from './repo/local-repo-state-store.js';
 export { repoDevelop, type RepoDevelopOptions, type RepoDevelopResponse, type RepoDevelopResult, type RepoDevelopNeedsConfirmation, type RepoDevelopNeedsRepoDisambiguation, type WorkflowInput } from './repo/repo-develop.js';
+export { spawnAgentSession, buildClaudeArgs, type SpawnAgentOptions, type SpawnAgentResult, type AgentPermissionMode } from './session/agent-spawn.js';
 
 // Repo Registry
 export { RepoRegistryClient, type RepoRegistryClientOptions, type RepoMetadataRecord, type CreateRepoInput, type PatchRepoInput, type SearchParams, type SearchResult, type ResolveResult, type RepoHost, type RepoCredential, type RepoWorkflowMeta, type RepoVaultScope } from './repo/repo-registry-client.js';

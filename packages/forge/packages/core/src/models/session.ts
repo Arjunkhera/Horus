@@ -66,6 +66,12 @@ export const SessionRecordSchema = z.object({
    * Defaults to createdAt when not present (backward-compatible).
    */
   lastModified: z.string().optional(),
+  /**
+   * Claude Code session_id captured from the spawned edit-flow agent run.
+   * Used to --resume the same conversation and as provenance for the work item.
+   * Absent until an agent has actually been spawned for this session.
+   */
+  claudeSessionId: z.string().optional(),
 });
 
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;

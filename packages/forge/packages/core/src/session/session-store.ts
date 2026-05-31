@@ -105,6 +105,24 @@ export class SessionStoreManager {
   }
 
   /**
+   * Persist the Claude Code session_id on an existing record (and bump lastModified).
+   * Called after the edit-flow spawn so the session is resumable and provenance-linked.
+   * No-op when the sessionId is unknown.
+   */
+  async setClaudeSessionId(sessionId: string, claudeSessionId: string): Promise<void> {
+    const store = await this.load();
+    const idx = store.sessions.findIndex(s => s.sessionId === sessionId);
+    if (idx !== -1) {
+      store.sessions[idx] = {
+        ...store.sessions[idx],
+        claudeSessionId,
+        lastModified: new Date().toISOString(),
+      };
+      await this.save(store);
+    }
+  }
+
+  /**
    * Count total sessions across all work items.
    */
   async count(): Promise<number> {

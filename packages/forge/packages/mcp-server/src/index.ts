@@ -431,6 +431,31 @@ const TOOLS = [
           },
           required: ['type', 'pushTo', 'prTarget'],
         },
+        prompt: {
+          type: 'string',
+          description: 'Optional task prompt. When provided, after the worktree is created/resumed a non-bare ' +
+            'headless Claude Code session is spawned rooted at the worktree (the Shape-1 edit flow). The repo\'s ' +
+            'CLAUDE.md + skills load automatically (cwd = worktree). The captured Claude session_id is persisted ' +
+            'and returned as claudeSessionId for resume + provenance. Omit to create the worktree only (legacy behaviour).',
+        },
+        agent: {
+          type: 'object',
+          description: 'Optional tuning for the spawned edit-flow agent session (only used when prompt is set).',
+          properties: {
+            permissionMode: {
+              type: 'string',
+              enum: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+              description: 'Permission mode for the headless run (default: acceptEdits).',
+            },
+            allowedTools: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Restrict the agent to these tools (passed as --allowedTools).',
+            },
+            maxTurns: { type: 'number', description: 'Cap the number of agent turns.' },
+            timeoutMs: { type: 'number', description: 'Subprocess timeout in ms; 0 (default) disables it.' },
+          },
+        },
       },
       required: ['repo', 'workItem'],
     },
@@ -982,7 +1007,7 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_develop': {
-          const { repo, workItem, branch, localPath, defaultRemote, workflow } = (args ?? {}) as {
+          const { repo, workItem, branch, localPath, defaultRemote, workflow, prompt, agent } = (args ?? {}) as {
             repo: string;
             workItem: string;
             branch?: string;
@@ -997,6 +1022,13 @@ function buildServer(workspaceRoot: string): Server {
               branchPattern?: string;
               commitFormat?: string;
             };
+            prompt?: string;
+            agent?: {
+              permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+              allowedTools?: string[];
+              maxTurns?: number;
+              timeoutMs?: number;
+            };
           };
           if (!repo || !workItem) {
             return {
@@ -1008,7 +1040,17 @@ function buildServer(workspaceRoot: string): Server {
               isError: true,
             };
           }
-          const developResult = await forge.repoDevelop({ repo, workItem, branch, localPath, defaultRemote, workflow });
+          // Forward only the known agent tuning fields — keep the MCP boundary
+          // explicit and avoid leaking unvetted keys (e.g. claudeBin) into the spawn.
+          const agentTuning = agent
+            ? {
+                ...(agent.permissionMode !== undefined ? { permissionMode: agent.permissionMode } : {}),
+                ...(agent.allowedTools !== undefined ? { allowedTools: agent.allowedTools } : {}),
+                ...(agent.maxTurns !== undefined ? { maxTurns: agent.maxTurns } : {}),
+                ...(agent.timeoutMs !== undefined ? { timeoutMs: agent.timeoutMs } : {}),
+              }
+            : undefined;
+          const developResult = await forge.repoDevelop({ repo, workItem, branch, localPath, defaultRemote, workflow, prompt, agent: agentTuning });
           if (
             developResult.status === 'needs_workflow_confirmation' ||
             developResult.status === 'needs_remote_confirmation' ||
@@ -1035,9 +1077,14 @@ function buildServer(workspaceRoot: string): Server {
                 repoSource: developResult.repoSource,
                 workflow: developResult.workflow,
                 agentSlot: developResult.agentSlot,
-                message: developResult.status === 'resumed'
-                  ? `Session resumed at ${displayPath} on branch '${developResult.branch}'. Work in this directory.`
-                  : `Session created at ${displayPath} on branch '${developResult.branch}' (from ${developResult.baseBranch}). Work in this directory.`,
+                ...(developResult.claudeSessionId ? { claudeSessionId: developResult.claudeSessionId } : {}),
+                ...(developResult.agentRun ? { agentRun: developResult.agentRun } : {}),
+                message: developResult.agentRun
+                  ? `Edit-flow agent ran in ${displayPath} on branch '${developResult.branch}' (claudeSessionId=${developResult.claudeSessionId}). ` +
+                    `${developResult.agentRun.isError ? 'Run reported an error — inspect agentRun.result.' : 'Completed.'} Resume with the same workItem+repo.`
+                  : developResult.status === 'resumed'
+                    ? `Session resumed at ${displayPath} on branch '${developResult.branch}'. Work in this directory.`
+                    : `Session created at ${displayPath} on branch '${developResult.branch}' (from ${developResult.baseBranch}). Work in this directory.`,
               }, null, 2),
             }],
           };
