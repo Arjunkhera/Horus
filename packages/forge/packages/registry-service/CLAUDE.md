@@ -17,24 +17,16 @@ HTTP registry service for publishing, resolving, searching, and verifying Forge 
 
 ## Infrastructure
 
-Deployed to AWS (us-east-1) via Terraform. Architecture: CloudFront + WAF → EC2 (t4g.small, ARM64) → nginx → registry (:8744) + typesense (:8108). Artifacts stored in S3 with CloudFront OAC for reads.
+> **⚠️ RETIRED (2026-05-31).** The AWS EC2 + CloudFront + WAF + Terraform deployment described in this
+> section has been **decommissioned**. The registry now runs **in-cluster on Kubernetes** (`horus-system`),
+> deployed by ArgoCD from `deploy/forge-registry/` (app `horus-forge-registry`), exposed via the Horus
+> gateway at `https://horus.arjunkhera.io/api/v1/forge` (anonymous reads, JWT-gated writes). The S3 bucket
+> `horus-forge-registry` is **unchanged**. Redeploy = push to `master` → CI builds
+> `ghcr.io/arjunkhera/horus/forge-registry` → ArgoCD syncs. The `deploy/scripts/` + `deploy/terraform/`
+> tree and the `forge-registry-ops` skill below are **historical**. See story `2828ffb7` and Alpha Program
+> journal `13855a87`.
 
-### Deploy scripts
-
-All in `deploy/scripts/`:
-
-| Script | Purpose |
-|--------|---------|
-| `deploy.sh` | Full pipeline: Docker build → terraform → verify |
-| `redeploy.sh` | Code update: build → push → SSH pull → restart |
-| `smoke-test.sh` | Validate running instance |
-| `ssh.sh` | SSH helper (auto-resolves IP from terraform) |
-| `teardown.sh` | Destroy infrastructure |
-| `create-keypair.sh` | First-time EC2 key pair setup |
-
-### Terraform
-
-Located at `deploy/terraform/public-global/`. State is LOCAL — back up `terraform.tfstate`.
+**(Historical) AWS deployment:** CloudFront + WAF → EC2 (t4g.small, ARM64) → nginx → registry (:8744) + typesense (:8108), artifacts in S3 with CloudFront OAC for reads. Deploy scripts (`deploy.sh`, `redeploy.sh`, `smoke-test.sh`, `ssh.sh`, `teardown.sh`, `create-keypair.sh`) lived in `deploy/scripts/`; Terraform (local state) at `deploy/terraform/public-global/`. All torn down — do not run.
 
 ## Build & Test
 
