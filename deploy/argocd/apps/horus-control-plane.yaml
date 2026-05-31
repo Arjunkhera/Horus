@@ -21,3 +21,20 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # Honour ignoreDifferences during sync so selfHeal does not revert
+      # operator-owned fields (see ignoreDifferences below).
+      - RespectIgnoreDifferences=true
+  # The vault-registry ConfigMap is seeded from git (the "default" vault) but its
+  # `data` is owned at runtime by operator-service, which patches it to register
+  # provisioned vaults. Without this, selfHeal reverts those writes and the router
+  # never sees new vaults. ArgoCD still creates/seeds the ConfigMap; it just stops
+  # fighting over `data`. NOTE: the committed `data` is therefore a seed only —
+  # live contents diverge. Longer term this registry should move to an
+  # operator-owned datastore exposed via an API (see follow-up).
+  ignoreDifferences:
+    - group: ""
+      kind: ConfigMap
+      name: vault-registry
+      namespace: horus-system
+      jsonPointers:
+        - /data
