@@ -81,10 +81,18 @@ if [ -n "$REPO_URL" ] && [ ! -d "$NOTES_PATH/.git" ]; then
   log "Repository cloned successfully"
 fi
 
-# Fail-fast guard: if REPO_URL is unset and .git doesn't exist, error and exit
+# Local-first fallback: if no remote repo is configured and there's no existing
+# repo, initialize a local-only notes repo so the client works out-of-the-box.
+# (Connected/operator onboarding may not provision a remote notes repo; a
+# local-first Anvil should still start. Notes stay local until a remote is set.)
 if [ -z "$REPO_URL" ] && [ ! -d "$NOTES_PATH/.git" ]; then
-  log_err "ANVIL_REPO_URL is not set and $NOTES_PATH has no .git directory. Cannot start."
-  exit 1
+  log "No ANVIL_REPO_URL and no existing repo at $NOTES_PATH — initializing a local-only notes repo."
+  mkdir -p "$NOTES_PATH"
+  git config --global --add safe.directory "$NOTES_PATH" 2>/dev/null || true
+  git -C "$NOTES_PATH" init -q || {
+    log_err "Failed to initialize local notes repository at $NOTES_PATH"
+    exit 1
+  }
 fi
 
 # Step 2: Configure git for token-based auth if GITHUB_TOKEN is set
