@@ -1,0 +1,11 @@
+# Never copy host-installed deps or VCS/build cruft into image build contexts.
+# Images install their own deps and build their own dist in dedicated stages.
+**/node_modules
+node_modules
+.git
+.gitignore
+.claude
+.pnpm-store
+**/*.tsbuildinfo
+design-artifacts
+**/*.log

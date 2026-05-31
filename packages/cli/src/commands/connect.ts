@@ -108,10 +108,17 @@ export function buildStdioServers(
   wrapperPath: string,
   host: string,
 ): Record<string, StdioMcpServerEntry> {
+  const connectedMode = !!(config.control_plane_url && config.control_plane_url.trim());
+  const vaultUrl = connectedMode
+    ? `http://${host}:${config.ports.ui}/vault/mcp`
+    : `http://${host}:${config.ports.vault_mcp}/mcp`;
+  const forgeUrl = connectedMode
+    ? `http://${host}:${config.ports.ui}/forge/mcp`
+    : `http://${host}:${config.ports.forge}/mcp`;
   return {
     anvil: { command: wrapperPath, args: [`http://${host}:${config.ports.anvil}/mcp`, '--transport', 'http-only'] },
-    vault: { command: wrapperPath, args: [`http://${host}:${config.ports.vault_mcp}/mcp`, '--transport', 'http-only'] },
-    forge: { command: wrapperPath, args: [`http://${host}:${config.ports.forge}/mcp`, '--transport', 'http-only'] },
+    vault: { command: wrapperPath, args: [vaultUrl, '--transport', 'http-only'] },
+    forge: { command: wrapperPath, args: [forgeUrl, '--transport', 'http-only'] },
   };
 }
 
@@ -135,10 +142,18 @@ export function buildClaudeDesktopServers(
   const npxDir = npxPath === 'npx' ? '/usr/local/bin' : npxPath.substring(0, npxPath.lastIndexOf('/'));
   const envPath = `${npxDir}:/usr/local/bin:/usr/bin:/bin`;
 
+  const connectedMode = !!(config.control_plane_url && config.control_plane_url.trim());
+  const vaultUrl = connectedMode
+    ? `http://${host}:${config.ports.ui}/vault/mcp`
+    : `http://${host}:${config.ports.vault_mcp}/mcp`;
+  const forgeUrl = connectedMode
+    ? `http://${host}:${config.ports.ui}/forge/mcp`
+    : `http://${host}:${config.ports.forge}/mcp`;
+
   return {
     anvil: { command: npxPath, args: ['mcp-remote', `http://${host}:${config.ports.anvil}/mcp`], env: { PATH: envPath } },
-    vault: { command: npxPath, args: ['mcp-remote', `http://${host}:${config.ports.vault_mcp}/mcp`], env: { PATH: envPath } },
-    forge: { command: npxPath, args: ['mcp-remote', `http://${host}:${config.ports.forge}/mcp`], env: { PATH: envPath } },
+    vault: { command: npxPath, args: ['mcp-remote', vaultUrl], env: { PATH: envPath } },
+    forge: { command: npxPath, args: ['mcp-remote', forgeUrl], env: { PATH: envPath } },
   };
 }
 
@@ -269,12 +284,25 @@ export async function runConnect(
   targets: ClientTarget[],
   host: string = 'localhost',
 ): Promise<ClientTarget[]> {
-  // Build HTTP MCP config (used by all clients — Claude Desktop, Claude Code, Cursor)
-  const httpServers: Record<string, HttpMcpServerEntry> = {
-    anvil: { url: `http://${host}:${config.ports.anvil}/mcp` },
-    vault: { url: `http://${host}:${config.ports.vault_mcp}/mcp` },
-    forge: { url: `http://${host}:${config.ports.forge}/mcp` },
-  };
+  const connectedMode = !!(config.control_plane_url && config.control_plane_url.trim());
+
+  // Build HTTP MCP config (used by all clients — Claude Desktop, Claude Code, Cursor).
+  // In connected mode:
+  //   - anvil  stays local (local container, unchanged)
+  //   - vault  routes through horus-ui's connected-mode proxy at /vault/mcp
+  //   - forge  routes through horus-ui's in-process Forge at /forge/mcp
+  // In local-only mode, all three use their direct local container ports.
+  const httpServers: Record<string, HttpMcpServerEntry> = connectedMode
+    ? {
+        anvil: { url: `http://${host}:${config.ports.anvil}/mcp` },
+        vault: { url: `http://${host}:${config.ports.ui}/vault/mcp` },
+        forge: { url: `http://${host}:${config.ports.ui}/forge/mcp` },
+      }
+    : {
+        anvil: { url: `http://${host}:${config.ports.anvil}/mcp` },
+        vault: { url: `http://${host}:${config.ports.vault_mcp}/mcp` },
+        forge: { url: `http://${host}:${config.ports.forge}/mcp` },
+      };
 
   const configured: ClientTarget[] = [];
 
@@ -342,25 +370,37 @@ export async function runConnect(
 
   // Sync horus-core skills (only when claude-code is a target)
   if (targets.includes('claude-code')) {
-    const skillsSpinner = ora('Syncing horus-core skills...').start();
-    try {
-      await syncSkills(runtime);
-      skillsSpinner.succeed('horus-core skills synced to ~/.claude/skills/');
-    } catch (error) {
-      skillsSpinner.warn('Could not sync skills (Forge container may not be running)');
-      console.log(chalk.dim((error as Error).message));
+    if (connectedMode) {
+      // In connected mode the horus-forge-1 container does not exist locally.
+      // TODO: fetch skills via the control plane instead (skills API not yet available).
+      console.warn(chalk.yellow('[connect] Skipping skills sync — connected mode has no local forge container.'));
+      console.log(chalk.dim('         TODO: fetch skills via the control plane when the skills API is available.'));
+    } else {
+      const skillsSpinner = ora('Syncing horus-core skills...').start();
+      try {
+        await syncSkills(runtime);
+        skillsSpinner.succeed('horus-core skills synced to ~/.claude/skills/');
+      } catch (error) {
+        skillsSpinner.warn('Could not sync skills (Forge container may not be running)');
+        console.log(chalk.dim((error as Error).message));
+      }
     }
   }
 
   // Sync horus-core rules for Cursor
   if (targets.includes('cursor')) {
-    const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor...').start();
-    try {
-      await syncSkillsForCursor(runtime);
-      cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/ and skills to ~/.cursor/skills-cursor/');
-    } catch (error) {
-      cursorRulesSpinner.warn('Could not sync Cursor rules (Forge container may not be running)');
-      console.log(chalk.dim((error as Error).message));
+    if (connectedMode) {
+      // TODO: fetch skills via the control plane when the skills API is available.
+      console.warn(chalk.yellow('[connect] Skipping Cursor rules sync — connected mode has no local forge container.'));
+    } else {
+      const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor...').start();
+      try {
+        await syncSkillsForCursor(runtime);
+        cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/ and skills to ~/.cursor/skills-cursor/');
+      } catch (error) {
+        cursorRulesSpinner.warn('Could not sync Cursor rules (Forge container may not be running)');
+        console.log(chalk.dim((error as Error).message));
+      }
     }
   }
 

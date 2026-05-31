@@ -308,6 +308,12 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.99.0
         version: 0.99.0(zod@4.3.6)
+      '@forge/core':
+        specifier: workspace:*
+        version: link:../forge/packages/core
+      '@forge/mcp-server':
+        specifier: workspace:*
+        version: link:../forge/packages/mcp-server
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)

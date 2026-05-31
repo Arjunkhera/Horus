@@ -374,3 +374,87 @@ describe('mergeAndWriteConfig with stdio entries', () => {
     expect(written.mcpServers.anvil.command).toBe('/wrapper');
   });
 });
+
+// ── Connected-mode httpServers routing ────────────────────────────────────────
+
+describe('buildStdioServers — connected mode', () => {
+  const localConfig = {
+    ports: { anvil: 8100, vault_mcp: 8300, forge: 8200, ui: 8400 },
+    control_plane_url: '',
+  } as any;
+
+  const connectedConfig = {
+    ports: { anvil: 8100, vault_mcp: 8300, forge: 8200, ui: 8400 },
+    control_plane_url: 'https://horus.example.com',
+  } as any;
+
+  it('local-only mode: vault and forge use their own container ports', () => {
+    mockExistsSync.mockReturnValue(false);
+    const servers = buildStdioServers(localConfig, '/wrapper', 'localhost');
+    expect(servers.vault.args[0]).toBe('http://localhost:8300/mcp');
+    expect(servers.forge.args[0]).toBe('http://localhost:8200/mcp');
+    expect(servers.anvil.args[0]).toBe('http://localhost:8100/mcp');
+  });
+
+  it('connected mode: vault routes through horus-ui /vault/mcp', () => {
+    mockExistsSync.mockReturnValue(false);
+    const servers = buildStdioServers(connectedConfig, '/wrapper', 'localhost');
+    expect(servers.vault.args[0]).toBe('http://localhost:8400/vault/mcp');
+  });
+
+  it('connected mode: forge routes through horus-ui /forge/mcp', () => {
+    mockExistsSync.mockReturnValue(false);
+    const servers = buildStdioServers(connectedConfig, '/wrapper', 'localhost');
+    expect(servers.forge.args[0]).toBe('http://localhost:8400/forge/mcp');
+  });
+
+  it('connected mode: anvil stays on its own container port', () => {
+    mockExistsSync.mockReturnValue(false);
+    const servers = buildStdioServers(connectedConfig, '/wrapper', 'localhost');
+    expect(servers.anvil.args[0]).toBe('http://localhost:8100/mcp');
+  });
+
+  it('connected mode: custom host is respected', () => {
+    mockExistsSync.mockReturnValue(false);
+    const servers = buildStdioServers(connectedConfig, '/wrapper', '192.168.1.10');
+    expect(servers.vault.args[0]).toBe('http://192.168.1.10:8400/vault/mcp');
+    expect(servers.forge.args[0]).toBe('http://192.168.1.10:8400/forge/mcp');
+  });
+});
+
+describe('buildClaudeDesktopServers — connected mode', () => {
+  const connectedConfig = {
+    ports: { anvil: 8100, vault_mcp: 8300, forge: 8200, ui: 8400 },
+    control_plane_url: 'https://horus.example.com',
+  } as any;
+
+  const localConfig = {
+    ports: { anvil: 8100, vault_mcp: 8300, forge: 8200, ui: 8400 },
+    control_plane_url: '',
+  } as any;
+
+  it('connected mode: vault routes through horus-ui /vault/mcp', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    const servers = buildClaudeDesktopServers(connectedConfig, 'localhost');
+    expect(servers.vault.args[1]).toBe('http://localhost:8400/vault/mcp');
+  });
+
+  it('connected mode: forge routes through horus-ui /forge/mcp', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    const servers = buildClaudeDesktopServers(connectedConfig, 'localhost');
+    expect(servers.forge.args[1]).toBe('http://localhost:8400/forge/mcp');
+  });
+
+  it('connected mode: anvil stays local', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    const servers = buildClaudeDesktopServers(connectedConfig, 'localhost');
+    expect(servers.anvil.args[1]).toBe('http://localhost:8100/mcp');
+  });
+
+  it('local-only mode: all three use their own container ports', () => {
+    mockExistsSync.mockImplementation((p) => p === '/opt/homebrew/bin/npx');
+    const servers = buildClaudeDesktopServers(localConfig, 'localhost');
+    expect(servers.vault.args[1]).toBe('http://localhost:8300/mcp');
+    expect(servers.forge.args[1]).toBe('http://localhost:8200/mcp');
+  });
+});

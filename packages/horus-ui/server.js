@@ -16,6 +16,8 @@ import { listAnvilTools, callAnvilTool } from './mcp-config.js';
 import { getCachedHistory, setCachedHistory } from './agent-cache.js';
 import { buildSystemStatus } from './system-status.js';
 import { parseCitations } from './citation-parser.js';
+import { forgeMcpRouter } from './forge-local-mcp.js';
+import { getToken } from './token-provider.js';
 
 // The agent chat surface is gated, not fatal: without an Anthropic key the
 // server still serves the UI and proxies Anvil — only /api/ai/ask is disabled.
@@ -30,10 +32,59 @@ const ANVIL_PORT = process.env.ANVIL_PORT || '8100';
 const READER_STATIC = process.env.READER_STATIC || path.join(__dirname, '../horus-ui-client');
 
 const app = express();
-app.use(express.json());
+// Body parsing is applied PER-ROUTE, never globally. The /forge MCP router and
+// the /vault + /api proxies must receive the raw request stream: the MCP
+// StreamableHTTP transport reads the POST body itself, and the proxies stream
+// it through untouched. A global parser would drain the stream and silently
+// break every MCP tool call. Only horus-ui's own JSON routes use jsonParser.
+const jsonParser = express.json();
 
 // Health check
 app.get('/health', (_req, res) => res.send('ok'));
+
+// ── Forge MCP (in-process) ──────────────────────────────────────────────────
+// Mount the embedded Forge MCP engine. MCP endpoint: POST /forge/mcp
+// Health endpoint: GET /forge/health
+app.use('/forge', forgeMcpRouter);
+
+// ── Vault MCP proxy (connected mode only) ───────────────────────────────────
+// When HORUS_CONTROL_PLANE_URL is set, proxy /vault/mcp → control plane,
+// injecting the bearer token from the configured token provider.
+// Forge stays in-process in both modes.
+const CONTROL_PLANE_URL = (process.env.HORUS_CONTROL_PLANE_URL || '').trim();
+if (CONTROL_PLANE_URL) {
+  console.log(`[horus-ui] Connected mode: proxying /vault/mcp → ${CONTROL_PLANE_URL}/api/v1/vault/mcp`);
+  app.use(
+    '/vault',
+    createProxyMiddleware({
+      target: CONTROL_PLANE_URL,
+      changeOrigin: true,
+      pathRewrite: { '^/vault': '/api/v1/vault' },
+      on: {
+        proxyReq: (proxyReq) => {
+          const token = getToken();
+          if (token) {
+            proxyReq.setHeader('Authorization', `Bearer ${token}`);
+          }
+        },
+        error: (err, _req, res) => {
+          console.error('[horus-ui] Vault proxy error:', err.message);
+          if (!res.headersSent) {
+            res.status(502).json({ error: 'Vault proxy error', detail: err.message });
+          }
+        },
+      },
+    }),
+  );
+} else {
+  // Local-only mode: /vault/* returns 503 with a helpful message
+  app.use('/vault', (_req, res) => {
+    res.status(503).json({
+      error: 'Vault is not available in local-only mode.',
+      hint: 'Set HORUS_CONTROL_PLANE_URL to enable connected mode.',
+    });
+  });
+}
 
 // DELETE /api/notes/:id — must be registered before the proxy
 app.delete('/api/notes/:id', async (req, res) => {
@@ -62,7 +113,7 @@ app.delete('/api/notes/:id', async (req, res) => {
 });
 
 // PATCH /api/notes/:id — update note body; must be registered before the proxy
-app.patch('/api/notes/:id', async (req, res) => {
+app.patch('/api/notes/:id', jsonParser, async (req, res) => {
   const { id } = req.params;
   const body = req.body?.body;
   if (typeof body !== 'string') {
@@ -143,7 +194,7 @@ app.get('/api/system/status', async (_req, res) => {
 });
 
 // POST /api/ai/ask — NLP agent search with SSE streaming (Anthropic + Anvil MCP)
-app.post('/api/ai/ask', async (req, res) => {
+app.post('/api/ai/ask', jsonParser, async (req, res) => {
   const { question, agentId: reqAgentId } = req.body;
 
   if (!question) {

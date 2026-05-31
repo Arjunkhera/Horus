@@ -604,7 +604,8 @@ function buildServer(workspaceRoot: string): Server {
 
         case 'forge_add': {
           const { refs, workspaceId } = args as { refs: string[]; workspaceId: string };
-          const workspacePath = path.join('/data/workspaces', workspaceId);
+          const workspacesRoot = process.env.FORGE_WORKSPACES_PATH ?? '/data/workspaces';
+          const workspacePath = path.join(workspacesRoot, workspaceId);
           const forgeForWorkspace = new ForgeCore(workspacePath);
           const config = await forgeForWorkspace.add(refs);
           return {
@@ -625,7 +626,8 @@ function buildServer(workspaceRoot: string): Server {
 
         case 'forge_install': {
           const { workspaceId, target, dryRun } = (args ?? {}) as { workspaceId: string; target?: string; dryRun?: boolean };
-          const workspacePath = path.join('/data/workspaces', workspaceId);
+          const workspacesRoot = process.env.FORGE_WORKSPACES_PATH ?? '/data/workspaces';
+          const workspacePath = path.join(workspacesRoot, workspaceId);
           const forgeForWorkspace = new ForgeCore(workspacePath);
           const report = await forgeForWorkspace.install({ target: target as any, dryRun });
 
@@ -1343,6 +1345,8 @@ function buildServer(workspaceRoot: string): Server {
 }
 
 // ─── Stdio transport (original, for local/agent use) ───────────────────────
+
+export { buildServer };
 
 /**
  * Start the Forge MCP server on stdio transport.

@@ -148,8 +148,15 @@ const HORUS_UI_SERVICE = `\
       - HORUS_AGENT_MODEL=\${HORUS_AGENT_MODEL:-claude-sonnet-4-6}
       - ANVIL_HOST=anvil
       - ANVIL_PORT=8100
+      - FORGE_CONFIG_PATH=/horus/config
+      - FORGE_SESSIONS_ROOT=/horus/sessions
+      - FORGE_MANAGED_REPOS_PATH=/horus/repos
+      - FORGE_WORKSPACES_PATH=/horus/workspaces
     volumes:
       - \${HORUS_PROVIDERS_PATH}:/horus-providers:ro
+      - \${HORUS_DATA_PATH}/sessions:/horus/sessions:rw
+      - \${HORUS_DATA_PATH}/repos:/horus/repos:rw
+      - \${HORUS_DATA_PATH}/config:/horus/config:rw
     networks:
       - horus-net
     restart: unless-stopped
@@ -157,9 +164,9 @@ const HORUS_UI_SERVICE = `\
     deploy:
       resources:
         limits:
-          memory: 256m
+          memory: 512m
         reservations:
-          memory: 128m
+          memory: 256m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8400/health"]
       interval: 30s
