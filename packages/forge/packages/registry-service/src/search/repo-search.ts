@@ -43,6 +43,8 @@ const COLLECTION_SCHEMA = {
 interface TypesenseDocumentsHandle {
   upsert: (doc: Record<string, unknown>) => Promise<unknown>;
   search: (params: Record<string, unknown>) => Promise<TypesenseSearchResponse>;
+  // Typesense supports DELETE /collections/{c}/documents?filter_by=... returning { num_deleted }
+  delete: (params: { filter_by: string }) => Promise<{ num_deleted?: number } | unknown>;
 }
 
 interface TypesenseDocumentHandle {
@@ -185,11 +187,25 @@ export class RepoSearchClient {
 
   /**
    * Delete a repo document by org + name.
+   *
+   * Uses delete-by-filter instead of delete-by-id to avoid the Typesense URL
+   * encoding bug: doc ids are "{org}/{name}" and the Typesense JS client does
+   * NOT percent-encode the id before embedding it in the URL path, so the raw
+   * slash is parsed as a path separator → ObjectNotFound(404) even when the
+   * doc exists (bug b18ccd0e).  The filter_by path is naturally idempotent and
+   * sidesteps URL encoding entirely.
    */
   async remove(org: string, name: string): Promise<void> {
     await this.ensureCollection();
-    const docId = `${org}/${name}`;
-    await this.ts.collections(COLLECTION).documents(docId).delete();
+    try {
+      await this.ts
+        .collections(COLLECTION)
+        .documents()
+        .delete({ filter_by: `org:=${org} && name:=${name}` });
+    } catch {
+      // best-effort: tolerate a missing doc / transient Typesense error so
+      // DELETE /repos/:org/:name remains idempotent and always returns 204.
+    }
   }
 
   // ── Search ──────────────────────────────────────────────────────────────────

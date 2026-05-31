@@ -8,6 +8,8 @@
  *   4. resolveByName returns ambiguous when multiple orgs have same name
  *   5. resolveByUrl matches regardless of protocol/suffix
  *   6. rebuildFromStorage drops collection, recreates, indexes all
+ *   7. remove() uses filter_by delete (not id-path delete) — bug b18ccd0e
+ *   8. remove() is idempotent — does not throw when doc is absent
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -56,6 +58,7 @@ function makeTypesenseClient(opts: {
   _createSpy: ReturnType<typeof vi.fn>;
   _upsertSpy: ReturnType<typeof vi.fn>;
   _deleteSpy: ReturnType<typeof vi.fn>;
+  _filterDeleteSpy: ReturnType<typeof vi.fn>;
   _collectionDeleteSpy: ReturnType<typeof vi.fn>;
   _searchSpy: ReturnType<typeof vi.fn>;
 } {
@@ -67,7 +70,10 @@ function makeTypesenseClient(opts: {
 
   const createSpy = vi.fn().mockResolvedValue({});
   const upsertSpy = vi.fn().mockResolvedValue({});
+  // deleteSpy: simulates the OLD by-id path — documents(id).delete()
   const deleteSpy = vi.fn().mockResolvedValue({});
+  // filterDeleteSpy: simulates the NEW filter_by path — documents().delete({ filter_by })
+  const filterDeleteSpy = vi.fn().mockResolvedValue({ num_deleted: 1 });
   const collectionDeleteSpy = vi.fn().mockResolvedValue({});
 
   const searchSpy = vi.fn().mockImplementation((params: Record<string, unknown>) => {
@@ -96,9 +102,12 @@ function makeTypesenseClient(opts: {
     });
   });
 
+  // The stable no-arg documents handle now also exposes delete({ filter_by })
   const stableDocuments = {
     upsert: upsertSpy,
     search: searchSpy,
+    // filter_by delete — exposed on the no-arg documents() handle
+    delete: filterDeleteSpy,
   };
 
   // Per-collection handle — returned when collections('name') is called
@@ -138,6 +147,7 @@ function makeTypesenseClient(opts: {
     _createSpy: createSpy,
     _upsertSpy: upsertSpy,
     _deleteSpy: deleteSpy,
+    _filterDeleteSpy: filterDeleteSpy,
     _collectionDeleteSpy: collectionDeleteSpy,
     _searchSpy: searchSpy,
   };
@@ -460,5 +470,44 @@ describe('RepoSearchClient.rebuildFromStorage()', () => {
 
     expect(ts._collectionDeleteSpy).not.toHaveBeenCalled();
     expect(ts._createSpy).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 7 (regression b18ccd0e): remove() uses filter_by delete, not id-path
+// ---------------------------------------------------------------------------
+
+describe('RepoSearchClient.remove() — bug b18ccd0e regression', () => {
+  it('issues a filter_by delete (not a by-id-path delete) for repos with slash in id', async () => {
+    const { client, ts } = makeSearchClient({ collectionExists: true });
+
+    await client.remove('smoke-test', 'gateway-probe');
+
+    // The NEW implementation must call documents().delete({ filter_by: ... })
+    expect(ts._filterDeleteSpy).toHaveBeenCalledOnce();
+    const [params] = ts._filterDeleteSpy.mock.calls[0] as [{ filter_by: string }];
+    expect(params.filter_by).toBe('org:=smoke-test && name:=gateway-probe');
+
+    // The OLD by-id-path delete must NOT have been used
+    expect(ts._deleteSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when the doc is absent (idempotent remove)', async () => {
+    const ts = makeTypesenseClient({ collectionExists: true });
+    // Simulate Typesense returning 0 deleted docs — this is not an error
+    ts._filterDeleteSpy.mockResolvedValue({ num_deleted: 0 });
+    const client = new RepoSearchClient(ts as unknown as TypesenseClient);
+
+    // Must not throw even if nothing was deleted
+    await expect(client.remove('no-such-org', 'no-such-repo')).resolves.toBeUndefined();
+  });
+
+  it('does not throw when Typesense returns a transient error on remove', async () => {
+    const ts = makeTypesenseClient({ collectionExists: true });
+    ts._filterDeleteSpy.mockRejectedValue(new Error('Typesense unavailable'));
+    const client = new RepoSearchClient(ts as unknown as TypesenseClient);
+
+    // Must not throw — best-effort, DELETE route must stay 204
+    await expect(client.remove('acme', 'my-service')).resolves.toBeUndefined();
   });
 });

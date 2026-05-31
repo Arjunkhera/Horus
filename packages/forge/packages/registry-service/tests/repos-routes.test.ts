@@ -432,3 +432,46 @@ describe('Full CRUD lifecycle', () => {
     expect(get3.statusCode).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression b18ccd0e: DELETE must return 204 even if search layer throws
+// ---------------------------------------------------------------------------
+
+describe('DELETE /repos/:org/:name — bug b18ccd0e regression', () => {
+  it('returns 204 even when the search remove() throws (Typesense unavailable / doc missing)', async () => {
+    // A search stub whose remove() throws unconditionally — this simulates
+    // the old bug where documents(id).delete() threw ObjectNotFound(404)
+    // because the unencoded slash in "{org}/{name}" was parsed as a URL path
+    // separator by the Typesense server.
+    const throwingSearch: RepoSearchClient = {
+      ...makeRepoSearch(),
+      remove: vi.fn(async () => { throw new Error('ObjectNotFound: 404'); }),
+    } as unknown as RepoSearchClient;
+
+    const storage = makeRepoStorage([validMeta('org-a', 'repo-b')]);
+    const app = buildApp(storage, throwingSearch);
+    await app.ready();
+
+    const res = await app.inject({ method: 'DELETE', url: '/repos/org-a/repo-b' });
+
+    // With the OLD code (no try/catch in remove, propagates to Fastify) this
+    // would be 500.  With the fix (remove() absorbs errors, route stays clean)
+    // it must be 204.
+    expect(res.statusCode).toBe(204);
+
+    await app.close();
+  });
+
+  it('still calls remove() on the search client when a repo is deleted', async () => {
+    const search = makeRepoSearch();
+    const storage = makeRepoStorage([validMeta('acme', 'tracker')]);
+    const app = buildApp(storage, search);
+    await app.ready();
+
+    await app.inject({ method: 'DELETE', url: '/repos/acme/tracker' });
+
+    expect(search.remove).toHaveBeenCalledWith('acme', 'tracker');
+
+    await app.close();
+  });
+});
