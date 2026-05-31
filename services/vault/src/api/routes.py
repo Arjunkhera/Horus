@@ -102,16 +102,33 @@ router = APIRouter()
 
 def _resolve_id(page_id: str, registry) -> str:
     """
-    Resolve a page identifier to a file path.
+    Resolve a page identifier to a filesystem path (``pages/<uuid>.md``).
 
     If *page_id* looks like a UUID and a registry is available, resolve it
-    to the corresponding file path.  Otherwise return *page_id* unchanged
-    (assumed to already be a file path).
+    to the corresponding flat path.  Otherwise return *page_id* unchanged
+    (assumed to already be a flat/legacy path).
     """
     if registry and _UUID_RE.match(page_id):
         resolved = registry.resolve(page_id)
         if resolved:
             return resolved
+    return page_id
+
+
+def _resolve_id_to_uuid(page_id: str, registry) -> str:
+    """
+    Resolve a page identifier to its bare UUID (for graph/Neo4j calls).
+
+    If *page_id* is already a UUID, return it as-is.
+    If it is a file path, look it up in the registry to get the UUID.
+    Falls back to *page_id* unchanged when no UUID can be found.
+    """
+    if _UUID_RE.match(page_id):
+        return page_id
+    if registry:
+        uuid = registry.lookup(page_id)
+        if uuid:
+            return uuid
     return page_id
 
 
@@ -504,27 +521,31 @@ def _get_related_sync(request: GetRelatedRequest, store: SearchStore, graph=None
     parsed = parse_page(content)
     source_summary = to_page_summary(parsed, file_path)
 
+    # For graph queries: use the bare UUID (Neo4j page_id = UUID).
+    graph_page_id = _resolve_id_to_uuid(request.id, registry)
+
     related_pages_tuples: list[tuple] = []
 
     if graph is not None:
         try:
             results = graph.query(
                 """
-                MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r:DOCS|PART_OF|RELATED|DEPENDS_ON|CONSUMED_BY|APPLIES_TO]-(q:Page {vault_name: $vault_name})
+                MATCH (p:Page {page_id: $page_id, vault_name: $vault_name})-[r:DOCS|PART_OF|RELATED|DEPENDS_ON|CONSUMED_BY|APPLIES_TO|MENTIONS|REFERENCES]-(q:Page {vault_name: $vault_name})
                 RETURN DISTINCT q.page_id AS id
                 LIMIT 50
                 """,
-                {"page_id": file_path, "vault_name": vault_name}
+                {"page_id": graph_page_id, "vault_name": vault_name}
             )
             doc_cache = store.get_all_documents()
             for row in results:
-                related_path = row.get("id")
-                if not related_path:
+                related_uuid = row.get("id")
+                if not related_uuid:
                     continue
-                page_content = doc_cache.get(related_path) or store.get_document(related_path)
+                flat_path = f"pages/{related_uuid}.md" if _UUID_RE.match(related_uuid) else related_uuid
+                page_content = doc_cache.get(flat_path) or store.get_document(related_uuid)
                 if page_content:
                     rel_parsed = parse_page(page_content)
-                    related_pages_tuples.append((rel_parsed, related_path))
+                    related_pages_tuples.append((rel_parsed, flat_path))
         except Exception:
             logger.warning(
                 "Graph-based get-related failed for page '%s', falling back to link_navigator",
@@ -855,6 +876,8 @@ def _write_page_sync(
     resolver: Optional[VaultRepoResolver] = None,
     vault_namespace: str = "default",
     vault_git_repo: Optional[str] = None,
+    graph: Any = None,
+    store: Any = None,
 ) -> WritePageResponse:
     """Synchronous implementation of write-page."""
     import uuid as _uuid
@@ -923,19 +946,21 @@ def _write_page_sync(
             }
         )
 
-    # Strip collection prefix if caller passed the ID format (e.g. "shared/repos/foo.md")
-    path = request.path
-    for _prefix in ("shared/", "workspace/"):
-        if path.startswith(_prefix):
-            path = path[len(_prefix):]
-            break
+    # Flat-UUID storage: canonical on-disk path is pages/<uuid>.md.
+    # The request.path is now advisory only (kept for human context / PR title).
+    # We always write to the flat UUID path derived from frontmatter.
+    page_uuid = post.metadata.get("id")
+    flat_path = f"pages/{page_uuid}.md" if page_uuid else None
 
-    # Derive branch, commit_message, pr_title if not provided
-    branch_name = path.replace("/", "-").replace(".md", "").replace("_", "-")
-    branch = f"write-page-{branch_name}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    if flat_path is None:
+        raise internal_error("Page has no UUID after stamping — cannot derive flat path")
 
-    commit_message = request.commit_message or f"Add/update page: {path}"
-    pr_title = request.pr_title or f"Add/update knowledge page: {path}"
+    # Derive branch from UUID (short prefix) to avoid branch-name collisions.
+    short_uuid = page_uuid[:8] if page_uuid else "unknown"
+    branch = f"vault/write-{short_uuid}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    commit_message = request.commit_message or f"Add/update page: {flat_path}"
+    pr_title = request.pr_title or f"Add/update knowledge page: {flat_path}"
 
     writer = GitWriter(
         repo_path=repo_path,
@@ -946,7 +971,7 @@ def _write_page_sync(
     )
 
     pr_url, commit_sha = writer.write_page(
-        page_path=path,
+        page_path=flat_path,
         content=request.content,
         branch=branch,
         commit_message=commit_message,
@@ -956,21 +981,34 @@ def _write_page_sync(
 
     logger.info(
         "Page written and PR created: %s → %s",
-        request.path,
+        flat_path,
         pr_url,
         extra={"commit_sha": commit_sha}
     )
 
-    # Update UUID registry with the new/updated page (collection-prefixed path)
-    page_uuid = post.metadata.get("id")
+    # Update UUID registry: flat path is the canonical path.
     if registry and page_uuid:
-        registry.register(page_uuid, f"shared/{path}")
+        registry.register(page_uuid, flat_path)
+
+    # Wiki-link auto-edge extraction (Section B): scan body for [[...]] links
+    # and create MENTIONS edges in Neo4j.  Runs fire-and-forget — never blocks
+    # the write response.
+    if graph is not None and page_uuid and _GRAPH_EDGES_AVAILABLE:
+        try:
+            body_content = post.content  # markdown body without frontmatter
+            search_fn = (lambda q: store.search(q, limit=5)) if store else (lambda q: [])
+            _create_wiki_link_edges(
+                graph, page_uuid, body_content, registry, search_fn,
+                vault_name=vault_namespace,
+            )
+        except Exception as _wl_exc:
+            logger.warning("Wiki-link edge extraction failed for %s: %s", page_uuid, _wl_exc)
 
     return WritePageResponse(
         pr_url=pr_url,
         branch=branch,
         commit_sha=commit_sha,
-        path=path,
+        path=flat_path,
     )
 
 
@@ -979,7 +1017,9 @@ async def write_page(
     request: WritePageRequest,
     loader: SchemaLoaderDepends,
     settings: SettingsDepends,
+    store: StoreDepends,
     vault_ns: VaultNamespaceDepends,
+    graph: GraphDepends,
     vault_git_repo: VaultGitRepoDepends = None,
     registry: UUIDRegistryDepends = None,
     resolver: RepoResolverDepends = None,
@@ -990,18 +1030,19 @@ async def write_page(
 
     This completes the write-path pipeline:
     1. Validate page content against schema + registries
-    2. Derive branch, commit, and PR metadata
+    2. Derive flat-UUID branch and path (pages/<uuid>.md)
     3. Create feature branch
     4. Write page to disk and commit
     5. Push to GitHub
     6. Open PR
-    7. Return PR URL (human review gate)
+    7. Auto-extract wiki-links from body and create MENTIONS edges in Neo4j
+    8. Return PR URL (human review gate)
 
     Requires GitHub configuration (GITHUB_TOKEN, GITHUB_REPO).
     """
     return await asyncio.to_thread(
         _write_page_sync, request, loader, settings, registry,
-        resolver, vault_ns, vault_git_repo,
+        resolver, vault_ns, vault_git_repo, graph, store,
     )
 
 
@@ -1020,6 +1061,7 @@ try:
         get_edges as _get_edges,
         delete_edge as _delete_edge,
         traverse_graph as _traverse_graph,
+        create_wiki_link_edges as _create_wiki_link_edges,
     )
     _GRAPH_EDGES_AVAILABLE = True
 except ImportError:
@@ -1042,8 +1084,8 @@ def _graph_unavailable_response():
 
 def _create_edge_sync(request: CreateEdgeRequest, graph: Any, registry=None, vault_name: str = "default") -> EdgeResponse:
     """Synchronous implementation of POST /graph/edges."""
-    source_id = _resolve_id(request.source_id, registry)
-    target_id = _resolve_id(request.target_id, registry)
+    source_id = _resolve_id_to_uuid(request.source_id, registry)
+    target_id = _resolve_id_to_uuid(request.target_id, registry)
     edge_type = EdgeType.from_str(request.edge_type)
     props = EdgeProperties(
         mechanism=request.properties.mechanism,
@@ -1078,18 +1120,28 @@ async def create_graph_edge(request: CreateEdgeRequest, graph: GraphDepends, vau
 
 
 def _get_edges_sync(request: GetEdgesRequest, graph: Any, registry=None, vault_name: str = "default") -> GetEdgesResponse:
-    """Synchronous implementation of POST /graph/edges/get."""
-    page_id = _resolve_id(request.page_id, registry)
+    """Synchronous implementation of POST /graph/edges/get.
+
+    Returns edges with direction (outgoing|incoming) and display_label
+    (inverse label for incoming directional edges).
+    """
+    page_id = _resolve_id_to_uuid(request.page_id, registry)
     edge_type: "EdgeType | None" = None
     if request.edge_type:
         edge_type = EdgeType.from_str(request.edge_type)
     raw_edges = _get_edges(graph, page_id, edge_type, vault_name=vault_name)
     edges = [
         EdgeResponse(
-            source_id=page_id,
-            target_id=e["target_id"],
+            # For outgoing: source=page_id, target=other_id
+            # For incoming: source=other_id, target=page_id (shows the actual edge direction)
+            source_id=page_id if e.get("direction") == "outgoing" else e["other_id"],
+            target_id=e["other_id"] if e.get("direction") == "outgoing" else page_id,
             edge_type=e["edge_type"],
-            properties=e.get("properties", {}),
+            properties={
+                **e.get("properties", {}),
+                "direction": e.get("direction", "outgoing"),
+                "display_label": e.get("display_label", e["edge_type"]),
+            },
         )
         for e in raw_edges
     ]
@@ -1111,8 +1163,8 @@ async def get_graph_edges(request: GetEdgesRequest, graph: GraphDepends, vault_n
 
 def _delete_edge_sync(request: DeleteEdgeRequest, graph: Any, registry=None, vault_name: str = "default") -> dict:
     """Synchronous implementation of POST /graph/edges/delete."""
-    source_id = _resolve_id(request.source_id, registry)
-    target_id = _resolve_id(request.target_id, registry)
+    source_id = _resolve_id_to_uuid(request.source_id, registry)
+    target_id = _resolve_id_to_uuid(request.target_id, registry)
     edge_type = EdgeType.from_str(request.edge_type)
     _delete_edge(graph, source_id, target_id, edge_type, vault_name=vault_name)
     return {"deleted": True, "source_id": source_id, "target_id": target_id, "edge_type": edge_type.value}
@@ -1132,7 +1184,7 @@ async def delete_graph_edge(request: DeleteEdgeRequest, graph: GraphDepends, vau
 
 def _traverse_graph_sync(request: TraverseGraphRequest, graph: Any, registry=None, vault_name: str = "default") -> TraverseGraphResponse:
     """Synchronous implementation of POST /graph/traverse."""
-    start_id = _resolve_id(request.start_page_id, registry)
+    start_id = _resolve_id_to_uuid(request.start_page_id, registry)
     edge_types: "list[EdgeType] | None" = None
     if request.edge_types:
         edge_types = [EdgeType.from_str(et) for et in request.edge_types]

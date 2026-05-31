@@ -48,10 +48,19 @@ class UUIDRegistry:
         """
         Scan all .md files and populate both maps.  Existing entries are replaced.
 
-        If *collection_paths* is provided (e.g. ``{"shared": "/data/knowledge-repo"}``),
-        paths are stored with the collection prefix (``shared/repos/horus.md``) so they
-        match what ``SearchStore.get_document()`` expects.  Otherwise falls back to
-        scanning *knowledge_repo_path* under a ``"shared"`` prefix.
+        Flat-UUID redesign: paths are stored as ``pages/<uuid>.md`` (the canonical
+        flat path) regardless of where on disk the file lives.  This matches what
+        ``TypesenseSearchEngine.get_document()`` and ``_build_document()`` expect.
+
+        Legacy behaviour (collection-prefixed paths like ``shared/repos/horus.md``)
+        is preserved as a *secondary* alias so callers that still pass old paths can
+        still resolve them until fully migrated.
+
+        Args:
+            knowledge_repo_path: Root path of the knowledge repo (used when
+                collection_paths is None).
+            collection_paths: Optional explicit map of collection → root.  When
+                provided, all roots are scanned.
         """
         self._uuid_to_path.clear()
         self._path_to_uuid.clear()
@@ -78,15 +87,23 @@ class UUIDRegistry:
                 try:
                     content = md_file.read_text(encoding="utf-8")
                     parsed = parse_page(content)
-                    rel_path = f"{collection_name}/{md_file.relative_to(base)}"
+                    rel = str(md_file.relative_to(base))
 
                     if not parsed.id:
                         skipped += 1
-                        logger.warning("Page has no id, skipping: %s", rel_path)
+                        legacy_path = f"{collection_name}/{rel}"
+                        logger.warning("Page has no id, skipping: %s", legacy_path)
                         continue
 
-                    self._uuid_to_path[parsed.id] = rel_path
-                    self._path_to_uuid[rel_path] = parsed.id
+                    # Canonical flat path: pages/<uuid>.md
+                    flat_path = f"pages/{parsed.id}.md"
+                    self._uuid_to_path[parsed.id] = flat_path
+                    self._path_to_uuid[flat_path] = parsed.id
+
+                    # Register legacy path as alias so old callers still resolve.
+                    legacy_path = f"{collection_name}/{rel}"
+                    if legacy_path != flat_path:
+                        self._path_to_uuid[legacy_path] = parsed.id
 
                 except Exception as exc:
                     skipped += 1

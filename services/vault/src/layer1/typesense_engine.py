@@ -26,7 +26,27 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_COLLECTION = "horus_documents"
 SOURCE = "vault"
-BODY_MAX_CHARS = 20_000
+# BODY_MAX_CHARS removed: full body is indexed (flat-UUID redesign).
+# The [:200] slices in search/filter_search results are kept — those are
+# display snippets, not the indexed field.
+
+_UUID_RE_SIMPLE = __import__("re").compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    __import__("re").IGNORECASE,
+)
+
+
+def _uuid_to_flat_path(doc_id: str) -> str:
+    """
+    Convert a Typesense document id to a filesystem-relative path.
+
+    Flat-UUID design: if doc_id is a bare UUID, return ``pages/<uuid>.md``.
+    Otherwise return doc_id unchanged (legacy collection-prefixed path, or
+    paths that arrived before the migration).
+    """
+    if doc_id and _UUID_RE_SIMPLE.match(doc_id):
+        return f"pages/{doc_id}.md"
+    return doc_id
 
 
 def _get_ts_client() -> Any:
@@ -115,12 +135,27 @@ class TypesenseSearchEngine(SearchStore):
         """
         Build the Typesense document dict for a parsed page.
 
+        Flat-UUID redesign:
+        - ``id`` is the bare frontmatter UUID (not a collection-prefixed path).
+          ``file_path`` is still accepted for callers that pass the resolved path,
+          but the UUID from frontmatter takes precedence.
+        - ``page_uuid`` is kept equal to ``id`` for backward compatibility with
+          any consumers that read it directly.
+        - Full body is indexed (no BODY_MAX_CHARS truncation).
+
         Args:
-            file_path: Collection-prefixed path (e.g. "shared/repos/horus.md")
+            file_path: Resolved filesystem path (used only as fallback when no UUID
+                       is present in frontmatter).
             parsed: ParsedPage object from layer2.frontmatter.parse_page
         """
         scope = parsed.scope or {}
-        body = (parsed.body or "")[:BODY_MAX_CHARS]
+        # Index the full body — no truncation.
+        body = parsed.body or ""
+
+        # Bare UUID is the canonical Typesense id.
+        # Fall back to file_path only for legacy pages that somehow have no id.
+        page_uuid = getattr(parsed, "id", "") or ""
+        doc_id = page_uuid if page_uuid else file_path
 
         # Timestamps — use current time as fallback
         now = int(time.time())
@@ -137,8 +172,9 @@ class TypesenseSearchEngine(SearchStore):
                 pass
 
         doc: dict = {
-            "id": file_path,
-            "page_uuid": getattr(parsed, "id", "") or "",
+            "id": doc_id,
+            # Keep page_uuid equal to id for backward compatibility.
+            "page_uuid": doc_id,
             "source": SOURCE,
             "source_type": parsed.type or "concept",
             "title": parsed.title or "Untitled",
@@ -181,6 +217,9 @@ class TypesenseSearchEngine(SearchStore):
         """
         Parse content and upsert a single document into Typesense.
 
+        Flat-UUID: the parsed frontmatter UUID becomes the Typesense id.
+        ``file_path`` is used only as a fallback when no UUID is present.
+
         Fire-and-forget: failures are logged but never raised.
         """
         try:
@@ -192,35 +231,37 @@ class TypesenseSearchEngine(SearchStore):
             logger.warning("upsert_document failed for '%s': %s", file_path, exc)
 
     def delete_document(self, file_path: str) -> None:
-        """
-        Delete a single document from Typesense.
-
-        Fire-and-forget: failures are logged but never raised.
-        """
-        self._delete_raw(file_path)
+        """Delete a document from Typesense. Resolves flat/UUID ids to the bare UUID
+        (the Typesense doc id); legacy paths are passed through best-effort."""
+        doc_id = file_path
+        if file_path and _UUID_RE_SIMPLE.match(file_path):
+            doc_id = file_path
+        elif file_path and file_path.startswith("pages/") and file_path.endswith(".md"):
+            doc_id = file_path[len("pages/"):-len(".md")]
+        self._delete_raw(doc_id)
 
     # ------------------------------------------------------------------
     # SearchStore interface — search methods
     # ------------------------------------------------------------------
 
     def search(self, query: str, collection: Optional[str] = None, limit: int = 10) -> list[SearchResult]:
-        """BM25 keyword search via Typesense, filtered to source=vault."""
+        """BM25 keyword search via Typesense, filtered to source=vault.
+
+        Flat-UUID redesign: doc ``id`` is a bare UUID.  ``file_path`` on the
+        returned SearchResult is set to ``pages/<uuid>.md`` so that callers can
+        resolve the page via the filesystem store root without a collection prefix.
+        The ``id`` field on SearchResult carries the same UUID for direct identity.
+        """
         try:
             filter_by = f"source:={SOURCE}"
-            if collection:
-                # map collection name to a file_path prefix filter using Typesense's
-                # built-in prefix matching (not natively supported, so we use a tag
-                # approach via the document ID prefix match workaround — instead we
-                # just pass collection as an extra filter that we store in tags at
-                # index time).  For now, rely on post-filter since Typesense doesn't
-                # support startsWith on string fields in free-text filter_by.
-                pass  # collection filtering handled post-result below
+            # Collection filtering is no longer meaningful with bare-UUID ids.
+            # We keep the parameter for API compatibility but ignore it for now.
 
             params: dict[str, Any] = {
                 "q": query or "*",
                 "query_by": "title,body,tags,aliases",
                 "filter_by": filter_by,
-                "per_page": limit if not collection else limit * 3,
+                "per_page": limit,
                 "sort_by": "_text_match:desc",
             }
 
@@ -230,11 +271,10 @@ class TypesenseSearchEngine(SearchStore):
             results: list[SearchResult] = []
             for hit in hits:
                 doc = hit.get("document", {})
-                fp = doc.get("id", "")
+                doc_id = doc.get("id", "")
 
-                # Apply collection prefix filter post-search
-                if collection and not fp.startswith(f"{collection}/"):
-                    continue
+                # Resolve bare UUID to flat path for filesystem consumers.
+                fp = _uuid_to_flat_path(doc_id)
 
                 text_score = hit.get("text_match", 0)
                 # Normalise to 0-1
@@ -255,8 +295,9 @@ class TypesenseSearchEngine(SearchStore):
                         file_path=fp,
                         score=score,
                         snippet=snippet,
-                        collection=fp.split("/")[0] if "/" in fp else "",
-                        id=doc.get("page_uuid") or None,
+                        collection="",
+                        id=doc_id if doc_id else None,
+                        title=doc.get("title") or None,
                     )
                 )
                 if len(results) >= limit:
@@ -296,14 +337,16 @@ class TypesenseSearchEngine(SearchStore):
             results: list[SearchResult] = []
             for hit in hits:
                 doc = hit.get("document", {})
-                fp = doc.get("id", "")
+                doc_id = doc.get("id", "")
+                fp = _uuid_to_flat_path(doc_id)
                 results.append(
                     SearchResult(
                         file_path=fp,
                         score=1.0,
                         snippet=(doc.get("body") or "")[:200],
-                        collection=fp.split("/")[0] if "/" in fp else "",
-                        id=doc.get("page_uuid") or None,
+                        collection="",
+                        id=doc_id if doc_id else None,
+                        title=doc.get("title") or None,
                     )
                 )
             return results
@@ -317,7 +360,33 @@ class TypesenseSearchEngine(SearchStore):
     # ------------------------------------------------------------------
 
     def get_document(self, file_path: str) -> Optional[str]:
-        """Retrieve document content from the filesystem."""
+        """Retrieve document content from the filesystem.
+
+        Flat-UUID redesign: ``file_path`` may be any of:
+        - ``pages/<uuid>.md`` — flat UUID path; resolved against the single store root
+          (first collection_path that exists).
+        - ``<uuid>`` (bare UUID, no extension) — also resolved as ``pages/<uuid>.md``.
+        - Legacy ``<collection>/<relative>`` path — resolved via the old collection map.
+        """
+        if not file_path:
+            return None
+
+        # Bare UUID: convert to flat path first.
+        if _UUID_RE_SIMPLE.match(file_path):
+            file_path = f"pages/{file_path}.md"
+
+        # Flat path starting with "pages/": resolve against single (first) store root.
+        if file_path.startswith("pages/"):
+            for root_path in self._collection_paths.values():
+                candidate = Path(root_path) / file_path
+                if candidate.exists():
+                    try:
+                        return candidate.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        return None
+            return None
+
+        # Legacy collection-prefixed path (e.g. "shared/repos/horus.md").
         parts = file_path.split("/", 1)
         if len(parts) != 2:
             return None
@@ -331,8 +400,15 @@ class TypesenseSearchEngine(SearchStore):
             return None
 
     def get_documents_by_glob(self, pattern: str) -> list[Document]:
-        """Retrieve documents from the filesystem matching a glob pattern."""
+        """Retrieve documents from the filesystem matching a glob pattern.
+
+        Flat-UUID redesign: for each root, pages under ``pages/`` are exposed with
+        their flat path (``pages/<uuid>.md``) as the file_path key.  Legacy pages
+        under other subdirectories still use the collection-prefixed key for
+        backward compatibility with callers that do not yet expect flat paths.
+        """
         documents: list[Document] = []
+        seen_paths: set[str] = set()
         for coll_name, root_path in self._collection_paths.items():
             root = Path(root_path)
             if not root.exists():
@@ -340,10 +416,18 @@ class TypesenseSearchEngine(SearchStore):
             for match in root.glob(pattern):
                 try:
                     relative = str(match.relative_to(root))
+                    # Use flat path for pages/ directory; legacy prefix for others.
+                    if relative.startswith("pages/") or relative.startswith("pages\\"):
+                        fp = relative  # e.g. "pages/<uuid>.md"
+                    else:
+                        fp = f"{coll_name}/{relative}"
+                    if fp in seen_paths:
+                        continue
+                    seen_paths.add(fp)
                     content = match.read_text(encoding="utf-8")
                     documents.append(
                         Document(
-                            file_path=f"{coll_name}/{relative}",
+                            file_path=fp,
                             content=content,
                             collection=coll_name,
                         )
@@ -379,8 +463,9 @@ class TypesenseSearchEngine(SearchStore):
                 resp = self._collection().documents.search(params)
                 hits = resp.get("hits", [])
                 for hit in hits:
-                    fp = hit.get("document", {}).get("id", "")
-                    if fp and (not collection or fp.startswith(f"{collection}/")):
+                    doc_id = hit.get("document", {}).get("id", "")
+                    if doc_id:
+                        fp = _uuid_to_flat_path(doc_id)
                         all_ids.append(fp)
                 if len(hits) < per_page:
                     break
@@ -421,6 +506,10 @@ class TypesenseSearchEngine(SearchStore):
         count = 0
         errors = 0
 
+        # Track indexed UUIDs to avoid double-indexing when the same root appears
+        # under multiple collection_paths keys.
+        indexed_uuids: set[str] = set()
+
         for coll_name, root_path in self._collection_paths.items():
             root = Path(root_path)
             if not root.exists():
@@ -434,7 +523,19 @@ class TypesenseSearchEngine(SearchStore):
                     content = md_file.read_text(encoding="utf-8")
                     parsed = parse_page(content)
                     relative = str(md_file.relative_to(root))
-                    file_path = f"{coll_name}/{relative}"
+                    # Flat-UUID: use pages/<uuid>.md if in pages/ dir; otherwise
+                    # derive flat path from frontmatter UUID when available.
+                    if relative.startswith("pages/") or relative.startswith("pages\\"):
+                        file_path = relative  # already flat
+                    elif parsed.id:
+                        file_path = f"pages/{parsed.id}.md"
+                    else:
+                        file_path = f"{coll_name}/{relative}"
+                    # Skip duplicates (same UUID seen via a different collection root)
+                    if parsed.id:
+                        if parsed.id in indexed_uuids:
+                            continue
+                        indexed_uuids.add(parsed.id)
                     doc = self._build_document(file_path, parsed)
                     self._upsert_raw(doc)
                     count += 1
