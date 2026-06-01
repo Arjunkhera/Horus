@@ -25,7 +25,19 @@ import {
 import { collectionCreateBody } from '@horus/search';
 
 export interface KubernetesVaultInfraConfig {
+  /**
+   * Static GitHub token (env-var snapshot). Used as the fallback when
+   * githubTokenPath is unset or its file cannot be read. Captured once at
+   * construction, so it does NOT reflect Secret rotations on its own.
+   */
   githubToken: string;
+  /**
+   * Path to a file containing the GitHub token, mounted from the Secret.
+   * When set, the token is read fresh from this file on every GitHub request
+   * so a rotated Secret (hot-reloaded by Kubernetes into the mounted file)
+   * takes effect without a pod restart.
+   */
+  githubTokenPath?: string;
   githubOwner: string;
   typesenseUrl: string;
   typesenseApiKey: string;
@@ -413,9 +425,29 @@ export class KubernetesVaultInfra implements VaultInfra {
 
   // ── Header builders ───────────────────────────────────────────────────────
 
+  /**
+   * Resolves the GitHub token at call time. When githubTokenPath is configured,
+   * the file is read fresh on every call so a rotated Secret — which Kubernetes
+   * hot-reloads into the mounted file — takes effect without a pod restart. Env
+   * vars do NOT hot-reload, which previously caused vault_create to fail with
+   * GitHub "401 Bad credentials" until the pod was manually restarted. Falls
+   * back to the static env-var snapshot if no file is configured or the read
+   * fails (e.g. the volume is not yet mounted).
+   */
+  private resolveGithubToken(): string {
+    if (this.config.githubTokenPath) {
+      try {
+        return readFileSync(this.config.githubTokenPath, 'utf8').trim();
+      } catch {
+        // Fall through to the static token.
+      }
+    }
+    return this.config.githubToken;
+  }
+
   private githubHeaders(): Record<string, string> {
     return {
-      authorization: `Bearer ${this.config.githubToken}`,
+      authorization: `Bearer ${this.resolveGithubToken()}`,
       accept: 'application/vnd.github+json',
       'content-type': 'application/json',
       'x-github-api-version': '2022-11-28',
@@ -454,6 +486,7 @@ export function createKubernetesVaultInfra(): KubernetesVaultInfra | null {
 
   return new KubernetesVaultInfra({
     githubToken: process.env.GITHUB_TOKEN ?? '',
+    githubTokenPath: process.env.GITHUB_TOKEN_FILE,
     githubOwner: process.env.GITHUB_OWNER ?? '',
     typesenseUrl: process.env.TYPESENSE_URL ?? 'http://typesense:8108',
     typesenseApiKey: process.env.TYPESENSE_API_KEY ?? '',
