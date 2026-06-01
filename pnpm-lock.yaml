@@ -317,9 +317,6 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
-      '@vault/knowledge-mcp':
-        specifier: workspace:*
-        version: link:../vault-mcp
       express:
         specifier: ^4.18.2
         version: 4.22.1

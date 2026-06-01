@@ -3,11 +3,6 @@
   "version": "0.2.0",
   "description": "MCP thin client for Vault Knowledge Service",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": "./dist/index.js"
-  },
   "bin": {
     "knowledge-mcp": "./dist/index.js"
   },
