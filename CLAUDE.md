@@ -27,43 +27,45 @@ This repo ships three thin-pointer skills under `.claude/skills/<name>/SKILL.md`
 | Trigger | Skill | What it does |
 |---|---|---|
 | User asks to edit `docker-compose.yml`, the workspace-generated compose file, or any file under a source-repo path; agent unsure where a fix belongs | **horus-where-do-edits-go** | Names the three locations (workspace, source repo, session) and routes the change to the right one. |
-| User asks for a CLI release, version bump, or `npm publish` of `@arkhera30/cli` | **horus-cli-release-gate** | Walks the CLI release procedure: bump → build → test → publish → tag → verify. References `shared/procedures/horus-release.md`. |
+| User asks for a CLI release, version bump, or `npm publish` of `@arkhera30/cli` | **horus-cli-release-gate** | Walks the CLI release procedure: bump → build → test → publish → tag → verify. References `procedures/horus-release.md` in the `vault-code` vault. |
 | User asks to add a new MCP tool to Anvil, Forge, or Vault MCP | **horus-mcp-tool-add** | Names the registration file, schema location, and test pattern for each MCP server. References per-package guides. |
 | User asks to add a new Anvil type to the Reader, fix a Reader UI bug, add a page or route, change Reader styling, or make any edit to `packages/horus-ui-client/` | **horus-reader-dev** | Covers the no-bundler architecture, script load order, type display system (`TYPE_ORDER` + `activeTypes`), CSS type color recipe, and `forge_develop` workflow for the Reader. |
 | User asks to deploy, redeploy, troubleshoot, or operate the Forge Remote Registry; mentions terraform, EC2, CloudFront, registry infrastructure | **forge-registry-ops** | Architecture quick ref, script inventory, critical gotchas, Vault page links for full procedures. |
 
 ## Always Load (Vault Pages)
 
-Before working on this repo, load context from Vault. These pages are the authoritative documentation:
+Before working on this repo, load context from the **`vault-code`** remote vault. These pages are the authoritative documentation.
 
-| Page | What it covers |
-|------|---------------|
-| `shared/repos/horus.md` | Repo structure, tech stack, all packages, Docker services, CI |
-| `shared/concepts/horus-package-architecture.md` | How packages depend on each other, network call graph, shared infrastructure |
-| `shared/guides/horus-development-workflow.md` | Build, test, deploy workflow |
-| `shared/procedures/horus-release.md` | Release procedure for service images (CI) and CLI (npm) |
-| `procedures/forge-registry-deploy.md` | Full deployment procedure: Docker build, Terraform, EC2 bootstrap, smoke test |
-| `concepts/forge-registry-architecture.md` | AWS infrastructure architecture: EC2, CloudFront, S3, WAF, IAM, CloudWatch |
-| `learnings/forge-registry-deploy-gotchas.md` | 9 deployment pitfalls (AL2023, pnpm v11, Typesense, S3 creds) |
+**Reference pages by UUID, not logical path.** Path-based `get-page` currently 404s for non-default vaults (the writer's `uuid_registry` is built from the default repo only); UUID lookups and `search`/`list-by-scope` work. To load a page:
+
+```
+knowledge_get_page({ id: "<uuid>", vault: "vault-code" })
+```
+
+| Page | UUID | What it covers |
+|------|------|---------------|
+| `repos/horus.md` | `6a4a6a28-112e-466c-bc62-0e5d72742590` | Repo structure, tech stack, all packages, Docker services, CI |
+| `concepts/horus-package-architecture.md` | `7ee9e308-58d9-4e35-9f09-48bc14a1d6fd` | How packages depend on each other, network call graph, shared infrastructure |
+| `guides/horus-development-workflow.md` | `51b4d3ec-f320-4d23-a2d7-2f618bbf1df1` | Build, test, deploy workflow |
+| `procedures/horus-release.md` | `b1e44388-d2ba-4599-9dae-192229928e4b` | Release procedure for service images (CI) and CLI (npm) |
+| `concepts/forge-registry-architecture.md` | `96e3921f-2579-4fc1-8bb9-bfe4f5f7d9e2` | Forge Remote Registry AWS infra: EC2, CloudFront, S3, WAF, IAM — architecture, deploy procedure, and known gotchas |
 
 Load a specific package guide when working on that package:
 
-| Package | Guide |
-|---------|-------|
-| `packages/anvil` | `shared/guides/horus-anvil-package.md` |
-| `packages/forge` | `shared/guides/horus-forge-package.md` (V1) + `shared/guides/horus-forge-v2.md` (V2 distributed registry) |
-| `services/vault` | `shared/guides/horus-vault-service.md` |
-| `services/vault-router` | `shared/guides/horus-vault-router.md` |
-| `packages/vault-mcp` | `shared/guides/horus-vault-mcp.md` |
-| `packages/cli` | `shared/guides/horus-cli-package.md` |
-| `packages/search` | `shared/guides/horus-search-package.md` |
-| `packages/horus-ui` (Express server) | `shared/guides/horus-ui-package.md` |
-| `packages/horus-ui-client` (SPA) | `shared/guides/horus-reader-development.md` |
-| Anvil graph layer | `shared/concepts/horus-anvil-graph.md` |
-| `packages/forge/packages/registry-service` | `procedures/forge-registry-deploy.md` + `concepts/forge-registry-architecture.md` |
-| Personal task / PKM | `shared/guides/horus-pkm.md` |
-
-To load a page: `knowledge_get_page({ id: "<page-id>" })` — accepts UUID or file path.
+| Package | Guide | UUID |
+|---------|-------|------|
+| `packages/anvil` | `guides/horus-anvil-package.md` | `98cd92a6-d594-468e-b766-491d395ed633` |
+| `packages/forge` | `guides/horus-forge-package.md` | `15fd5928-f5ef-47b9-9ba6-8bb941c75c47` |
+| `services/vault` | `guides/horus-vault-service.md` | `e9771923-9899-4e12-a545-3451a71485d9` |
+| `services/vault-router` | `guides/horus-vault-router.md` | `a692f9cb-8e44-4265-9a1c-257f23dd1b8f` |
+| `packages/vault-mcp` | `guides/horus-vault-mcp.md` | `1507fa6a-3f1c-4977-875e-87115a4ad19b` |
+| `packages/cli` | `guides/horus-cli-package.md` | `90fed637-ce3d-481f-aa4f-5ae10ead795b` |
+| `packages/search` | `guides/horus-search-package.md` | `1ea393a4-bad4-4b9d-b4ff-4ae823356852` |
+| `packages/horus-ui` (Express server) | `guides/horus-ui-package.md` | `037eaead-4c64-4ce9-96c9-99411d311c01` |
+| `packages/horus-ui-client` (SPA) | `guides/horus-reader-development.md` | `3f4f20fd-5c2d-4ae7-9bc8-fa6421037005` |
+| Anvil graph layer | `concepts/horus-anvil-graph.md` | `44a325bf-6988-4600-a332-586d18e9e6bd` |
+| `packages/forge/packages/registry-service` | `concepts/forge-registry-architecture.md` | `96e3921f-2579-4fc1-8bb9-bfe4f5f7d9e2` |
+| Personal task / PKM | `guides/horus-pkm.md` | `073489a2-3622-446f-90cd-ba4560961e96` |
 
 ## Concept → Location reverse index
 
@@ -151,4 +153,4 @@ cd services/vault && pytest                   # Vault (Python)
 cd packages/cli && pnpm build && pnpm test && npm publish  # CLI release
 ```
 
-For deeper guidance, load `shared/guides/horus-development-workflow.md`.
+For deeper guidance, load `guides/horus-development-workflow.md` (`knowledge_get_page({ id: "51b4d3ec-f320-4d23-a2d7-2f618bbf1df1", vault: "vault-code" })`).

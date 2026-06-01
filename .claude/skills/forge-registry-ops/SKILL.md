@@ -57,18 +57,20 @@ S3 ← artifact storage (OAC for reads, IAM user for writes)
 
 ## Vault Documentation
 
-Always consult these Vault pages for detailed procedures and architecture:
+Always consult this Vault page (in the **`vault-code`** vault) for detailed procedures and architecture. Reference by UUID — path-based lookups 404 for non-default vaults:
 
-| Page | Content |
-|------|---------|
-| `procedures/forge-registry-deploy.md` | Full step-by-step deployment procedure |
-| `concepts/forge-registry-architecture.md` | Infrastructure architecture + design decisions |
-| `learnings/forge-registry-deploy-gotchas.md` | Known pitfalls (AL2023, pnpm, Typesense, S3 creds) |
+| Page | UUID | Content |
+|------|------|---------|
+| `concepts/forge-registry-architecture.md` | `96e3921f-2579-4fc1-8bb9-bfe4f5f7d9e2` | Infrastructure architecture + design decisions, the full deploy procedure, and known gotchas (AL2023, pnpm, Typesense, S3 creds) |
+
+```
+knowledge_get_page({ id: "96e3921f-2579-4fc1-8bb9-bfe4f5f7d9e2", vault: "vault-code" })
+```
 
 Load context:
 ```
-knowledge_resolve_context(repo: "horus")
-knowledge_search(query: "forge registry deploy", scope: { program: "horus" })
+knowledge_resolve_context({ repo: "horus", vault: "vault-code" })
+knowledge_search({ query: "forge registry deploy", vault: "vault-code" })
 ```
 
 ## Available Scripts

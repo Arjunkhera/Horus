@@ -115,6 +115,8 @@ Service images update on next `horus up` after CI completes.
 
 ## Background reading
 
-- Vault page: `shared/procedures/horus-release.md` — full release procedure (both channels)
-- Vault page: `shared/guides/horus-cli-package.md` — CLI internals
-- Vault page: `shared/guides/horus-development-workflow.md` — overall dev/deploy flow
+Load from the **`vault-code`** vault by UUID (path-based lookups 404 for non-default vaults): `knowledge_get_page({ id: "<uuid>", vault: "vault-code" })`.
+
+- `procedures/horus-release.md` (`b1e44388-d2ba-4599-9dae-192229928e4b`) — full release procedure (both channels)
+- `guides/horus-cli-package.md` (`90fed637-ce3d-481f-aa4f-5ae10ead795b`) — CLI internals
+- `guides/horus-development-workflow.md` (`51b4d3ec-f320-4d23-a2d7-2f618bbf1df1`) — overall dev/deploy flow
