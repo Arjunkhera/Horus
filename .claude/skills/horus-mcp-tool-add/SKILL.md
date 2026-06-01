@@ -79,16 +79,16 @@ This is the two-edit case.
 
 ### Edit 3 — Vault Router (sometimes)
 
-If the endpoint needs special routing (fan-out vs UUID-routed vs broadcast), edit `services/vault-router/src/routes.py`. Most new endpoints follow an existing pattern; consult `shared/guides/horus-vault-router.md` for the routing taxonomy.
+If the endpoint needs special routing (fan-out vs UUID-routed vs broadcast), edit `services/vault-router/src/routes.py`. Most new endpoints follow an existing pattern; consult `guides/horus-vault-router.md` (`a692f9cb-8e44-4265-9a1c-257f23dd1b8f`) in the `vault-code` vault for the routing taxonomy.
 
 ## Consistency checks before finishing
 
 After adding ANY new tool, do these:
 
-1. **Update Vault docs.** The relevant per-package guide states a tool count (e.g. "Anvil — 25 tools"). Update the count and add the new tool to the table. Pages to potentially touch:
-   - `shared/repos/horus.md` (top-level counts)
-   - `shared/concepts/horus-package-architecture.md` (MCP layer table)
-   - The specific package guide (`horus-anvil-package.md`, `horus-forge-package.md`, `horus-vault-mcp.md`)
+1. **Update Vault docs** (in the `vault-code` vault — fetch/write by UUID, path lookups 404 for non-default vaults). The relevant per-package guide states a tool count (e.g. "Anvil — 25 tools"). Update the count and add the new tool to the table. Pages to potentially touch:
+   - `repos/horus.md` (`6a4a6a28-112e-466c-bc62-0e5d72742590`) (top-level counts)
+   - `concepts/horus-package-architecture.md` (`7ee9e308-58d9-4e35-9f09-48bc14a1d6fd`) (MCP layer table)
+   - The specific package guide (`horus-anvil-package.md` `98cd92a6-d594-468e-b766-491d395ed633`, `horus-forge-package.md` `15fd5928-f5ef-47b9-9ba6-8bb941c75c47`, `horus-vault-mcp.md` `1507fa6a-3f1c-4977-875e-87115a4ad19b`)
 
 2. **Run the per-package tests** (`pnpm test` for TS, `pytest` for Python).
 
@@ -108,8 +108,10 @@ After adding ANY new tool, do these:
 
 ## Background reading
 
-- `shared/guides/horus-anvil-package.md` — Anvil tool reference
-- `shared/guides/horus-forge-package.md` + `shared/guides/horus-forge-v2.md` — Forge tools
-- `shared/guides/horus-vault-mcp.md` — Vault MCP tool ↔ REST endpoint mapping
-- `shared/guides/horus-vault-service.md` — Vault REST architecture (Layer 1/Layer 2)
-- `shared/guides/horus-vault-router.md` — routing rules for new endpoints
+Load from the **`vault-code`** vault by UUID (path-based lookups 404 for non-default vaults): `knowledge_get_page({ id: "<uuid>", vault: "vault-code" })`.
+
+- `guides/horus-anvil-package.md` (`98cd92a6-d594-468e-b766-491d395ed633`) — Anvil tool reference
+- `guides/horus-forge-package.md` (`15fd5928-f5ef-47b9-9ba6-8bb941c75c47`) — Forge tools
+- `guides/horus-vault-mcp.md` (`1507fa6a-3f1c-4977-875e-87115a4ad19b`) — Vault MCP tool ↔ REST endpoint mapping
+- `guides/horus-vault-service.md` (`e9771923-9899-4e12-a545-3451a71485d9`) — Vault REST architecture (Layer 1/Layer 2)
+- `guides/horus-vault-router.md` (`a692f9cb-8e44-4265-9a1c-257f23dd1b8f`) — routing rules for new endpoints

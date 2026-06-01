@@ -68,9 +68,11 @@ Files like `<repo>/.claude/skills/<name>/SKILL.md`, `<repo>/.claude/scripts/<nam
 
 For the full conceptual map, load:
 
-- Vault page: `workspace-vs-source-vs-session` (gap page authored alongside this pilot)
-- Vault page: `registry-as-repo` (registry vs in-repo skill distinction)
+- Vault page: `workspace-vs-source-vs-session` (not yet migrated to the `vault-code` vault — search for it there once authored)
+- Vault page: `registry-as-repo` (registry vs in-repo skill distinction — not yet migrated to `vault-code`)
 - Workspace-level guard precedent: `<workspace-root>/.claude/scripts/guard-source-repos.sh`
+
+> The two conceptual pages above are not part of the initial 16-page `vault-code` set. Until they are authored there, locate them via `knowledge_search({ query: "...", vault: "vault-code" })` rather than a path-based `get-page` (which 404s for non-default vaults).
 
 ## Quick checklist before any Edit/Write
 
