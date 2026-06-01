@@ -179,7 +179,12 @@ def _build_per_vault_headers(
         return {}
     per_vault: dict[str, dict[str, str]] = {}
     for ns in endpoints:
-        per_vault[ns] = _vault_context_headers(ns, registry)
+        # _all_endpoints() keys reader/writer pools as "<ns>#reader"/"<ns>#writer".
+        # Strip the suffix so the registry lookup (and the X-Vault-* header values)
+        # use the real namespace — otherwise the writer gets no x-vault-collection
+        # and indexes per-vault content into the default collection.
+        base_ns = ns.split("#", 1)[0]
+        per_vault[ns] = _vault_context_headers(base_ns, registry)
     return per_vault
 
 
