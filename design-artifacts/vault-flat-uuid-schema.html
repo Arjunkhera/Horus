@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vault Flat-UUID Schema — Design Explainer</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950;
+    --amber:#d29922; --red:#f85149; --purple:#bc8cff; --mono:#79c0ff;
+    --pink:#ff7b72;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --code:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);line-height:1.6;font-size:15px}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 24px 96px}
+  header.hero{border-bottom:1px solid var(--border);padding-bottom:24px;margin-bottom:32px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.4px}
+  .sub{color:var(--muted);font-size:15px}
+  h2{font-size:21px;margin:48px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{font-size:16px;margin:26px 0 10px;color:var(--fg)}
+  p{margin:10px 0}
+  code{font-family:var(--code);font-size:.88em;background:#21262d;padding:2px 6px;border-radius:5px;color:var(--mono)}
+  .pill{display:inline-block;font-family:var(--code);font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--border);color:var(--muted);margin-right:6px}
+  .tldr{background:linear-gradient(135deg,#15233a,#161b22);border:1px solid #2b4a6f;border-radius:12px;padding:20px 24px;margin:8px 0 8px}
+  .tldr b{color:var(--accent)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px}
+  .card.before{border-color:#5a3a3a}
+  .card.after{border-color:#2f5a3a}
+  .tag{font-family:var(--code);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:6px;font-weight:600}
+  .tag.b{background:#3a2020;color:#ff9b94}
+  .tag.a{background:#16321f;color:#6ee787}
+  pre{background:#0b0f15;border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow:auto;font-family:var(--code);font-size:12.5px;line-height:1.55;margin:12px 0}
+  pre .c{color:var(--muted)}           /* comment / muted */
+  pre .k{color:var(--pink)}            /* key */
+  pre .s{color:#a5d6ff}                /* string */
+  pre .u{color:var(--purple);font-weight:600} /* uuid */
+  pre .n{color:#f0883e}                /* number */
+  pre .t{color:var(--green)}           /* type/label */
+  pre .del{color:var(--red)}
+  pre .add{color:var(--green)}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--border);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-weight:600}
+  td code{white-space:nowrap}
+  .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0}
+  .node{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:13px}
+  .arrow{color:var(--accent);font-size:20px;font-weight:700}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12.5px;margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .note{border-left:3px solid var(--accent);background:#11202f;padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;color:#cde3f7}
+  .warn{border-left:3px solid var(--amber);background:#241d10;padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0;color:#f0d9a6}
+  svg{max-width:100%;height:auto}
+  .mono-lg{font-family:var(--code);color:var(--purple);font-weight:600}
+  ul{margin:10px 0;padding-left:22px}
+  li{margin:5px 0}
+  .foot{margin-top:60px;border-top:1px solid var(--border);padding-top:18px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div><span class="pill">Horus · Vault V3</span><span class="pill">B3 Part C</span><span class="pill">design explainer</span></div>
+  <h1>Vault Flat-UUID Storage Schema</h1>
+  <div class="sub">From path-hierarchy pages → flat, UUID-keyed pages where search + graph are the only navigation.</div>
+</header>
+
+<div class="tldr">
+  <b>The one idea:</b> a page's identity is its <b>UUID</b>, and nothing else. The file path
+  (<code>pages/&lt;uuid&gt;.md</code>) is a pure storage detail. <b>You never navigate by folder</b> —
+  Typesense answers "which pages match?" and Neo4j answers "what's linked to this page?", both keyed by UUID.
+  The old <code>shared/</code> / <code>concepts/</code> / <code>repos/</code> hierarchy and the
+  <code>shared/</code> id-prefix disappear.
+</div>
+
+<h2>1 · The model: three stores over one git source of truth</h2>
+<p>A vault is a <b>git repo</b> (the bytes / source of truth) projected into two read-optimised
+indexes. Writes go to git; the indexes are rebuilt from git. Reads go to the indexes.</p>
+
+<svg viewBox="0 0 920 260" role="img" aria-label="Three stores over git">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#58a6ff"/>
+    </marker>
+  </defs>
+  <!-- git -->
+  <rect x="40" y="95" width="210" height="80" rx="12" fill="#161b22" stroke="#2f5a3a" stroke-width="2"/>
+  <text x="145" y="125" text-anchor="middle" fill="#6ee787" font-size="15" font-weight="700">git: horus-knowledge</text>
+  <text x="145" y="148" text-anchor="middle" fill="#8b949e" font-size="12">source of truth</text>
+  <text x="145" y="165" text-anchor="middle" fill="#79c0ff" font-family="monospace" font-size="12">pages/&lt;uuid&gt;.md</text>
+  <!-- arrows to indexes -->
+  <line x1="250" y1="120" x2="430" y2="70" stroke="#58a6ff" stroke-width="2" marker-end="url(#ar)"/>
+  <line x1="250" y1="150" x2="430" y2="200" stroke="#58a6ff" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="330" y="80" fill="#8b949e" font-size="11">index</text>
+  <text x="330" y="195" fill="#8b949e" font-size="11">index</text>
+  <!-- typesense -->
+  <rect x="440" y="35" width="240" height="78" rx="12" fill="#161b22" stroke="#2b4a6f" stroke-width="2"/>
+  <text x="560" y="63" text-anchor="middle" fill="#58a6ff" font-size="15" font-weight="700">Typesense</text>
+  <text x="560" y="83" text-anchor="middle" fill="#8b949e" font-size="12">search · "which pages match?"</text>
+  <text x="560" y="100" text-anchor="middle" fill="#79c0ff" font-family="monospace" font-size="12">doc.id = uuid</text>
+  <!-- neo4j -->
+  <rect x="440" y="163" width="240" height="78" rx="12" fill="#161b22" stroke="#5a4a2a" stroke-width="2"/>
+  <text x="560" y="191" text-anchor="middle" fill="#d29922" font-size="15" font-weight="700">Neo4j</text>
+  <text x="560" y="211" text-anchor="middle" fill="#8b949e" font-size="12">graph · "what links here?"</text>
+  <text x="560" y="228" text-anchor="middle" fill="#79c0ff" font-family="monospace" font-size="12">page_id = uuid</text>
+  <!-- reader -->
+  <rect x="730" y="95" width="150" height="80" rx="12" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+  <text x="805" y="128" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">vault-reader</text>
+  <text x="805" y="150" text-anchor="middle" fill="#8b949e" font-size="11">resolve by uuid</text>
+  <line x1="680" y1="74" x2="728" y2="115" stroke="#58a6ff" stroke-width="2" marker-end="url(#ar)"/>
+  <line x1="680" y1="202" x2="728" y2="155" stroke="#58a6ff" stroke-width="2" marker-end="url(#ar)"/>
+</svg>
+
+<p>Crucially, <b>all page metadata already lives in frontmatter</b> — <code>type</code>, <code>scope</code>,
+<code>title</code>, <code>tags</code> are read from the file, never inferred from the folder. That's why
+flattening the hierarchy loses nothing.</p>
+
+<h2>2 · Why the <code>shared/</code> prefix goes away</h2>
+<p>Today a doc id looks like <code>shared/repos/horus.md</code>. The <code>shared/</code> part is a
+<b>legacy single-vault artifact</b>: one process used to serve two backends at once
+(<code>shared/</code> = the knowledge repo, <code>workspace/</code> = a locally-synced store), and the
+prefix told the code which filesystem root to read.</p>
+<p>In multi-vault, <b>the vault <em>is</em> the namespace</b> — each vault has its own Typesense
+collection, its own git repo, its own Neo4j scoping. The router picks the collection <em>before</em> any
+read, so encoding it in the id is redundant. → <b>doc id becomes the bare UUID.</b></p>
+
+<h2>3 · A page on disk — before &amp; after</h2>
+<div class="grid2">
+  <div class="card before">
+    <span class="tag b">before · path-keyed</span>
+    <pre><span class="c"># file: shared/repos/horus.md</span>
+<span class="c"># identity = the path itself</span>
+<span class="k">---</span>
+<span class="k">id</span>: <span class="u">0a9e1b34-5c6d-4e7f-8a90-1b2c3d4e5f60</span>
+<span class="k">title</span>: <span class="s">Horus Repository</span>
+<span class="k">type</span>: <span class="s">repo-profile</span>
+<span class="k">scope</span>:
+  <span class="k">repo</span>: <span class="s">horus</span>
+  <span class="k">program</span>: <span class="s">horus</span>
+<span class="k">tags</span>: [<span class="s">monorepo</span>, <span class="s">architecture</span>]
+<span class="k">related</span>: [<span class="u">1b2c3d4e-6f70-4a8b-9c0d-2e3f40516273</span>]
+<span class="k">---</span>
+<span class="c"># Horus Repository</span>
+One product, one repo. Anvil, Forge, Vault …</pre>
+  </div>
+  <div class="card after">
+    <span class="tag a">after · uuid-keyed flat</span>
+    <pre><span class="c"># file: pages/0a9e1b34-5c6d-4e7f-8a90-1b2c3d4e5f60.md</span>
+<span class="c"># identity = the uuid; path derives from it</span>
+<span class="k">---</span>
+<span class="k">id</span>: <span class="u">0a9e1b34-5c6d-4e7f-8a90-1b2c3d4e5f60</span>
+<span class="k">title</span>: <span class="s">Horus Repository</span>
+<span class="k">type</span>: <span class="s">repo-profile</span>
+<span class="k">scope</span>:
+  <span class="k">repo</span>: <span class="s">horus</span>
+  <span class="k">program</span>: <span class="s">horus</span>
+<span class="k">tags</span>: [<span class="s">monorepo</span>, <span class="s">architecture</span>]
+<span class="k">related</span>: [<span class="u">1b2c3d4e-6f70-4a8b-9c0d-2e3f40516273</span>]
+<span class="k">---</span>
+<span class="c"># Horus Repository</span>
+One product, one repo. Anvil, Forge, Vault …</pre>
+  </div>
+</div>
+<div class="note"><b>Frontmatter is identical.</b> The only change is the filename and the directory it
+lives in. Same UUID, same metadata, same body. The migration is a <code>git mv</code> per file — no content edits.</div>
+
+<h3>Directory layout</h3>
+<div class="grid2">
+  <div class="card before">
+    <span class="tag b">before</span>
+<pre>horus-knowledge/
+├── repos/
+│   └── horus.md
+├── concepts/
+│   └── horus-package-architecture.md
+├── guides/
+│   └── horus-development-workflow.md
+├── _schema/
+└── _graph/</pre>
+  </div>
+  <div class="card after">
+    <span class="tag a">after</span>
+<pre>horus-knowledge/
+├── pages/
+│   ├── 0a9e1b34-…-1b2c3d4e5f60.md   <span class="c"># repo-profile</span>
+│   ├── 1b2c3d4e-…-2e3f40516273.md   <span class="c"># concept</span>
+│   └── 2c3d4e5f-…-3f4051627384.md   <span class="c"># guide</span>
+├── _schema/
+└── _graph/</pre>
+  </div>
+</div>
+
+<h2>4 · How it's indexed in Typesense</h2>
+<p>The Vault walks <code>pages/*.md</code>, reads frontmatter, and upserts one document per page. In the
+new schema the document <b>id is the UUID</b>; every other field still comes from frontmatter.</p>
+
+<div class="grid2">
+  <div class="card before">
+    <span class="tag b">before · id = path</span>
+<pre>{
+  <span class="k">"id"</span>: <span class="s">"shared/repos/horus.md"</span>,
+  <span class="k">"page_uuid"</span>: <span class="u">"0a9e1b34-…-1b2c3d4e5f60"</span>,
+  <span class="k">"source"</span>: <span class="s">"vault"</span>,
+  <span class="k">"source_type"</span>: <span class="s">"repo-profile"</span>,
+  <span class="k">"title"</span>: <span class="s">"Horus Repository"</span>,
+  <span class="k">"scope_repo"</span>: <span class="s">"horus"</span>,
+  <span class="k">"vault_name"</span>: <span class="s">"default"</span>
+}</pre>
+  </div>
+  <div class="card after">
+    <span class="tag a">after · id = uuid</span>
+<pre>{
+  <span class="k">"id"</span>: <span class="u">"0a9e1b34-…-1b2c3d4e5f60"</span>,   <span class="c">// ← the uuid</span>
+  <span class="k">"source"</span>: <span class="s">"vault"</span>,
+  <span class="k">"source_type"</span>: <span class="s">"repo-profile"</span>,
+  <span class="k">"title"</span>: <span class="s">"Horus Repository"</span>,
+  <span class="k">"body"</span>: <span class="s">"One product, one repo. Anvil, Forge and
+           Vault are packages in this pnpm
+           monorepo. They share the git repo,
+           Typesense and Neo4j … &lt;entire page&gt;"</span>,  <span class="c">// full body, indexed</span>
+  <span class="k">"scope_repo"</span>: <span class="s">"horus"</span>,
+  <span class="k">"scope_program"</span>: <span class="s">"horus"</span>,
+  <span class="k">"tags"</span>: [<span class="s">"monorepo"</span>,<span class="s">"architecture"</span>],
+  <span class="k">"vault_name"</span>: <span class="s">"default"</span>
+}</pre>
+  </div>
+</div>
+<div class="note"><code>page_uuid</code> as a separate field becomes redundant — it <em>is</em> the id now.
+Collection selection (<code>horus_documents</code>) is decided by vault routing, so it's no longer
+smuggled into the id string.</div>
+
+<div class="note"><b>Full-body indexing.</b> The <code>body</code> field holds the <b>entire</b> markdown,
+not just metadata or a snippet. Today it's truncated at <code>BODY_MAX_CHARS = 20_000</code>
+(<code>typesense_engine.py:123</code>) — the new schema drops that cap so search covers the whole page.
+The short <code>[:200]</code> slices in the engine are only for <em>result snippets</em> and are unaffected.</div>
+
+<h3>A search → fetch round-trip</h3>
+<div class="flow">
+  <div class="node">query: <code>"package architecture"</code></div>
+  <div class="arrow">→</div>
+  <div class="node">Typesense returns <span class="mono-lg">1b2c3d4e…</span></div>
+  <div class="arrow">→</div>
+  <div class="node">read <code>pages/1b2c3d4e….md</code></div>
+</div>
+<p>No path lookup table, no directory walk — the hit <em>is</em> the UUID, and the file is at
+<code>pages/&lt;uuid&gt;.md</code>.</p>
+
+<h2>5 · How linking works in Neo4j</h2>
+<p>Every page is a <code>:Page</code> node keyed by <code>page_id = uuid</code> and scoped by
+<code>vault_name</code>. Cross-page references in frontmatter (<code>related: [uuid]</code>) become typed
+edges. The graph is <b>already UUID-keyed today</b> — flattening the files doesn't change it, except the
+stored key is the clean UUID instead of a path.</p>
+
+<svg viewBox="0 0 900 250" role="img" aria-label="Page graph">
+  <defs>
+    <marker id="ar2" markerWidth="11" markerHeight="11" refX="9" refY="3.2" orient="auto">
+      <path d="M0,0 L9,3.2 L0,6.4 Z" fill="#d29922"/>
+    </marker>
+  </defs>
+  <!-- guide -->
+  <circle cx="130" cy="125" r="62" fill="#1c2330" stroke="#2f5a3a" stroke-width="2"/>
+  <text x="130" y="108" text-anchor="middle" fill="#6ee787" font-size="13" font-weight="700">guide</text>
+  <text x="130" y="127" text-anchor="middle" fill="#e6edf3" font-size="11">dev-workflow</text>
+  <text x="130" y="146" text-anchor="middle" fill="#bc8cff" font-family="monospace" font-size="10">2c3d4e5f…</text>
+  <!-- concept -->
+  <circle cx="450" cy="125" r="62" fill="#1c2330" stroke="#2b4a6f" stroke-width="2"/>
+  <text x="450" y="108" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="700">concept</text>
+  <text x="450" y="127" text-anchor="middle" fill="#e6edf3" font-size="11">pkg-arch</text>
+  <text x="450" y="146" text-anchor="middle" fill="#bc8cff" font-family="monospace" font-size="10">1b2c3d4e…</text>
+  <!-- repo -->
+  <circle cx="770" cy="125" r="62" fill="#1c2330" stroke="#5a4a2a" stroke-width="2"/>
+  <text x="770" y="108" text-anchor="middle" fill="#d29922" font-size="13" font-weight="700">repo-profile</text>
+  <text x="770" y="127" text-anchor="middle" fill="#e6edf3" font-size="11">horus</text>
+  <text x="770" y="146" text-anchor="middle" fill="#bc8cff" font-family="monospace" font-size="10">0a9e1b34…</text>
+  <!-- edges -->
+  <line x1="192" y1="120" x2="386" y2="120" stroke="#d29922" stroke-width="2" marker-end="url(#ar2)"/>
+  <text x="289" y="110" text-anchor="middle" fill="#d29922" font-size="11" font-family="monospace">REFERENCES</text>
+  <line x1="512" y1="120" x2="706" y2="120" stroke="#d29922" stroke-width="2" marker-end="url(#ar2)"/>
+  <text x="609" y="110" text-anchor="middle" fill="#d29922" font-size="11" font-family="monospace">REFERENCES</text>
+  <!-- guide -> repo curved -->
+  <path d="M150,182 C 360,255 560,255 752,182" fill="none" stroke="#d29922" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#ar2)"/>
+  <text x="450" y="240" text-anchor="middle" fill="#8b949e" font-size="11" font-family="monospace">REFERENCES</text>
+</svg>
+
+<h3>Writing the edges (frontmatter → graph)</h3>
+<pre><span class="c">// guide frontmatter:  related: [1b2c3d4e…, 0a9e1b34…]</span>
+<span class="c">// each related uuid is MERGEd as a :REFERENCES edge, scoped by vault</span>
+<span class="t">MERGE</span> (s:<span class="t">Page</span> {page_id: <span class="u">"2c3d4e5f-…-3f4051627384"</span>, vault_name: <span class="s">"default"</span>})
+<span class="t">MERGE</span> (t:<span class="t">Page</span> {page_id: <span class="u">"1b2c3d4e-…-2e3f40516273"</span>, vault_name: <span class="s">"default"</span>})
+<span class="t">MERGE</span> (s)-[:<span class="t">REFERENCES</span>]->(t);</pre>
+
+<h3>Traversing — "what does the guide link to?"</h3>
+<pre><span class="t">MATCH</span> (s:<span class="t">Page</span> {page_id: <span class="u">"2c3d4e5f-…-3f4051627384"</span>, vault_name: <span class="s">"default"</span>})
+      -[:<span class="t">REFERENCES</span>]->(t:<span class="t">Page</span>)
+<span class="t">RETURN</span> t.page_id, t.title;
+
+<span class="c">// → 1b2c3d4e…  "Horus Package Architecture"</span>
+<span class="c">// → 0a9e1b34…  "Horus Repository"</span></pre>
+<p>The returned <code>page_id</code>s are UUIDs — feed them straight back to
+<code>pages/&lt;uuid&gt;.md</code> or to a Typesense <code>get</code>. Identity is uniform across all three stores.</p>
+
+<h2>6 · Search experience — borrowed from Anvil</h2>
+<p>Anvil runs <b>locally</b> (per user); Vault runs <b>remote</b> (in the cluster). They <b>no longer share</b>
+a Typesense collection or a Neo4j — each owns its own. The win isn't a shared store, it's a
+<b>shared pattern</b>: the same <code>@horus/search</code> schema, the same UUID identity, and the same
+linking model — so mental model, skills and code carry across both systems. Two of Anvil's graph patterns
+drop straight into Vault's search-driven model now; semantic search comes in a later phase.</p>
+
+<h3>6.1 · Body wiki-links → a self-populating graph + backlinks</h3>
+<p>Anvil scans every body for <code>[[…]]</code> and auto-creates edges
+(<code>indexer.ts:140</code>, <code>wiki-links.ts</code>). Vault today only reads the frontmatter
+<code>related</code> list, so prose mentions create no links. Borrowing this, the graph builds itself
+from content — and every page gets <b>backlinks for free</b>.</p>
+<div class="grid2">
+  <div class="card">
+    <span class="tag a">page body (the guide)</span>
+<pre><span class="c"># pages/2c3d4e5f-…-3f4051627384.md  (body)</span>
+…for the call graph see
+[[<span class="u">1b2c3d4e-…-2e3f40516273</span>]],
+and [[<span class="s">Horus Repository</span>]] for the
+package list.</pre>
+  </div>
+  <div class="card">
+    <span class="tag a">on write → auto-edges</span>
+<pre><span class="c">// [[uuid]]  → direct registry lookup</span>
+<span class="c">// [[Title]] → resolve via search()</span>
+(guide)-[:<span class="t">MENTIONS</span>]->(concept)
+(guide)-[:<span class="t">MENTIONS</span>]->(repo-profile)
+<span class="c">// no manual `related:` curation needed</span></pre>
+  </div>
+</div>
+
+<h3>6.2 · Typed, inverse-labelled edges → real backlinks</h3>
+<p>Anvil's <code>IntentRegistry</code> gives every edge a <code>direction</code> and an
+<code>inverseLabel</code>, so a read from either end is correctly labelled. Vault's current
+<code>get_edges</code> returns <code>target_id</code> for both directions and <em>loses</em> the source of
+incoming edges — it can't say "referenced&nbsp;by." Borrowing the inverse-label idea:</p>
+<pre><span class="t">references</span>  ⇄  <span class="t">referenced_by</span>      <span class="c">// directional pair</span>
+<span class="t">mentions</span>    ⇄  <span class="t">mentions</span>            <span class="c">// bidirectional</span>
+<span class="t">parent_of</span>   ⇄  <span class="t">child_of</span></pre>
+
+<h3>6.3 · Hybrid semantic + keyword <span class="pill">deferred — later phase</span></h3>
+<p><b>Not in this pass.</b> Captured here so the schema leaves room for it. Anvil wires
+<code>HORUS_EMBEDDING_API_KEY</code> → an <code>embedding</code> field and queries
+<code>title,body,embedding</code>; Vault's <code>semantic_search</code>/<code>hybrid_search</code> are
+stubs that fall back to BM25 (<code>typesense_engine.py:271</code>). When we pick this up, Vault adds
+<code>embedding</code> to <code>query_by</code> on its own collection.</p>
+<pre><span class="c">// later: query "how do the services talk to each other?"</span>
+<span class="c">// no keyword overlap with "package architecture" —</span>
+<span class="c">// vector match still surfaces the pkg-arch concept</span></pre>
+
+<h3>Net effect — a richer search result</h3>
+<div class="card" style="border-color:#2b4a6f">
+  <div style="font-weight:700;color:#58a6ff">Horus Repository <span class="pill">repo-profile</span></div>
+  <div style="color:#8b949e;font-size:13px;margin:4px 0 10px">One product, one repo. Anvil, Forge and Vault are packages in this pnpm monorepo…</div>
+  <div style="font-size:13px"><b style="color:#d29922">referenced&nbsp;by</b> →
+    <code>dev-workflow guide</code>, <code>pkg-arch concept</code> <span class="c">(from auto-extracted backlinks)</span></div>
+  <div style="font-size:13px;margin-top:4px;opacity:.55"><b style="color:#bc8cff">semantically near</b> →
+    <code>pkg-arch concept</code> <span class="c">(vector — later phase)</span></div>
+</div>
+<div class="note"><b>Future cheap win:</b> once edges auto-populate, store a <code>backlink_count</code> on the
+Typesense doc and boost well-connected pages in ranking — graph-aware search that neither Anvil nor Vault
+does today.</div>
+
+<h2>7 · End-to-end: one identity, three stores</h2>
+<table>
+  <tr><th>Concern</th><th>Before</th><th>After (flat-UUID)</th></tr>
+  <tr><td>Page identity</td><td>file path</td><td><b>UUID</b></td></tr>
+  <tr><td>File on disk</td><td><code>repos/horus.md</code></td><td><code>pages/&lt;uuid&gt;.md</code></td></tr>
+  <tr><td>Typesense <code>id</code></td><td><code>shared/repos/horus.md</code></td><td><code>&lt;uuid&gt;</code></td></tr>
+  <tr><td>Neo4j <code>page_id</code></td><td>resolved path</td><td><code>&lt;uuid&gt;</code></td></tr>
+  <tr><td>Collection choice</td><td>in-band <code>shared/</code> prefix</td><td>vault routing (registry)</td></tr>
+  <tr><td>Body in search index</td><td>truncated @ 20k chars</td><td><b>full body</b> (no cap)</td></tr>
+  <tr><td>type / scope / title</td><td>frontmatter</td><td>frontmatter <span class="pill">unchanged</span></td></tr>
+  <tr><td>Cross-page refs</td><td>UUID</td><td>UUID <span class="pill">unchanged</span></td></tr>
+  <tr><td>Navigation</td><td>folders + search + graph</td><td><b>search + graph only</b></td></tr>
+</table>
+
+<h2>8 · What actually changes in code</h2>
+<p>Because metadata is frontmatter-derived, the surface is small:</p>
+<ul>
+  <li><b>Write path</b> — <code>routes.py :: _write_page_sync</code>: compute <code>path = "pages/" + frontmatter.id + ".md"</code> (drop hierarchy + the <code>shared/</code> prefix), branch name derived from the UUID.</li>
+  <li><b>Typesense doc build</b> — <code>typesense_engine.py :: _build_document</code>: set <code>id = frontmatter.id</code> (was the path); drop the now-redundant <code>page_uuid</code> field; stop inferring collection from <code>id.split("/")</code>; <b>index the full body — drop the <code>BODY_MAX_CHARS = 20_000</code> truncation at line 123</b> (keep the <code>[:200]</code> snippet slices, those are display-only).</li>
+  <li><b>UUID registry</b> — simplifies to a thin <code>uuid → pages/&lt;uuid&gt;.md</code> mapping (or drops out where callers already pass UUIDs).</li>
+  <li><b>Reindex / discovery</b> — already <code>rglob("*.md")</code>; works unchanged on the flat layout.</li>
+  <li><b>Data migration</b> — one-shot: <code>git mv</code> each page to <code>pages/&lt;uuid&gt;.md</code>, rebuild Typesense, re-point Neo4j <code>page_id</code>s.</li>
+</ul>
+
+<div class="warn"><b>Pre-flight gate before migrating:</b> every page must have <code>id</code>, <code>title</code>,
+<code>type</code>, <code>scope</code> in frontmatter, no path-based entries left in <code>related</code>,
+and no UUID collisions. (Title matters: a fallback path exists that would otherwise display the UUID.)</div>
+
+<div class="legend">
+  <span><span class="dot" style="background:#3fb950"></span> guide</span>
+  <span><span class="dot" style="background:#58a6ff"></span> concept</span>
+  <span><span class="dot" style="background:#d29922"></span> repo-profile</span>
+  <span><span class="dot" style="background:#bc8cff"></span> uuid (shared identity)</span>
+</div>
+
+<div class="foot">
+  Horus · Vault V3 · B3 Part C — flat-UUID storage schema. Samples are illustrative (UUIDs fabricated for
+  clarity). Source of truth: <code>Arjunkhera/horus-knowledge</code>; indexes rebuilt from git.
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Horus Alpha — Architecture &amp; Operations (Artifact Collection)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:           #0d0f12;
+    --bg-card:      #14171c;
+    --bg-card2:     #1a1e25;
+    --bg-card3:     #1f242d;
+    --border:       #2a2f3a;
+    --border-hi:    #363d4e;
+    --text:         #dce2ec;
+    --text-muted:   #7b8599;
+    --text-dim:     #4e5668;
+    --amber:        #f5a623;
+    --amber-light:  #ffb347;
+    --amber-dim:    #7a5010;
+    --amber-glow:   rgba(245,166,35,0.10);
+    --green:        #3ecf8e;
+    --green-bg:     rgba(62,207,142,0.12);
+    --blue:         #60a5fa;
+    --blue-bg:      rgba(96,165,250,0.10);
+    --purple:       #a78bfa;
+    --purple-bg:    rgba(167,139,250,0.10);
+    --pending-bg:   rgba(245,166,35,0.13);
+    --mono:         "SF Mono","Fira Code","Cascadia Code","Consolas","Menlo",monospace;
+    --sans:         -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --radius:       10px;
+    --radius-lg:    16px;
+    --shadow:       0 2px 16px rgba(0,0,0,0.45);
+    --shadow-amber: 0 0 28px rgba(245,166,35,0.08);
+  }
+
+  html { font-size: 15px; }
+  body { font-family: var(--sans); background: var(--bg); color: var(--text); line-height: 1.6; padding: 0; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+
+  /* ── Top nav ── */
+  .topnav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(13,15,18,0.92);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px;
+    display: flex; align-items: center;
+    height: 44px; font-size: 0.78rem;
+  }
+  .topnav-brand {
+    font-weight: 700; letter-spacing: 0.12em; color: var(--amber);
+    text-decoration: none; text-transform: uppercase; font-size: 0.72rem;
+    white-space: nowrap;
+  }
+  .topnav-brand:hover { color: var(--amber-light); }
+  .topnav-links { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+  .topnav-links a {
+    color: var(--text-muted); text-decoration: none;
+    padding: 4px 9px; border-radius: 6px;
+    font-size: 0.72rem; white-space: nowrap;
+    transition: color 0.12s, background 0.12s;
+  }
+  .topnav-links a:hover { color: var(--text); background: var(--bg-card2); }
+  .topnav-links a.active { color: var(--amber-light); background: var(--pending-bg); }
+
+  /* ── Layout ── */
+  .page { max-width: 1100px; margin: 0 auto; padding: 0 28px 72px; }
+
+  /* ── Hero ── */
+  .hero {
+    padding: 64px 0 52px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 56px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute; top: -80px; right: -120px;
+    width: 480px; height: 480px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(245,166,35,0.05) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .logo-mark {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--amber); margin-bottom: 16px;
+  }
+  .logo-mark svg { width: 22px; height: 22px; }
+  .hero-inner { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 28px; }
+  .hero-left { max-width: 680px; }
+  h1 {
+    font-size: 2.2rem; font-weight: 700; line-height: 1.18;
+    letter-spacing: -0.025em; color: #fff;
+  }
+  h1 span { color: var(--amber); }
+  .hero-intro {
+    margin-top: 14px; font-size: 0.96rem; color: var(--text-muted);
+    max-width: 600px; line-height: 1.65;
+  }
+  .hero-intro strong { color: var(--text); font-weight: 500; }
+  .hero-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .hero-right { display: flex; flex-direction: column; gap: 10px; min-width: 220px; }
+
+  /* ── Status card ── */
+  .status-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .status-card-label {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px;
+  }
+  .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .status-row:last-child { margin-bottom: 0; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot-green { background: var(--green); box-shadow: 0 0 6px rgba(62,207,142,0.5); }
+  .status-dot-amber { background: var(--amber); box-shadow: 0 0 6px rgba(245,166,35,0.5); }
+  .status-row-text { font-size: 0.81rem; color: var(--text); }
+  .status-row-text span { color: var(--text-muted); font-size: 0.76rem; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.70rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 4px 10px; border-radius: 20px;
+  }
+  .badge-amber { background: var(--amber-dim); border: 1px solid var(--amber); color: var(--amber-light); }
+  .badge-green { background: var(--green-bg); border: 1px solid var(--green); color: var(--green); }
+  .badge-blue { background: var(--blue-bg); border: 1px solid var(--blue); color: var(--blue); }
+  .badge-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 56px; }
+  .section-label {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 0.70rem; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--amber); margin-bottom: 20px;
+  }
+  .section-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  h2 { font-size: 1.4rem; font-weight: 700; color: #fff; letter-spacing: -0.015em; margin-bottom: 6px; }
+
+  /* ── Reading order ── */
+  .reading-order {
+    background: var(--bg-card); border: 1px solid var(--amber-dim);
+    border-radius: var(--radius-lg); padding: 22px 26px;
+    box-shadow: var(--shadow-amber);
+    margin-bottom: 0;
+  }
+  .reading-order h3 {
+    font-size: 0.82rem; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--amber); margin-bottom: 14px;
+  }
+  .reading-steps { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .reading-steps li {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 14px;
+    background: var(--bg-card2); border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .reading-steps li:hover { border-color: var(--amber-dim); background: var(--bg-card3); }
+  .reading-step-num {
+    width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+    background: var(--amber-dim); border: 1px solid var(--amber);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.72rem; font-weight: 700; color: var(--amber-light);
+    font-family: var(--mono);
+  }
+  .reading-steps a {
+    font-size: 0.86rem; font-weight: 600; color: var(--text);
+    text-decoration: none; flex: 1;
+    transition: color 0.12s;
+  }
+  .reading-steps li:hover a { color: var(--amber-light); }
+  .reading-step-desc { font-size: 0.78rem; color: var(--text-muted); margin-top: 1px; }
+  .reading-steps .step-inner { flex: 1; display: flex; flex-direction: column; }
+
+  /* ── Artifact cards ── */
+  .artifact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .artifact-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 0;
+    overflow: hidden;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    display: flex; flex-direction: column;
+    text-decoration: none;
+  }
+  .artifact-card:hover {
+    border-color: var(--border-hi);
+    box-shadow: var(--shadow), 0 0 18px rgba(245,166,35,0.04);
+    transform: translateY(-1px);
+  }
+  .artifact-card-accent {
+    height: 3px; width: 100%;
+    background: var(--border);
+    transition: background 0.15s;
+  }
+  .artifact-card:hover .artifact-card-accent { background: var(--amber); }
+  .artifact-card-accent-green { background: var(--green) !important; }
+  .artifact-card-accent-blue { background: var(--blue) !important; }
+  .artifact-card-accent-purple { background: var(--purple) !important; }
+  .artifact-card-body { padding: 20px 22px 22px; flex: 1; }
+  .artifact-card-icon {
+    font-size: 1.4rem; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .artifact-card-num {
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+    color: var(--text-dim); background: var(--bg-card3);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 7px;
+  }
+  .artifact-card h3 {
+    font-size: 0.97rem; font-weight: 700; color: #fff;
+    margin-bottom: 8px; line-height: 1.3;
+  }
+  .artifact-card p {
+    font-size: 0.83rem; color: var(--text-muted); line-height: 1.55;
+  }
+  .artifact-card-footer {
+    padding: 12px 22px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-card2);
+  }
+  .artifact-filename {
+    font-family: var(--mono); font-size: 0.70rem; color: var(--text-dim);
+  }
+  .artifact-arrow {
+    font-size: 0.9rem; color: var(--text-dim);
+    transition: color 0.12s, transform 0.12s;
+  }
+  .artifact-card:hover .artifact-arrow { color: var(--amber); transform: translateX(3px); }
+
+  /* ── Architecture mini-diagram ── */
+  .mini-arch {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 24px;
+    box-shadow: var(--shadow);
+  }
+  .mini-arch-grid {
+    display: flex; align-items: center; gap: 0;
+    flex-wrap: wrap;
+  }
+  .mini-arch-box {
+    flex: 1; min-width: 180px;
+    background: var(--bg-card2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px;
+  }
+  .mini-arch-box-label {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; margin-bottom: 10px;
+    padding: 3px 8px; border-radius: 20px; display: inline-block;
+  }
+  .label-local { background: var(--amber-dim); color: var(--amber-light); border: 1px solid var(--amber); }
+  .label-remote { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+  .mini-arch-items { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .mini-arch-items li {
+    font-family: var(--mono); font-size: 0.76rem; color: var(--text-muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .mini-arch-items li::before {
+    content: ""; width: 4px; height: 4px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mini-arch-box.local .mini-arch-items li::before { background: var(--amber); }
+  .mini-arch-box.remote .mini-arch-items li::before { background: var(--green); }
+  .mini-arch-connector {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 0 20px; flex-shrink: 0; gap: 4px;
+  }
+  .connector-line-h {
+    width: 40px; height: 2px;
+    background: linear-gradient(90deg, var(--border-hi), var(--amber), var(--border-hi));
+  }
+  .connector-label {
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--amber-dim);
+    text-align: center; white-space: nowrap;
+  }
+
+  /* ── Inline code ── */
+  code {
+    font-family: var(--mono); font-size: 0.83em;
+    background: var(--bg-card3); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; color: var(--amber-light);
+  }
+  a { color: var(--amber); text-decoration: none; }
+  a:hover { color: var(--amber-light); }
+
+  /* ── Footer ── */
+  footer {
+    border-top: 1px solid var(--border); margin-top: 64px;
+    padding-top: 28px; text-align: center;
+    font-size: 0.78rem; color: var(--text-dim);
+  }
+  footer a { color: var(--text-muted); }
+  footer a:hover { color: var(--amber); }
+
+  @media (max-width: 720px) {
+    h1 { font-size: 1.7rem; }
+    .hero-inner { flex-direction: column; }
+    .mini-arch-grid { flex-direction: column; }
+    .mini-arch-connector { flex-direction: row; padding: 12px 0; }
+    .connector-line-h { width: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Top nav ── -->
+<nav class="topnav">
+  <a href="horus-artifacts-index.html" class="topnav-brand active">Horus Alpha · Artifact Collection</a>
+  <div class="topnav-links">
+    <a href="horus-local-client-showcase.html">Architecture</a>
+    <a href="horus-local-client-setup.html">Setup &amp; Run</a>
+    <a href="identity-flows-walkthrough.html">Identity Flows</a>
+    <a href="infra-topology.html">Infra Topology</a>
+    <a href="infra-deployment-walkthrough.html">Deployment</a>
+    <a href="vault-flat-uuid-schema.html">Vault Schema</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- ── Hero ── -->
+  <header class="hero">
+    <div class="logo-mark">
+      <svg viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="11" cy="11" r="10" stroke="#f5a623" stroke-width="1.5"/>
+        <circle cx="11" cy="11" r="4" fill="#f5a623" opacity="0.25"/>
+        <circle cx="11" cy="11" r="2" fill="#f5a623"/>
+        <line x1="11" y1="1" x2="11" y2="5" stroke="#f5a623" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="11" y1="17" x2="11" y2="21" stroke="#f5a623" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="1" y1="11" x2="5" y2="11" stroke="#f5a623" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="17" y1="11" x2="21" y2="11" stroke="#f5a623" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      Horus Alpha
+    </div>
+    <div class="hero-inner">
+      <div class="hero-left">
+        <h1>Architecture &amp; Operations<br><span>Artifact Collection</span></h1>
+        <p class="hero-intro">
+          A hub for understanding and operating the new <strong>split-architecture Horus</strong> —
+          Anvil local; Vault + Forge registry remote; Forge execution embedded locally in horus-ui;
+          control plane on k3s at <strong>horus.arjunkhera.io</strong>.
+          Built for the team and future agents.
+        </p>
+        <div class="hero-badges">
+          <span class="badge badge-amber"><span class="badge-dot"></span>Alpha</span>
+          <span class="badge badge-green"><span class="badge-dot"></span>CLI 0.8.x Released</span>
+          <span class="badge badge-blue">E2E Validated on EC2</span>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="status-card">
+          <div class="status-card-label">Status — 2026-06-01</div>
+          <div class="status-row">
+            <div class="status-dot status-dot-green"></div>
+            <div class="status-row-text">New local client delivered <span>· CLI 0.8.x</span></div>
+          </div>
+          <div class="status-row">
+            <div class="status-dot status-dot-green"></div>
+            <div class="status-row-text">E2E validated on EC2</div>
+          </div>
+          <div class="status-row">
+            <div class="status-dot status-dot-green"></div>
+            <div class="status-row-text">Control plane healthy <span>· k3s</span></div>
+          </div>
+          <div class="status-row">
+            <div class="status-dot status-dot-amber"></div>
+            <div class="status-row-text">Alpha — operator onboarding</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Architecture mini-diagram ── -->
+  <div class="section">
+    <div class="section-label">Architecture at a glance</div>
+    <div class="mini-arch">
+      <div class="mini-arch-grid">
+        <div class="mini-arch-box local">
+          <span class="mini-arch-box-label label-local">Local · your machine</span>
+          <ul class="mini-arch-items">
+            <li>horus-ui (+ embedded Forge engine)</li>
+            <li>anvil (notes, graph, MCP)</li>
+            <li>typesense (full-text search)</li>
+            <li>neo4j (graph datastore)</li>
+          </ul>
+        </div>
+        <div class="mini-arch-connector">
+          <div class="connector-line-h"></div>
+          <div class="connector-label">JWT · HTTPS</div>
+        </div>
+        <div class="mini-arch-box remote">
+          <span class="mini-arch-box-label label-remote">Remote · control plane</span>
+          <ul class="mini-arch-items">
+            <li>horus-service (gateway)</li>
+            <li>Vault service (knowledge base)</li>
+            <li>Forge registry (discovery + publish)</li>
+            <li>Auth / principal normalization</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Reading order ── -->
+  <div class="section">
+    <div class="section-label">Suggested reading order</div>
+    <div class="reading-order">
+      <h3>Start here — follow the numbers</h3>
+      <ol class="reading-steps">
+        <li>
+          <div class="reading-step-num">1</div>
+          <div class="step-inner">
+            <a href="horus-local-client-showcase.html">Horus Local Client — Split Architecture</a>
+            <span class="reading-step-desc">The split architecture at a glance: what's local vs remote, and the Forge carve-out.</span>
+          </div>
+        </li>
+        <li>
+          <div class="reading-step-num">2</div>
+          <div class="step-inner">
+            <a href="horus-local-client-setup.html">Setup &amp; Run</a>
+            <span class="reading-step-desc">Step-by-step: install the CLI, operator onboarding, setup/login/up, verify.</span>
+          </div>
+        </li>
+        <li>
+          <div class="reading-step-num">3</div>
+          <div class="step-inner">
+            <a href="identity-flows-walkthrough.html">Identity &amp; Request Flows</a>
+            <span class="reading-step-desc">How identity, JWTs, and requests flow through the gateway (Principal normalization, scope chain).</span>
+          </div>
+        </li>
+        <li>
+          <div class="reading-step-num">4</div>
+          <div class="step-inner">
+            <a href="infra-topology.html">Kubernetes Infrastructure Topology</a>
+            <span class="reading-step-desc">The Kubernetes/k3s topology of the control plane (services, ingress, datastores).</span>
+          </div>
+        </li>
+        <li>
+          <div class="reading-step-num">5</div>
+          <div class="step-inner">
+            <a href="infra-deployment-walkthrough.html">Infra &amp; Deployment Walkthrough</a>
+            <span class="reading-step-desc">How Horus is deployed and runs in the cloud (ArgoCD GitOps, images).</span>
+          </div>
+        </li>
+        <li>
+          <div class="reading-step-num">6</div>
+          <div class="step-inner">
+            <a href="vault-flat-uuid-schema.html">Vault Flat-UUID Storage Schema</a>
+            <span class="reading-step-desc">Vault's flat-UUID storage schema design.</span>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- ── Artifact cards ── -->
+  <div class="section">
+    <div class="section-label">All artifacts</div>
+    <h2>Collection</h2>
+    <div class="artifact-grid" style="margin-top:20px;">
+
+      <a href="horus-local-client-showcase.html" class="artifact-card">
+        <div class="artifact-card-accent"></div>
+        <div class="artifact-card-body">
+          <div class="artifact-card-icon">
+            🏗
+            <span class="artifact-card-num">01</span>
+          </div>
+          <h3>Horus Local Client — Split Architecture (Alpha)</h3>
+          <p>The split architecture at a glance. What lives locally vs remotely, the Forge execution carve-out, and how the four local containers connect to the remote control plane over JWT-gated HTTPS.</p>
+        </div>
+        <div class="artifact-card-footer">
+          <span class="artifact-filename">horus-local-client-showcase.html</span>
+          <span class="artifact-arrow">→</span>
+        </div>
+      </a>
+
+      <a href="horus-local-client-setup.html" class="artifact-card">
+        <div class="artifact-card-accent"></div>
+        <div class="artifact-card-body">
+          <div class="artifact-card-icon">
+            ⚡
+            <span class="artifact-card-num">02</span>
+          </div>
+          <h3>Horus Local Client — Setup &amp; Run</h3>
+          <p>Step-by-step guide for the new architecture. Covers operator-mediated bundle minting, CLI installation (<code>≥ 0.8.2</code>), <code>horus setup</code>, <code>horus up</code>, health verification, and the Forge local/remote split. Includes a troubleshooting table from real e2e runs.</p>
+        </div>
+        <div class="artifact-card-footer">
+          <span class="artifact-filename">horus-local-client-setup.html</span>
+          <span class="artifact-arrow">→</span>
+        </div>
+      </a>
+
+      <a href="identity-flows-walkthrough.html" class="artifact-card">
+        <div class="artifact-card-accent artifact-card-accent-blue"></div>
+        <div class="artifact-card-body">
+          <div class="artifact-card-icon">
+            🔐
+            <span class="artifact-card-num">03</span>
+          </div>
+          <h3>Horus — Identity &amp; Request Flows (Locked Alpha)</h3>
+          <p>How identity, JWTs, and requests flow through the gateway. Covers Principal normalization, the scope chain, token propagation from client to remote Vault and Forge registry, and the auth-error surface.</p>
+        </div>
+        <div class="artifact-card-footer">
+          <span class="artifact-filename">identity-flows-walkthrough.html</span>
+          <span class="artifact-arrow">→</span>
+        </div>
+      </a>
+
+      <a href="infra-topology.html" class="artifact-card">
+        <div class="artifact-card-accent artifact-card-accent-green"></div>
+        <div class="artifact-card-body">
+          <div class="artifact-card-icon">
+            🗺
+            <span class="artifact-card-num">04</span>
+          </div>
+          <h3>Horus Alpha — Kubernetes Infrastructure Topology</h3>
+          <p>The Kubernetes/k3s topology of the control plane. Services, ingress rules, persistent volume claims, datastores (Typesense, Neo4j, Postgres), and how the namespace layout maps to product boundaries.</p>
+        </div>
+        <div class="artifact-card-footer">
+          <span class="artifact-filename">infra-topology.html</span>
+          <span class="artifact-arrow">→</span>
+        </div>
+      </a>
+
+      <a href="infra-deployment-walkthrough.html" class="artifact-card">
+        <div class="artifact-card-accent artifact-card-accent-green"></div>
+        <div class="artifact-card-body">
+          <div class="artifact-card-icon">
+            🚀
+            <span class="artifact-card-num">05</span>
+          </div>
+          <h3>Horus Alpha — Infra &amp; Deployment Walkthrough</h3>
+          <p>How Horus is deployed and kept running in the cloud. ArgoCD GitOps flow, image publish pipeline (GHCR), rollout strategy, and operational runbook for common deployment tasks.</p>
+        </div>
+        <div class="artifact-card-footer">
+          <span class="artifact-filename">infra-deployment-walkthrough.html</span>
+          <span class="artifact-arrow">→</span>
+        </div>
+      </a>
+
+      <a href="vault-flat-uuid-schema.html" class="artifact-card">
+        <div class="artifact-card-accent artifact-card-accent-purple"></div>
+        <div class="artifact-card-body">
+          <div class="artifact-card-icon">
+            🗄
+            <span class="artifact-card-num">06</span>
+          </div>
+          <h3>Vault Flat-UUID Storage Schema</h3>
+          <p>The design and rationale behind Vault's flat-UUID storage layout. How pages are addressed by UUID, the frontmatter schema, the relationship between the file layer and the Typesense/Neo4j indexes, and the write-path pipeline.</p>
+        </div>
+        <div class="artifact-card-footer">
+          <span class="artifact-filename">vault-flat-uuid-schema.html</span>
+          <span class="artifact-arrow">→</span>
+        </div>
+      </a>
+
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <p>
+    Horus Alpha · Architecture &amp; Operations ·
+    <a href="horus-local-client-showcase.html">Architecture</a> ·
+    <a href="horus-local-client-setup.html">Setup &amp; Run</a> ·
+    <a href="identity-flows-walkthrough.html">Identity Flows</a> ·
+    <a href="infra-topology.html">Infra Topology</a> ·
+    <a href="infra-deployment-walkthrough.html">Deployment</a> ·
+    <a href="vault-flat-uuid-schema.html">Vault Schema</a>
+  </p>
+  <p style="margin-top:8px;">2026</p>
+</footer>
+
+</body>
+</html>
