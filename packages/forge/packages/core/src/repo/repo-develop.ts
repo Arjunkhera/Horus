@@ -11,6 +11,7 @@ import { SessionStoreManager } from '../session/session-store.js';
 import { ForgeError } from '../adapters/errors.js';
 import { installEnforcementHooks } from './git-enforcement.js';
 import { VaultClient } from '../vault/vault-client.js';
+import { repoClonePath, ensureHorusIgnored } from './clone-layout.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -215,8 +216,28 @@ async function cloneToManagedPool(
   // Local clones over virtiofs (Podman) are significantly slower than remote
   const timeout = isLocalPath(sourceUrl) ? 300_000 : 120_000;
   const startTime = Date.now();
+
+  // Inject GITHUB_TOKEN for HTTPS clones of private repos (additive/safe for public).
+  // IMPORTANT: use the original URL in all error messages so the token never leaks.
+  const originalUrl = sourceUrl;
+  let cloneUrl = sourceUrl;
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (githubToken && !isLocalPath(sourceUrl) && sourceUrl.startsWith('https://')) {
+    try {
+      const parsed = new URL(sourceUrl);
+      parsed.username = 'x-access-token';
+      parsed.password = githubToken;
+      cloneUrl = parsed.toString();
+    } catch {
+      // Malformed URL — fall through and let git report the error.
+    }
+  }
+
   try {
-    await execFileAsync('git', ['clone', sourceUrl, tmpPath], { timeout });
+    await execFileAsync('git', ['clone', cloneUrl, tmpPath], {
+      timeout,
+      env: { ...process.env },
+    });
     await fs.rename(tmpPath, destPath);
   } catch (err: any) {
     await fs.rm(tmpPath, { recursive: true, force: true }).catch(() => {});
@@ -225,7 +246,7 @@ async function cloneToManagedPool(
     const detail = err.stderr?.trim() ? ` stderr: ${err.stderr.trim()}` : ` ${err.message}`;
     throw new ForgeError(
       isTimeout ? 'CLONE_TIMEOUT' : 'CLONE_FAILED',
-      `Failed to clone ${sourceUrl} to ${destPath} after ${durationMs}ms:${detail}`,
+      `Failed to clone ${originalUrl} to ${destPath} after ${durationMs}ms:${detail}`,
       isTimeout
         ? `Clone timed out after ${durationMs}ms. This may be caused by slow filesystem I/O (e.g. Podman virtiofs). The partial clone has been removed.`
         : 'Check the remote URL and your network/SSH access.',
@@ -525,18 +546,63 @@ export async function repoDevelop(
     }
   }
 
-  // ── Tier-3: Clone from remote ─────────────────────────────────────────────
+  // ── Tier-3: Clone from remote registry ───────────────────────────────────
   if (!repoEntry) {
-    // We have no local copy at all. We cannot proceed without a remote URL —
-    // there's nothing to clone from. Return a clear error.
-    throw new ForgeError(
-      'REPO_NOT_FOUND',
-      `Repository "${repoName}" was not found in the local index or managed pool.`,
-      `To proceed:\n` +
-      `  1. If the repo exists locally: run 'forge repo scan' to add it to the index.\n` +
-      `  2. If you want to clone from a remote: call forge_develop with a remoteUrl parameter (not yet supported — coming in a future release).\n` +
-      `  3. Or check the repo name spelling.`,
-    );
+    const canonicalUrl = registryMeta?.canonicalUrl;
+
+    if (!canonicalUrl) {
+      // No remote URL available — cannot clone. Return a clear actionable error.
+      throw new ForgeError(
+        'REPO_NOT_FOUND',
+        `Repository "${repoName}" was not found in the local index or managed pool.`,
+        `To proceed:\n` +
+        `  1. If the repo exists locally: run 'forge repo scan' to add it to the index.\n` +
+        `  2. If the repo is registered in the remote registry, ensure the registry is reachable.\n` +
+        `  3. Or check the repo name spelling.`,
+      );
+    }
+
+    // Clone into the managed pool using the URL-derived layout so the path is
+    // deterministic and consistent with future scans.
+    const dataPath = path.dirname(managedReposPath);
+    const cloneDest = repoClonePath(canonicalUrl, dataPath);
+
+    // Clone (atomic rename pattern — cloneToManagedPool handles temp dir).
+    await cloneToManagedPool(canonicalUrl, cloneDest);
+    await ensureHorusIgnored(cloneDest);
+
+    // Build a synthetic RepoIndexEntry from registry metadata.
+    const now = new Date().toISOString();
+    const syntheticEntry: RepoIndexEntry = {
+      name: repoName,
+      localPath: cloneDest,
+      remoteUrl: canonicalUrl,
+      defaultBranch: registryMeta.defaultBranch ?? 'main',
+      language: registryMeta.language ?? null,
+      framework: null,
+      lastCommitDate: now,
+      lastScannedAt: now,
+      ...(registryMeta.workflow
+        ? {
+            workflow: {
+              type: registryMeta.workflow.type,
+              pushTo: registryMeta.workflow.pushTo,
+              prTarget: registryMeta.workflow.prTarget,
+              branchPattern: registryMeta.workflow.branchPattern,
+              commitFormat: registryMeta.workflow.commitFormat,
+              confirmedAt: now,
+              confirmedBy: 'auto' as const,
+            },
+          }
+        : {}),
+    };
+
+    // Persist to the repo index so the NEXT forge_develop hits Tier-1.
+    const updatedRepos = repoIndex ? [...repoIndex.repos, syntheticEntry] : [syntheticEntry];
+    await saveRepoIndexFn(updatedRepos);
+
+    repoEntry = syntheticEntry;
+    repoSource = 'managed';
   }
 
   // ── Check for existing session (resume flow) ──────────────────────────────
