@@ -863,14 +863,48 @@ export class ForgeCore {
     }
 
     // Provide a saveRepoIndex callback so repoDevelop can persist workflow saves
+    // (also used by Tier-3 to persist a freshly cloned repo entry).
     const saveRepoIndexFn = async (repos: RepoIndexEntry[]): Promise<void> => {
       const currentIndex = await loadRepoIndex(globalConfig.repos.index_path);
       if (currentIndex) {
         await saveRepoIndex({ ...currentIndex, repos }, globalConfig.repos.index_path);
+      } else {
+        // No index file yet — bootstrap a minimal one so the entry is persisted.
+        await saveRepoIndex(
+          { version: '1', scannedAt: new Date().toISOString(), scanPaths: [], repos },
+          globalConfig.repos.index_path,
+        );
       }
     };
 
-    return repoDevelop(opts, globalConfig, repoIndex, saveRepoIndexFn);
+    // ── Remote registry enrichment ──────────────────────────────────────────
+    // If the repo is not in the local index AND the caller hasn't already
+    // provided registryMeta or an explicit localPath, attempt to resolve it
+    // from the shared remote registry so Tier-3 in repoDevelop() can clone
+    // rather than hard-fail.
+    let enrichedOpts: RepoDevelopOptions = opts;
+    if (!opts.registryMeta && !opts.localPath) {
+      const inIndex = repoIndex?.repos.find(
+        (r) => r.name.toLowerCase() === opts.repo.toLowerCase(),
+      );
+      if (!inIndex) {
+        try {
+          const client = await this.getRepoRegistryClient();
+          if (client) {
+            const result = await client.resolve({ name: opts.repo });
+            if (result.match) {
+              enrichedOpts = { ...opts, registryMeta: result.match };
+            }
+          }
+        } catch {
+          // Registry unreachable or lookup failed — fall through.
+          // The inner repoDevelop() Tier-3 will throw REPO_NOT_FOUND with
+          // a clear actionable message.
+        }
+      }
+    }
+
+    return repoDevelop(enrichedOpts, globalConfig, repoIndex, saveRepoIndexFn);
   }
 
   /**
