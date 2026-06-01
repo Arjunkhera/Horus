@@ -89,17 +89,25 @@ spec:
             # plain account name. Override per-vault via vault_create payload.git_org.
             - name: GITHUB_OWNER
               value: "Arjunkhera"
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: vault-secrets
-                  key: GITHUB_TOKEN
+            # GITHUB_TOKEN is mounted as a FILE (see the github-token volume
+            # below), not injected as an env var. Env-var Secret values do NOT
+            # hot-reload: after a PAT rotation the pod kept using the stale token
+            # until restarted, causing vault_create to fail with GitHub
+            # "401 Bad credentials". A projected Secret volume hot-reloads, and
+            # the operator reads GITHUB_TOKEN_FILE fresh on every GitHub request.
+            - name: GITHUB_TOKEN_FILE
+              value: /etc/operator/secrets/GITHUB_TOKEN
           envFrom:
             - configMapRef:
                 name: operator-service-config
           volumeMounts:
             - name: data
               mountPath: /data
+            # Full-directory mount (NOT subPath) so the kubelet hot-reloads the
+            # token file when the vault-secrets Secret is rotated.
+            - name: github-token
+              mountPath: /etc/operator/secrets
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /health
@@ -113,6 +121,16 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+      volumes:
+        # Projects only the GITHUB_TOKEN key from vault-secrets into the mount
+        # directory. A projected Secret volume is hot-reloaded by the kubelet, so
+        # a rotated PAT reaches the operator without a pod restart.
+        - name: github-token
+          secret:
+            secretName: vault-secrets
+            items:
+              - key: GITHUB_TOKEN
+                path: GITHUB_TOKEN
   volumeClaimTemplates:
     - metadata:
         name: data

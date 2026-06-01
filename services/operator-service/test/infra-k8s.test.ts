@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   KubernetesVaultInfra,
   CollisionError,
@@ -708,6 +711,98 @@ describe('KubernetesVaultInfra', () => {
       const patch = JSON.parse(patchCall.body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes'].git_repo).toBe('Arjunkhera/vault-acme_notes');
+    });
+  });
+
+  // ── GitHub token resolution — Secret-rotation hot-reload (bug 52f1cda8) ──────
+  // Regression guard: the operator must read GITHUB_TOKEN from the mounted file
+  // on EVERY GitHub request, so a rotated Secret (hot-reloaded into the file)
+  // takes effect without a pod restart. Previously the token was an env-var
+  // snapshot frozen at construction, which went stale on rotation → 401s.
+  describe('GitHub token resolution (Secret-rotation hot-reload)', () => {
+    /** Authorization headers from GitHub API calls, in order. */
+    function githubAuthHeaders(calls: FakeCall[]): string[] {
+      return calls
+        .filter(c => c.url.startsWith('https://api.github.com/'))
+        .map(c => c.headers?.authorization ?? '');
+    }
+
+    /** Retry-path fake: namespace already owns the repo, so a single GitHub GET
+     *  (carrying the Authorization header) runs and the method returns. */
+    function retryPathFake() {
+      return createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({
+          'acme/notes': { git_repo: 'testorg/vault-acme_notes', reader_endpoint: 'http://r:8000' },
+        }),
+        'GET https://api.github.com/repos/testorg/vault-acme_notes': {
+          status: 200,
+          body: { full_name: 'testorg/vault-acme_notes' },
+        },
+      });
+    }
+
+    it('reads githubTokenPath fresh on every request — a rotated token applies without reconstruction', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'op-token-'));
+      const tokenFile = join(dir, 'GITHUB_TOKEN');
+      try {
+        writeFileSync(tokenFile, 'ghp_initial\n');
+        const config = {
+          ...baseConfig(),
+          githubToken: 'ghp_stale_env',
+          githubTokenPath: tokenFile,
+        };
+        const { fetch, calls } = retryPathFake();
+        const infra = new KubernetesVaultInfra(config, fetch);
+
+        await infra.ensureGitBackingStore('acme/notes', 'git');
+        expect(githubAuthHeaders(calls)).toContain('Bearer ghp_initial');
+
+        // Rotate the token on disk — SAME instance, no reconstruction.
+        writeFileSync(tokenFile, 'ghp_rotated\n');
+        await infra.ensureGitBackingStore('acme/notes', 'git');
+
+        const headers = githubAuthHeaders(calls);
+        expect(headers[headers.length - 1]).toBe('Bearer ghp_rotated');
+        // The frozen env-var snapshot must never have been used.
+        expect(headers).not.toContain('Bearer ghp_stale_env');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('trims trailing whitespace/newline from the token file', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'op-token-'));
+      const tokenFile = join(dir, 'GITHUB_TOKEN');
+      try {
+        writeFileSync(tokenFile, '  ghp_padded\n\n');
+        const config = { ...baseConfig(), githubTokenPath: tokenFile };
+        const { fetch, calls } = retryPathFake();
+        const infra = new KubernetesVaultInfra(config, fetch);
+        await infra.ensureGitBackingStore('acme/notes', 'git');
+        expect(githubAuthHeaders(calls)).toContain('Bearer ghp_padded');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('falls back to the static env-var token when githubTokenPath is unreadable', async () => {
+      const config = {
+        ...baseConfig(),
+        githubToken: 'ghp_env_fallback',
+        githubTokenPath: join(tmpdir(), 'definitely-missing-operator-token-file'),
+      };
+      const { fetch, calls } = retryPathFake();
+      const infra = new KubernetesVaultInfra(config, fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      expect(githubAuthHeaders(calls)).toContain('Bearer ghp_env_fallback');
+    });
+
+    it('uses the static env-var token when no githubTokenPath is configured', async () => {
+      const config = { ...baseConfig(), githubToken: 'ghp_only_env' };
+      const { fetch, calls } = retryPathFake();
+      const infra = new KubernetesVaultInfra(config, fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      expect(githubAuthHeaders(calls)).toContain('Bearer ghp_only_env');
     });
   });
 });
