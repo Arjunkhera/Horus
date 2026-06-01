@@ -191,11 +191,15 @@ def _build_per_vault_headers(
 def _read_endpoints(
     settings: VaultRouterSettings, registry: Optional[VaultRegistry]
 ) -> dict[str, str]:
-    """Fan-out read targets: each vault's READER endpoint when a registry is
-    configured (reads never touch the writer), else the name→url map."""
+    """Fan-out read targets. The default vault uses the READER pool. Non-default
+    vaults use the WRITER: only it holds the per-vault git clone, and the search/
+    list endpoints reconstruct page content from the local filesystem
+    (get_all_documents) — stateless readers have no per-vault clone, so their
+    doc-cache lookup drops every per-vault hit. Routing per-vault reads to the
+    writer keeps content + index on the same pod."""
     if registry is not None and registry.namespaces():
         return {
-            ns: entry.reader_endpoint
+            ns: (entry.reader_endpoint if ns == settings.vault_default else entry.writer_endpoint)
             for ns in registry.namespaces()
             if (entry := registry.get(ns)) is not None
         }
