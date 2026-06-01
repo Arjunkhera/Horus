@@ -222,6 +222,106 @@ async function syncSkills(runtime: ReturnType<typeof detectRuntime> extends Prom
   }
 }
 
+// ── Registry-based skills sync (connected mode) ──────────────────────────────
+
+const GLOBAL_SKILLS = ['horus-anvil', 'horus-vault', 'horus-forge', 'horus-context', 'capture', 'triage'] as const;
+type SkillId = (typeof GLOBAL_SKILLS)[number];
+
+async function fetchLatestSkillBody(controlPlaneUrl: string, id: SkillId): Promise<string | null> {
+  const base = controlPlaneUrl.replace(/\/+$/, '');
+  // 1. Resolve latest version
+  const versionsRes = await fetch(`${base}/api/v1/forge/artifacts/skill/${id}/versions`);
+  if (!versionsRes.ok) return null;
+  const versionsJson = (await versionsRes.json()) as { versions?: string[] };
+  const versions = versionsJson.versions ?? [];
+  if (versions.length === 0) return null;
+  // Pick highest semver (numeric comparison per segment)
+  const latest = versions.slice().sort((a, b) => {
+    const pa = a.split('.').map(Number);
+    const pb = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }).pop()!;
+  // 2. Fetch artifact
+  const artifactRes = await fetch(`${base}/api/v1/forge/artifacts/skill/${id}/${latest}`);
+  if (!artifactRes.ok) return null;
+  const artifact = (await artifactRes.json()) as { files?: Record<string, string> };
+  const b64 = artifact.files?.['SKILL.md'];
+  if (!b64) return null;
+  return Buffer.from(b64, 'base64').toString('utf-8');
+}
+
+async function syncSkillsFromRegistry(controlPlaneUrl: string): Promise<void> {
+  const home = homedir();
+  const skillsBase = join(home, '.claude', 'skills');
+  let synced = 0;
+  const failed: string[] = [];
+
+  for (const id of GLOBAL_SKILLS) {
+    try {
+      const body = await fetchLatestSkillBody(controlPlaneUrl, id);
+      if (!body) {
+        failed.push(id);
+        continue;
+      }
+      const destDir = join(skillsBase, id);
+      mkdirSync(destDir, { recursive: true });
+      writeFileSync(join(destDir, 'SKILL.md'), body, 'utf-8');
+      synced++;
+    } catch {
+      failed.push(id);
+    }
+  }
+
+  if (failed.length === 0) {
+    console.log(chalk.green(`✔ Synced ${synced} global skills from the control plane`));
+  } else {
+    console.log(chalk.yellow(`✔ Synced ${synced} global skills from the control plane`) +
+      chalk.dim(` (failed: ${failed.join(', ')})`));
+  }
+}
+
+async function syncSkillsForCursorFromRegistry(controlPlaneUrl: string): Promise<void> {
+  const home = homedir();
+  const rulesDir = join(home, '.cursor', 'rules');
+  const skillsBase = join(home, '.cursor', 'skills-cursor');
+  mkdirSync(rulesDir, { recursive: true });
+  let synced = 0;
+  const failed: string[] = [];
+
+  for (const id of GLOBAL_SKILLS) {
+    try {
+      const body = await fetchLatestSkillBody(controlPlaneUrl, id);
+      if (!body) {
+        failed.push(id);
+        continue;
+      }
+      // Emit as Cursor rule (always-on context)
+      const ruleDest = join(rulesDir, `${id}.mdc`);
+      const frontmatter = `---\ndescription: Horus ${id} reference\nalwaysApply: true\n---\n\n`;
+      writeFileSync(ruleDest, frontmatter + body, 'utf-8');
+
+      // Emit as Cursor skill (on-demand, structured instructions)
+      const skillDir = join(skillsBase, id);
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), body, 'utf-8');
+      synced++;
+    } catch {
+      failed.push(id);
+    }
+  }
+
+  if (failed.length === 0) {
+    console.log(chalk.green(`✔ Synced ${synced} global skills for Cursor from the control plane`));
+  } else {
+    console.log(chalk.yellow(`✔ Synced ${synced} global skills for Cursor from the control plane`) +
+      chalk.dim(` (failed: ${failed.join(', ')})`));
+  }
+}
+
 // ── Cursor rules + skills sync ────────────────────────────────────────────────
 
 async function syncSkillsForCursor(runtime: ReturnType<typeof detectRuntime> extends Promise<infer R> ? R : never): Promise<void> {
@@ -371,10 +471,14 @@ export async function runConnect(
   // Sync horus-core skills (only when claude-code is a target)
   if (targets.includes('claude-code')) {
     if (connectedMode) {
-      // In connected mode the horus-forge-1 container does not exist locally.
-      // TODO: fetch skills via the control plane instead (skills API not yet available).
-      console.warn(chalk.yellow('[connect] Skipping skills sync — connected mode has no local forge container.'));
-      console.log(chalk.dim('         TODO: fetch skills via the control plane when the skills API is available.'));
+      const skillsSpinner = ora('Syncing horus-core skills from the control plane...').start();
+      try {
+        await syncSkillsFromRegistry(config.control_plane_url!);
+        skillsSpinner.succeed('horus-core skills synced to ~/.claude/skills/');
+      } catch (error) {
+        skillsSpinner.warn('Could not sync skills from the control plane');
+        console.log(chalk.dim((error as Error).message));
+      }
     } else {
       const skillsSpinner = ora('Syncing horus-core skills...').start();
       try {
@@ -390,8 +494,14 @@ export async function runConnect(
   // Sync horus-core rules for Cursor
   if (targets.includes('cursor')) {
     if (connectedMode) {
-      // TODO: fetch skills via the control plane when the skills API is available.
-      console.warn(chalk.yellow('[connect] Skipping Cursor rules sync — connected mode has no local forge container.'));
+      const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor from the control plane...').start();
+      try {
+        await syncSkillsForCursorFromRegistry(config.control_plane_url!);
+        cursorRulesSpinner.succeed('horus-core rules synced to ~/.cursor/rules/ and skills to ~/.cursor/skills-cursor/');
+      } catch (error) {
+        cursorRulesSpinner.warn('Could not sync Cursor rules from the control plane');
+        console.log(chalk.dim((error as Error).message));
+      }
     } else {
       const cursorRulesSpinner = ora('Syncing horus-core rules for Cursor...').start();
       try {
