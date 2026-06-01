@@ -361,17 +361,6 @@ const TOOLS = [
     },
   },
   {
-    name: 'forge_repo_scan',
-    description:
-      '[DEPRECATED] Trigger a full repository index rescan. Use forge_repo_register instead to add repositories to the registry. ' +
-      'Scan paths are read from the global Forge config — no parameters needed. ' +
-      'Returns the number of scan paths checked and repositories found.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {},
-    },
-  },
-  {
     name: 'forge_develop',
     description:
       'Start or resume a code session for a work item on a repository. Creates a git worktree at ~/Horus/data/sessions/<workItem>-<slug>/. ' +
@@ -784,24 +773,6 @@ function buildServer(workspaceRoot: string): Server {
             }
             throw err;
           }
-        }
-
-        case 'forge_repo_scan': {
-          const index = await forge.repoScan();
-          return {
-            content: [{
-              type: 'text',
-              text: '⚠️ forge_repo_scan is deprecated. Use forge_repo_register instead.\n\n' + JSON.stringify({
-                scanPaths: index.scanPaths,
-                reposFound: index.repos.length,
-                repos: index.repos.map((r: RepoIndexEntry) => ({
-                  name: r.name,
-                  localPath: r.localPath,
-                  remoteUrl: r.remoteUrl,
-                })),
-              }, null, 2),
-            }],
-          };
         }
 
         case 'forge_repo_list': {
