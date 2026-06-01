@@ -1,6 +1,6 @@
 {
   "name": "@arkhera30/cli",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "CLI for managing the Horus AI development stack",
   "type": "module",
   "bin": {
@@ -11,7 +11,8 @@
     "build:guides": "node scripts/build-guides.mjs",
     "dev": "tsup src/index.ts --format esm --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
