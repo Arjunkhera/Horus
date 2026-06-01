@@ -14,9 +14,9 @@ sandbox (no Docker daemon, GHCR push blocked, no cluster).
 > Dockerfiles + CI jobs are live. Images are CI-built by `docker-publish.yml` on
 > a `v*` tag — cut `v0.1.0-alpha.1` (step 2) rather than building by hand. This
 > runbook now targets a **persistent** k3s control plane (Track A): real domain
-> + TLS (cert-manager), Sealed Secrets, and the full app-of-apps. The A1
-> substrate-provisioning section (EC2/EIP/EBS/k3s install) is appended when the
-> node is stood up.
+> + TLS (cert-manager), Sealed Secrets, and the full app-of-apps. The substrate
+> (EC2/EIP/EBS/k3s install) and local kubeconfig access are documented in section
+> **A1**.
 
 ---
 
@@ -37,6 +37,113 @@ sandbox (no Docker daemon, GHCR push blocked, no cluster).
     `enable-forge-bucket-versioning` Job).
   - the operator backup bucket (`BACKUP_BUCKET`).
 - The Horus CLI built (`pnpm --filter @arkhera30/cli build`) for `horus operator …`.
+
+---
+
+## A1. Cluster substrate & local kubeconfig access
+
+The persistent control plane the rest of this runbook targets. Section 0 assumes a
+cluster + `kubectl` context already exist — this section is how that substrate was
+provisioned and how an operator gets `kubectl`/port-forward access to it.
+
+### A1.1 How the node was provisioned
+
+A single always-on EC2 node in **`us-east-1`** (account `065585372120`) runs k3s +
+ArgoCD. It replaced the earlier throwaway validation cluster.
+
+| Attribute | Value |
+|-----------|-------|
+| Instance | `i-0698c4706c202cd3c` — **t4g.large** (ARM/Graviton, 2 vCPU, 8 GB) |
+| AMI | Ubuntu 22.04 LTS **arm64** |
+| Root volume | 40 GB gp3 (EBS) |
+| Elastic IP | **13.219.32.204** (`eipalloc-0f0883acbb80306b4`) |
+| Security group | `horus-track-a-sg` — `22` from admin IP, `80`/`443` public |
+| SSH keypair | `~/.ssh/horus-track-a.pem` |
+
+> **ARM substrate:** because the node is Graviton/arm64, every published image must
+> be multi-arch (amd64+arm64) — they are. A non-multi-arch image will `ImagePull`
+> fine but crash-loop on exec.
+
+Provision with the **`default` (root)** AWS profile (the `arkhera` profile is
+S3-only and lacks `ec2:*`), then install k3s and bootstrap ArgoCD on the node:
+
+```bash
+# On the node (Ubuntu), install k3s — bundles Traefik ingress + local-path StorageClass.
+curl -sfL https://get.k3s.io | sh -
+
+# Bootstrap ArgoCD (the app-of-apps `horus-root` drives everything else — section 5).
+sudo k3s kubectl create namespace argocd
+sudo k3s kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+```
+
+On the node, `kubectl` is reached via `sudo k3s kubectl` (k3s ships its own
+bundled binary). The steps below give you `kubectl` from your **local** machine.
+
+### A1.2 SSH access
+
+```bash
+ssh -i ~/.ssh/horus-track-a.pem ubuntu@13.219.32.204
+```
+
+> The `horus-track-a.pem` keypair is **distinct from the Forge registry's SSH
+> key** — they are different hosts with different keypairs. Don't cross them.
+
+### A1.3 Fetch the kubeconfig & configure a local context
+
+k3s writes its admin kubeconfig to `/etc/rancher/k3s/k3s.yaml` (root-owned, mode
+`600`) with the server set to `https://127.0.0.1:6443` — the loopback only works
+on the node, so the server URL must be rewritten to the public EIP. Use the
+helper script (preferred — see `scripts/get-cp-kubeconfig.sh`):
+
+```bash
+scripts/get-cp-kubeconfig.sh
+# writes ~/.kube/horus-track-a.yaml with a named context "horus-track-a"
+```
+
+Or do it by hand:
+
+```bash
+# 1. Pull the admin kubeconfig (sudo: it's root-only on the node).
+ssh -i ~/.ssh/horus-track-a.pem ubuntu@13.219.32.204 \
+  'sudo cat /etc/rancher/k3s/k3s.yaml' > ~/.kube/horus-track-a.yaml
+
+# 2. Rewrite the loopback server URL to the public EIP.
+sed -i '' 's#https://127.0.0.1:6443#https://13.219.32.204:6443#' \
+  ~/.kube/horus-track-a.yaml   # GNU sed: drop the '' after -i
+
+# 3. Use it as a standalone kubeconfig…
+KUBECONFIG=~/.kube/horus-track-a.yaml kubectl get nodes
+
+# …or merge it into your default kubeconfig as a named context.
+KUBECONFIG=~/.kube/config:~/.kube/horus-track-a.yaml \
+  kubectl config view --flatten > ~/.kube/config.merged && \
+  mv ~/.kube/config.merged ~/.kube/config
+kubectl config use-context horus-track-a
+```
+
+> k3s names the cluster/user/context `default` in `k3s.yaml`; the script renames
+> all three to `horus-track-a` so it won't collide with other `default` contexts.
+> The bearer token in this file is **cluster-admin** — treat the file as a secret
+> (`chmod 600`, never commit it).
+
+### A1.4 Port-forward without a full kubeconfig (SSH tunnel)
+
+For one-off access to an in-cluster service (e.g. operator-service's admin port
+in step 4) without configuring `kubectl` locally, run the port-forward **on the
+node** and tunnel the local port over SSH:
+
+```bash
+# Terminal 1 — on the node, expose the service on the node's localhost:8090.
+ssh -i ~/.ssh/horus-track-a.pem ubuntu@13.219.32.204 \
+  'sudo k3s kubectl -n horus-system port-forward svc/operator-service 8090:8090'
+
+# Terminal 2 — forward your local 8090 to the node's 8090.
+ssh -L 8090:localhost:8090 -i ~/.ssh/horus-track-a.pem ubuntu@13.219.32.204
+
+# Now localhost:8090 on your machine reaches the in-cluster service.
+curl -s localhost:8090/keys/jwks
+```
 
 ---
 
