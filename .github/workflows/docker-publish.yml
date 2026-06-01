@@ -69,6 +69,7 @@ jobs:
               - 'packages/horus-ui-client/**'
               - 'packages/horus-ui/**'
               - 'packages/search/**'
+              - 'packages/forge/**'
               - 'packages/forge/packages/core/**'
               - 'packages/forge/packages/mcp-server/**'
 
