@@ -8,9 +8,14 @@ commonLabels:
   app.kubernetes.io/component: forge
 
 # Pinned image tag (ADR-0007 — never :latest).
+# Re-pinned to sha-f607219: enable the S3-backed shared repo index
+# (POST/GET/PATCH/DELETE /repos). The base pin 0.1.0-alpha.1 (cut 2026-05-30
+# 15:55) predates the S3 RepoStorageAdapter wiring (PR #361, 270b977) + the
+# DELETE /repos fix (PR #363, f607219), so the repo routes never mounted and
+# /repos returned 404 for valid principals. Artifact routes were unaffected.
 images:
   - name: ghcr.io/arjunkhera/horus/forge-registry
-    newTag: 0.1.0-alpha.1
+    newTag: sha-f607219
 
 resources:
   - forge-registry.yaml
