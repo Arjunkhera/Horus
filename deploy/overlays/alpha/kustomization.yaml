@@ -24,6 +24,9 @@ resources:
 # (Vault V3 / B3 Part C, PR #368).
 # vault re-pinned to sha-ef4f314: token-less git remotes via credential-helper —
 # fixes silent clone/push breakage on PAT rotation (bug 3a561b8b, PR #379).
+# operator-service re-pinned to sha-de7df7e: reads GITHUB_TOKEN per-request from a
+# mounted (hot-reloading) Secret volume instead of a frozen env var — fixes stale
+# token / 401 Bad credentials after PAT rotation (bug 52f1cda8, PR #382).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
@@ -32,4 +35,4 @@ images:
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-6df2cec
   - name: ghcr.io/arjunkhera/horus/operator-service
-    newTag: sha-031c6c8
+    newTag: sha-de7df7e
