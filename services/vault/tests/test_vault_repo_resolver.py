@@ -58,7 +58,6 @@ class TestResolveLazyClone:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resolver = VaultRepoResolver(
             default_repo_path="/data/knowledge-repo",
-            github_token="ghp_test123",
             vaults_base=str(tmp_path / "vaults"),
         )
 
@@ -67,12 +66,15 @@ class TestResolveLazyClone:
         expected_dir = str(tmp_path / "vaults" / "org-tenant-a" / "knowledge-repo")
         assert result == expected_dir
 
-        # Verify git clone was called with authenticated URL
+        # Clone must use a TOKENLESS URL — auth comes from the git credential
+        # helper, never the URL (bug 3a561b8b regression guard).
         clone_call = mock_run.call_args_list[0]
         cmd = clone_call[0][0]
         assert cmd[0] == "git"
         assert cmd[1] == "clone"
-        assert "x-access-token:ghp_test123@github.com/org/tenant-a-kb.git" in cmd[2]
+        assert cmd[2] == "https://github.com/org/tenant-a-kb.git"
+        assert "@" not in cmd[2]
+        assert "x-access-token" not in cmd[2]
         assert cmd[3] == expected_dir
 
     @patch("src.layer2.vault_repo_resolver.subprocess.run")
@@ -80,7 +82,6 @@ class TestResolveLazyClone:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resolver = VaultRepoResolver(
             default_repo_path="/data/knowledge-repo",
-            github_token="ghp_test123",
             vaults_base=str(tmp_path / "vaults"),
         )
 
@@ -103,7 +104,6 @@ class TestResolveLazyClone:
 
         resolver = VaultRepoResolver(
             default_repo_path="/data/knowledge-repo",
-            github_token="ghp_test123",
             vaults_base=str(vaults_base),
         )
 
@@ -117,11 +117,10 @@ class TestResolveLazyClone:
         assert cmd[3:] == ["pull", "--ff-only"]
 
     @patch("src.layer2.vault_repo_resolver.subprocess.run")
-    def test_no_token_uses_public_url(self, mock_run, tmp_path):
+    def test_clone_url_is_always_tokenless(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         resolver = VaultRepoResolver(
             default_repo_path="/data/knowledge-repo",
-            github_token="",
             vaults_base=str(tmp_path / "vaults"),
         )
 
@@ -130,6 +129,7 @@ class TestResolveLazyClone:
         clone_call = mock_run.call_args_list[0]
         cmd = clone_call[0][0]
         assert cmd[2] == "https://github.com/org/public-kb.git"
+        assert "@" not in cmd[2]
 
     @patch("src.layer2.vault_repo_resolver.subprocess.run")
     def test_slug_replaces_slashes(self, mock_run, tmp_path):
