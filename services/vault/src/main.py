@@ -267,13 +267,21 @@ def get_store_override(request: Request):
     """Dependency override to inject SearchStore from app state.
 
     When X-Vault-Collection is present (injected by vault-router), returns a
-    vault-scoped engine that queries the per-vault Typesense collection.
+    vault-scoped engine that queries the per-vault Typesense collection AND,
+    for non-default vaults, reads filesystem pages from the per-vault clone
+    (/data/vaults/<slug>/knowledge-repo) so reindex/get-page work. The reader
+    has no per-vault clone (repo_resolver is None there); non-default get-page
+    is routed to the writer by vault-router.
     """
     base_store = request.app.state.store
     collection = request.headers.get("x-vault-collection")
     namespace = request.headers.get("x-vault-namespace")
     if collection and isinstance(base_store, TypesenseSearchEngine):
-        return base_store.for_vault(collection, namespace or "default")
+        per_vault_paths = None
+        resolver = getattr(request.app.state, "repo_resolver", None)
+        if resolver is not None and namespace and namespace not in ("default", ""):
+            per_vault_paths = {"shared": resolver.repo_path(namespace)}
+        return base_store.for_vault(collection, namespace or "default", per_vault_paths)
     return base_store
 
 

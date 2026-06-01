@@ -108,10 +108,21 @@ class TypesenseSearchEngine(SearchStore):
         self._vault_name: str = vault_name or os.getenv("VAULT_NAME", "default")
         self._client: Any = None  # lazily initialised
 
-    def for_vault(self, collection_name: str, vault_name: str) -> "TypesenseSearchEngine":
-        """Return a vault-scoped engine sharing the underlying Typesense client."""
+    def for_vault(
+        self,
+        collection_name: str,
+        vault_name: str,
+        collection_paths: Optional[dict[str, str]] = None,
+    ) -> "TypesenseSearchEngine":
+        """Return a vault-scoped engine sharing the underlying Typesense client.
+
+        collection_paths overrides the filesystem roots so reindex/get_document
+        read from the per-vault clone (/data/vaults/<slug>/knowledge-repo) rather
+        than the default repo. When omitted, the base engine's paths are inherited
+        (correct for the default vault).
+        """
         engine = TypesenseSearchEngine(
-            collection_paths=self._collection_paths,
+            collection_paths=collection_paths if collection_paths is not None else self._collection_paths,
             collection_name=collection_name,
             vault_name=vault_name,
         )

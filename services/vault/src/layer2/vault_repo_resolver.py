@@ -36,6 +36,18 @@ class VaultRepoResolver:
         self._lock = threading.Lock()
         self._resolved: dict[str, str] = {}
 
+    def repo_path(self, vault_namespace: str) -> str:
+        """Return the local clone path for a vault namespace WITHOUT cloning.
+
+        Deterministic from the slug convention — used by the search store to
+        point reindex/get_document at the per-vault clone. Does not touch the
+        network or the filesystem.
+        """
+        if vault_namespace == DEFAULT_NAMESPACE or not vault_namespace:
+            return self._default_path
+        slug = vault_namespace.replace("/", "-").replace("\\", "-")
+        return str(self._vaults_base / slug / "knowledge-repo")
+
     def resolve(
         self,
         vault_namespace: str,
