@@ -22,11 +22,13 @@ resources:
 # vault re-pinned to sha-e790daf: flat-UUID storage (bare-UUID id, pages/<uuid>.md)
 # + full-body indexing + wiki-link auto-edges + typed inverse-labelled edges
 # (Vault V3 / B3 Part C, PR #368).
+# vault re-pinned to sha-ef4f314: token-less git remotes via credential-helper —
+# fixes silent clone/push breakage on PAT rotation (bug 3a561b8b, PR #379).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-e790daf
+    newTag: sha-ef4f314
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-6df2cec
   - name: ghcr.io/arjunkhera/horus/operator-service
