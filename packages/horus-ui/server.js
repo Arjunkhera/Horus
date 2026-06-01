@@ -17,6 +17,7 @@ import { getCachedHistory, setCachedHistory } from './agent-cache.js';
 import { buildSystemStatus } from './system-status.js';
 import { parseCitations } from './citation-parser.js';
 import { forgeMcpRouter } from './forge-local-mcp.js';
+import { vaultMcpRouter } from './vault-local-mcp.js';
 import { getToken } from './token-provider.js';
 
 // The agent chat surface is gated, not fatal: without an Anthropic key the
@@ -47,13 +48,19 @@ app.get('/health', (_req, res) => res.send('ok'));
 // Health endpoint: GET /forge/health
 app.use('/forge', forgeMcpRouter);
 
-// ── Vault MCP proxy (connected mode only) ───────────────────────────────────
-// When HORUS_CONTROL_PLANE_URL is set, proxy /vault/mcp → control plane,
-// injecting the bearer token from the configured token provider.
-// Forge stays in-process in both modes.
+// ── Vault MCP (connected mode only) ─────────────────────────────────────────
+// The control plane serves the vault as a REST API but has NO MCP endpoint, so
+// /vault/mcp is handled IN-PROCESS by vaultMcpRouter — it embeds the
+// @vault/knowledge-mcp adapter pointed at the CP REST base, authenticated with
+// the configured token provider (mirrors how Forge runs in-process). Remaining
+// /vault/* paths are proxied straight through to the CP REST endpoints, with
+// the same bearer token injected. Forge stays in-process in both modes.
 const CONTROL_PLANE_URL = (process.env.HORUS_CONTROL_PLANE_URL || '').trim();
 if (CONTROL_PLANE_URL) {
-  console.log(`[horus-ui] Connected mode: proxying /vault/mcp → ${CONTROL_PLANE_URL}/api/v1/vault/mcp`);
+  console.log(`[horus-ui] Connected mode: vault MCP in-process at /vault/mcp → ${CONTROL_PLANE_URL}/api/v1/vault`);
+  // Handles /vault/mcp and /vault/health; falls through for other /vault/* paths.
+  app.use('/vault', vaultMcpRouter);
+  // REST passthrough for non-MCP /vault/* paths (e.g. direct get-page/search).
   app.use(
     '/vault',
     createProxyMiddleware({

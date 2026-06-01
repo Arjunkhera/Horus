@@ -50,6 +50,11 @@ const ANVIL_SERVICE = `\
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=horus-neo4j
+      # Connected mode: lets horus_search federate vault-scoped queries to the
+      # control plane (local Typesense holds no vault docs). Empty = local-only.
+      - HORUS_CONTROL_PLANE_URL=\${HORUS_CONTROL_PLANE_URL:-}
+      - TOKEN_PROVIDER_KIND=\${TOKEN_PROVIDER_KIND:-}
+      - TOKEN_PROVIDER_CONFIG=\${TOKEN_PROVIDER_CONFIG:-}
     depends_on:
       typesense:
         condition: service_healthy

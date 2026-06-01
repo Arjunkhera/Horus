@@ -13,6 +13,8 @@
 
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -61,29 +63,48 @@ function log(level: string, message: string, extra?: Record<string, unknown>) {
   process.stderr.write(JSON.stringify(entry) + "\n");
 }
 
-async function callKnowledgeAPI(path: string, body: unknown): Promise<unknown> {
-  const response = await fetch(`${endpoint}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${response.statusText}\n${errorText}`);
-  }
-  return response.json();
+/**
+ * Options for {@link buildServer}. When omitted, the server uses the
+ * module-level `endpoint` (CLI/env) and sends no Authorization header —
+ * preserving the original local-container behaviour. The connected-mode
+ * in-process host (horus-ui) passes a CP REST base + a token getter so every
+ * call is authenticated and scoped to the control plane.
+ */
+export interface VaultMcpServerOptions {
+  /** REST base URL, e.g. `https://cp/api/v1/vault`. Defaults to the CLI/env endpoint. */
+  endpoint?: string;
+  /** Returns the bearer token to attach, or a falsy value to send none. Re-read per call. */
+  getToken?: () => string | null | undefined;
 }
 
-async function callKnowledgeAPIGet(path: string): Promise<unknown> {
-  const response = await fetch(`${endpoint}${path}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${response.statusText}\n${errorText}`);
+/**
+ * Build a REST client bound to a specific endpoint + token source. The token
+ * getter is invoked per request so refreshed tokens are picked up.
+ */
+function makeApiClient(opts: Required<Pick<VaultMcpServerOptions, "endpoint">> & Pick<VaultMcpServerOptions, "getToken">) {
+  const base = opts.endpoint.replace(/\/$/, "");
+
+  function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    const headers = { ...extra };
+    const token = opts.getToken?.();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return headers;
   }
-  return response.json();
+
+  async function callKnowledgeAPI(path: string, body: unknown): Promise<unknown> {
+    const response = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${response.statusText}\n${errorText}`);
+    }
+    return response.json();
+  }
+
+  return { callKnowledgeAPI };
 }
 
 // Shared optional vault parameter — scopes operations to a specific vault instance
@@ -435,8 +456,16 @@ const TOOLS: Tool[] = [
 /**
  * Build and configure an MCP Server instance with all tool handlers.
  * Called once for stdio, or once per MCP session in HTTP mode.
+ *
+ * @param opts Optional endpoint + token source. Omit for the default
+ *   local-container behaviour (env/CLI endpoint, no auth).
  */
-function buildServer(): Server {
+export function buildServer(opts: VaultMcpServerOptions = {}): Server {
+  const { callKnowledgeAPI } = makeApiClient({
+    endpoint: opts.endpoint ?? endpoint,
+    getToken: opts.getToken,
+  });
+
   const server = new Server(
     { name: "@vault/knowledge-mcp", version: "0.2.0" },
     { capabilities: { tools: {} } }
@@ -691,16 +720,33 @@ async function startHttp(port: number, host: string): Promise<void> {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-if (useHttp) {
-  startHttp(httpPort, httpHost).catch((error) => {
-    log("error", "Fatal error starting HTTP server", {
-      error: error instanceof Error ? error.message : String(error),
+/**
+ * True only when this module is the process entry point (the `knowledge-mcp`
+ * bin). When imported as a library (e.g. by horus-ui's in-process vault MCP
+ * router) this is false, so no transport is started on import.
+ */
+function isRunningDirectly(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isRunningDirectly()) {
+  if (useHttp) {
+    startHttp(httpPort, httpHost).catch((error) => {
+      log("error", "Fatal error starting HTTP server", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      process.exit(1);
     });
-    process.exit(1);
-  });
-} else {
-  startStdio().catch((error) => {
-    process.stderr.write(`Fatal error: ${error}\n`);
-    process.exit(1);
-  });
+  } else {
+    startStdio().catch((error) => {
+      process.stderr.write(`Fatal error: ${error}\n`);
+      process.exit(1);
+    });
+  }
 }
