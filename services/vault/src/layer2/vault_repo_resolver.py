@@ -29,11 +29,9 @@ class VaultRepoResolver:
     def __init__(
         self,
         default_repo_path: str,
-        github_token: str = "",
         vaults_base: str = VAULTS_BASE,
     ):
         self._default_path = default_repo_path
-        self._github_token = github_token
         self._vaults_base = Path(vaults_base)
         self._lock = threading.Lock()
         self._resolved: dict[str, str] = {}
@@ -77,7 +75,7 @@ class VaultRepoResolver:
                 return str(repo_dir)
 
             repo_dir.parent.mkdir(parents=True, exist_ok=True)
-            clone_url = self._authenticated_url(git_repo)
+            clone_url = self._repo_url(git_repo)
             try:
                 subprocess.run(
                     ["git", "clone", clone_url, str(repo_dir)],
@@ -97,9 +95,10 @@ class VaultRepoResolver:
             self._resolved[vault_namespace] = str(repo_dir)
             return str(repo_dir)
 
-    def _authenticated_url(self, git_repo: str) -> str:
-        if self._github_token:
-            return f"https://x-access-token:{self._github_token}@github.com/{git_repo}.git"
+    def _repo_url(self, git_repo: str) -> str:
+        # Tokenless URL — auth comes from the global git credential helper
+        # configured in entrypoint.sh. Never bake the token into the URL
+        # (rotating it would silently break clones/pushes — bug 3a561b8b).
         return f"https://github.com/{git_repo}.git"
 
     def _git_pull(self, repo_dir: Path) -> None:

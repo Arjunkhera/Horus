@@ -120,16 +120,30 @@ if echo "$VAULT_KNOWLEDGE_REPO_URL" | grep -qE '^(git@|ssh://)'; then
   exit 1
 fi
 
-# Clone if not already present
+# ── Git credentials (token-less remotes + credential helper) ─────────────────
+# Configure auth via a global credential helper BEFORE any clone/fetch/push, so
+# the token is NEVER baked into a remote URL. Baking the PAT into the URL means
+# rotating/expiring it silently breaks fresh reader pods and all writes
+# (bug 3a561b8b). Remotes stay tokenless (https://github.com/owner/repo.git);
+# git reads the PAT from ~/.git-credentials via the store helper. The --global
+# helper also covers per-vault clones created at runtime by VaultRepoResolver.
+export GIT_TERMINAL_PROMPT=0
+if [ -n "$GITHUB_TOKEN" ]; then
+  git config --global credential.helper "store"
+  printf 'https://oauth2:%s@github.com\n' "$GITHUB_TOKEN" > ~/.git-credentials
+  chmod 600 ~/.git-credentials
+elif [ ! -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
+  # No token and nothing cloned yet — fail fast with a clear message rather than
+  # a cryptic auth error deep inside the clone of a private repo.
+  log_err "GITHUB_TOKEN is not set and $KNOWLEDGE_REPO_PATH has no clone yet. A valid token is required to clone/push the knowledge repo."
+  exit 1
+fi
+
+# Clone if not already present (auth via the credential helper above — no token in URL)
 if [ -n "$VAULT_KNOWLEDGE_REPO_URL" ] && [ ! -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
   log "Cloning knowledge repo from $VAULT_KNOWLEDGE_REPO_URL..."
-  if [ -n "$GITHUB_TOKEN" ]; then
-    CLONE_URL=$(echo "$VAULT_KNOWLEDGE_REPO_URL" | sed "s|https://|https://${GITHUB_TOKEN}@|")
-  else
-    CLONE_URL="$VAULT_KNOWLEDGE_REPO_URL"
-  fi
-  git clone "$CLONE_URL" "$KNOWLEDGE_REPO_PATH" || {
-    log_err "Failed to clone knowledge repo"
+  git clone "$VAULT_KNOWLEDGE_REPO_URL" "$KNOWLEDGE_REPO_PATH" || {
+    log_err "Failed to clone knowledge repo (check GITHUB_TOKEN is valid and not expired)"
     exit 1
   }
   log "Knowledge repo cloned successfully"
@@ -142,11 +156,8 @@ if [ -z "$GITHUB_REPO" ] && [ -n "$VAULT_KNOWLEDGE_REPO_URL" ]; then
   log "Derived GITHUB_REPO from URL: $GITHUB_REPO"
 fi
 
-# Configure git credentials and identity for any push operations
-if [ -n "$GITHUB_TOKEN" ] && [ -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
-  git -C "$KNOWLEDGE_REPO_PATH" config credential.helper "store"
-  echo "https://oauth2:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
-fi
+# Git credentials are configured globally before the clone (see above) — no
+# per-repo credential.helper or token-in-URL needed here.
 # Set the git identity --global (this script runs as appuser via gosu) so it
 # applies to BOTH the default knowledge-repo AND the per-vault clones created at
 # runtime by VaultRepoResolver. Per-repo config covered only the default vault,
@@ -159,13 +170,8 @@ if [ -n "$VAULT_KNOWLEDGE_REPO_URL" ] && [ -d "$KNOWLEDGE_REPO_PATH/.git" ]; the
   CURRENT_REMOTE=$(git -C "$KNOWLEDGE_REPO_PATH" remote get-url origin 2>/dev/null || echo "")
   if echo "$CURRENT_REMOTE" | grep -qE '^(git@|ssh://)'; then
     log "Existing clone has SSH remote ($CURRENT_REMOTE) — updating to HTTPS..."
-    if [ -n "$GITHUB_TOKEN" ]; then
-      NEW_REMOTE=$(echo "$VAULT_KNOWLEDGE_REPO_URL" | sed "s|https://|https://${GITHUB_TOKEN}@|")
-    else
-      NEW_REMOTE="$VAULT_KNOWLEDGE_REPO_URL"
-      log_err "Warning: GITHUB_TOKEN not set — remote updated to plain HTTPS, push operations may fail"
-    fi
-    git -C "$KNOWLEDGE_REPO_PATH" remote set-url origin "$NEW_REMOTE"
+    # Tokenless remote — auth comes from the global credential helper, never the URL.
+    git -C "$KNOWLEDGE_REPO_PATH" remote set-url origin "$VAULT_KNOWLEDGE_REPO_URL"
     log "Remote URL updated to HTTPS"
   fi
 fi
