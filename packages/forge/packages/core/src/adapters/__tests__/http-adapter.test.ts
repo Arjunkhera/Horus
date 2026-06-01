@@ -277,14 +277,34 @@ describe('HttpAdapter', () => {
     expect(err).not.toBeInstanceOf(PreUploadValidationError);
   });
 
-  // ── list() / read() / exists() ────────────────────────────────────────────
+  // ── list() / listVersions() / read() / exists() ───────────────────────────
 
-  it('list() returns parsed artifacts from server', async () => {
+  const b64 = (s: string): string => Buffer.from(s, 'utf-8').toString('base64');
+  const SKILL_META_YAML = [
+    'id: my-skill',
+    'name: My Skill',
+    'version: 1.2.3',
+    'description: A test skill',
+    'type: skill',
+    'tags: []',
+  ].join('\n');
+
+  it('list() maps the registry `hits` summaries onto ArtifactMeta', async () => {
     const listFetch = mockFetch({
       status: 200,
       body: {
-        artifacts: [
-          { id: 'skill-a', name: 'Skill A', version: '1.0.0', description: 'desc', type: 'skill', tags: [] },
+        query: 'skill',
+        total: 1,
+        hits: [
+          {
+            artifact_id: 'skill-a',
+            id: 'skill:skill-a:1.0.0',
+            name: 'Skill A',
+            version: '1.0.0',
+            description: 'desc',
+            type: 'skill',
+            tags: ['x'],
+          },
         ],
       },
     });
@@ -292,9 +312,62 @@ describe('HttpAdapter', () => {
     const results = await listAdapter.list('skill');
     expect(results).toHaveLength(1);
     expect(results[0]!.id).toBe('skill-a');
+    expect(results[0]!.version).toBe('1.0.0');
+    // Uses the search/list querystring route, not a path segment.
+    const [url] = (listFetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/artifacts?type=skill&limit=250`);
   });
 
-  it('read() throws ArtifactNotFoundError on 404', async () => {
+  it('listVersions() returns versions sorted highest-first', async () => {
+    const vFetch = mockFetch({ status: 200, body: { type: 'skill', id: 'my-skill', versions: ['1.0.0', '1.2.0'] } });
+    const vAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: vFetch });
+    expect(await vAdapter.listVersions('skill', 'my-skill')).toEqual(['1.2.0', '1.0.0']);
+    const [url] = (vFetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/artifacts/skill/my-skill/versions`);
+  });
+
+  it('listVersions() returns [] on 404 (legacy flat-layout fallback)', async () => {
+    const vAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: mockFetch({ status: 404 }) });
+    expect(await vAdapter.listVersions('skill', 'my-skill')).toEqual([]);
+  });
+
+  it('read() with explicit version fetches the 3-segment route and decodes base64 files', async () => {
+    const readFetch = mockFetch({
+      status: 200,
+      body: {
+        type: 'skill',
+        id: 'my-skill',
+        version: '1.2.3',
+        files: { 'metadata.yaml': b64(SKILL_META_YAML), 'SKILL.md': b64('# My Skill\nBody.') },
+      },
+    });
+    const readAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: readFetch });
+    const bundle = await readAdapter.read('skill', 'my-skill@1.2.3');
+    expect(bundle.meta.id).toBe('my-skill');
+    expect(bundle.meta.version).toBe('1.2.3');
+    expect(bundle.content).toBe('# My Skill\nBody.');
+    expect(bundle.contentPath).toBe('SKILL.md');
+    const [url] = (readFetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/artifacts/skill/my-skill/1.2.3`);
+  });
+
+  it('read() with no version resolves latest via listVersions then fetches it', async () => {
+    const seqFetch = mockFetchSequence([
+      { status: 200, body: { type: 'skill', id: 'my-skill', versions: ['1.2.3'] } },
+      {
+        status: 200,
+        body: { type: 'skill', id: 'my-skill', version: '1.2.3', files: { 'metadata.yaml': b64(SKILL_META_YAML), 'SKILL.md': b64('hi') } },
+      },
+    ]);
+    const seqAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: seqFetch });
+    const bundle = await seqAdapter.read('skill', 'my-skill');
+    expect(bundle.meta.version).toBe('1.2.3');
+    const calls = (seqFetch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0]![0]).toBe(`${BASE_URL}/artifacts/skill/my-skill/versions`);
+    expect(calls[1]![0]).toBe(`${BASE_URL}/artifacts/skill/my-skill/1.2.3`);
+  });
+
+  it('read() throws ArtifactNotFoundError when no versions exist', async () => {
     const notFoundFetch = mockFetch({ status: 404, body: { message: 'Not found' } });
     const notFoundAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: notFoundFetch });
     await expect(notFoundAdapter.read('skill', 'unknown-skill')).rejects.toThrow(
@@ -302,17 +375,24 @@ describe('HttpAdapter', () => {
     );
   });
 
-  it('exists() returns true for 200 response', async () => {
+  it('exists() returns true for an explicit version that HEADs 200', async () => {
     const existsFetch = mockFetch({ status: 200 });
     const existsAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: existsFetch });
-    const result = await existsAdapter.exists('skill', 'my-skill');
-    expect(result).toBe(true);
+    expect(await existsAdapter.exists('skill', 'my-skill@1.0.0')).toBe(true);
+    const [url, init] = (existsFetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(url).toBe(`${BASE_URL}/artifacts/skill/my-skill/1.0.0`);
+    expect((init as RequestInit).method).toBe('HEAD');
+  });
+
+  it('exists() with no version is true when at least one version exists', async () => {
+    const existsFetch = mockFetch({ status: 200, body: { versions: ['1.0.0'] } });
+    const existsAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: existsFetch });
+    expect(await existsAdapter.exists('skill', 'my-skill')).toBe(true);
   });
 
   it('exists() returns false for 404 response', async () => {
     const existsFetch = mockFetch({ status: 404 });
     const existsAdapter = new HttpAdapter({ baseUrl: BASE_URL, fetch: existsFetch });
-    const result = await existsAdapter.exists('skill', 'unknown-skill');
-    expect(result).toBe(false);
+    expect(await existsAdapter.exists('skill', 'unknown-skill')).toBe(false);
   });
 });

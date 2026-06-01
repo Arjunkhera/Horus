@@ -32,9 +32,11 @@ import {
 } from '../models/index.js';
 import {
   ArtifactNotFoundError,
+  InvalidMetadataError,
   PreUploadValidationError,
   ForgeCoreVersionMismatchError,
 } from './errors.js';
+import * as semver from 'semver';
 
 // ---------------------------------------------------------------------------
 // Package version (runtime read from package.json via createRequire)
@@ -120,32 +122,113 @@ export class HttpAdapter implements DataAdapter {
   // ── Read operations ─────────────────────────────────────────────────────────
 
   async list(type: ArtifactType): Promise<ArtifactMeta[]> {
-    const url = `${this.baseUrl}/artifacts/${type}`;
+    // The registry exposes listing/search via `GET /artifacts?type=<type>`,
+    // returning lightweight summary `hits` (not full bundles). Map those onto
+    // the ArtifactMeta shape callers (Registry.search / Registry.list) read.
+    const url = `${this.baseUrl}/artifacts?type=${encodeURIComponent(type)}&limit=250`;
     const res = await this.fetchJson(url, { method: 'GET' });
     if (!res.ok) {
       throw new Error(`Failed to list ${type} artifacts: HTTP ${res.status}`);
     }
-    const data = (await res.json()) as { artifacts: ArtifactMeta[] };
-    return data.artifacts ?? [];
+    const data = (await res.json()) as { hits?: Array<Record<string, unknown>> };
+    const hits = data.hits ?? [];
+    return hits.map((h) => ({
+      id: String(h.artifact_id ?? h.id ?? ''),
+      name: String(h.name ?? ''),
+      version: String(h.version ?? ''),
+      description: String(h.description ?? ''),
+      type,
+      tags: Array.isArray(h.tags) ? (h.tags as string[]) : [],
+    })) as unknown as ArtifactMeta[];
   }
 
-  async read(type: ArtifactType, id: string): Promise<ArtifactBundle> {
-    const url = `${this.baseUrl}/artifacts/${type}/${id}`;
+  /**
+   * List all published semver versions for an artifact, highest-first.
+   * Hits `GET /artifacts/:type/:id/versions`. Returns `[]` on 404 so the
+   * resolver can fall back to flat-layout behaviour for legacy registries.
+   */
+  async listVersions(type: ArtifactType, rawId: string): Promise<string[]> {
+    const { id } = parseVersionedId(rawId);
+    const url = `${this.baseUrl}/artifacts/${type}/${id}/versions`;
+    const res = await this.fetchJson(url, { method: 'GET' });
+    if (res.status === 404) {
+      return [];
+    }
+    if (!res.ok) {
+      throw new Error(`Failed to list versions for ${type}:${id}: HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as { versions?: string[] };
+    const versions = data.versions ?? [];
+    // Server already sorts descending, but re-sort defensively.
+    return [...versions].sort((a, b) => semver.rcompare(a, b));
+  }
+
+  async read(type: ArtifactType, rawId: string): Promise<ArtifactBundle> {
+    const { id, version } = parseVersionedId(rawId);
+    const resolvedVersion = version ?? (await this.latestVersion(type, id));
+    if (!resolvedVersion) {
+      throw new ArtifactNotFoundError(type, id);
+    }
+
+    const url = `${this.baseUrl}/artifacts/${type}/${id}/${resolvedVersion}`;
     const res = await this.fetchJson(url, { method: 'GET' });
     if (res.status === 404) {
       throw new ArtifactNotFoundError(type, id, url);
     }
     if (!res.ok) {
-      throw new Error(`Failed to read ${type}:${id}: HTTP ${res.status}`);
+      throw new Error(`Failed to read ${type}:${id}@${resolvedVersion}: HTTP ${res.status}`);
     }
-    const data = (await res.json()) as ArtifactBundle;
-    return data;
+
+    // Server returns { type, id, version, files: { <name>: <base64> } }.
+    const data = (await res.json()) as { files?: Record<string, string> };
+    const files = data.files ?? {};
+
+    // Decode + validate metadata.yaml (base64 → utf8 → yaml → Zod).
+    const metaB64 = files['metadata.yaml'];
+    if (!metaB64) {
+      throw new InvalidMetadataError(url, 'registry response missing metadata.yaml');
+    }
+    const metaRaw = Buffer.from(metaB64, 'base64').toString('utf-8');
+    const parsed = parseYaml(metaRaw);
+    const schema = META_SCHEMAS[type];
+    const result = schema.safeParse(parsed);
+    if (!result.success) {
+      throw new InvalidMetadataError(
+        url,
+        result.error.issues[0]?.message ?? 'schema validation failed',
+      );
+    }
+
+    // Decode the content file (SKILL.md / WORKSPACE.md / …). Optional for some
+    // types (plugins, workspace-configs) — default to empty string, mirroring
+    // FilesystemAdapter.read.
+    const contentFile = CONTENT_FILES[type];
+    const contentB64 = files[contentFile];
+    const content = contentB64 ? Buffer.from(contentB64, 'base64').toString('utf-8') : '';
+
+    return {
+      meta: result.data as ArtifactMeta,
+      content,
+      contentPath: contentFile,
+    };
   }
 
-  async exists(type: ArtifactType, id: string): Promise<boolean> {
-    const url = `${this.baseUrl}/artifacts/${type}/${id}`;
-    const res = await this.fetchJson(url, { method: 'HEAD' });
-    return res.ok;
+  async exists(type: ArtifactType, rawId: string): Promise<boolean> {
+    const { id, version } = parseVersionedId(rawId);
+    if (version) {
+      const url = `${this.baseUrl}/artifacts/${type}/${id}/${version}`;
+      const res = await this.fetchJson(url, { method: 'HEAD' });
+      return res.ok;
+    }
+    // No explicit version — the artifact exists if it has at least one version.
+    const versions = await this.listVersions(type, id);
+    return versions.length > 0;
+  }
+
+  /** Resolve the highest published version, or undefined if none exist. */
+  private async latestVersion(type: ArtifactType, id: string): Promise<string | undefined> {
+    const versions = await this.listVersions(type, id);
+    return versions[0];
   }
 
   // ── Write operation ─────────────────────────────────────────────────────────
@@ -268,3 +351,22 @@ const CONTENT_FILES: Record<ArtifactType, string> = {
   persona: 'PERSONA.md',
   'workspace-config': 'WORKSPACE.md',
 };
+
+/**
+ * Parse an artifact id that may carry a version suffix.
+ *   "sdlc-default@1.2.0" -> { id: "sdlc-default", version: "1.2.0" }
+ *   "sdlc-default"       -> { id: "sdlc-default", version: undefined }
+ * Only treats the suffix as a version when it is valid semver (mirrors
+ * FilesystemAdapter.parseVersionedId), so ids that legitimately contain '@'
+ * are left intact.
+ */
+function parseVersionedId(rawId: string): { id: string; version: string | undefined } {
+  const atIdx = rawId.lastIndexOf('@');
+  if (atIdx > 0) {
+    const possibleVersion = rawId.slice(atIdx + 1);
+    if (semver.valid(possibleVersion)) {
+      return { id: rawId.slice(0, atIdx), version: possibleVersion };
+    }
+  }
+  return { id: rawId, version: undefined };
+}
