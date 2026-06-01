@@ -562,13 +562,19 @@ export async function repoDevelop(
       );
     }
 
+    // The registry stores a normalized, scheme-less canonicalUrl
+    // (e.g. "github.com/org/repo"); restore an https:// scheme so git can clone.
+    const cloneUrl = /^([a-z][a-z0-9+.-]*:\/\/|git@)/i.test(canonicalUrl)
+      ? canonicalUrl
+      : `https://${canonicalUrl}`;
+
     // Clone into the managed pool using the URL-derived layout so the path is
     // deterministic and consistent with future scans.
     const dataPath = path.dirname(managedReposPath);
-    const cloneDest = repoClonePath(canonicalUrl, dataPath);
+    const cloneDest = repoClonePath(cloneUrl, dataPath);
 
     // Clone (atomic rename pattern — cloneToManagedPool handles temp dir).
-    await cloneToManagedPool(canonicalUrl, cloneDest);
+    await cloneToManagedPool(cloneUrl, cloneDest);
     await ensureHorusIgnored(cloneDest);
 
     // Build a synthetic RepoIndexEntry from registry metadata.
@@ -576,7 +582,7 @@ export async function repoDevelop(
     const syntheticEntry: RepoIndexEntry = {
       name: repoName,
       localPath: cloneDest,
-      remoteUrl: canonicalUrl,
+      remoteUrl: cloneUrl,
       defaultBranch: registryMeta.defaultBranch ?? 'main',
       language: registryMeta.language ?? null,
       framework: null,
