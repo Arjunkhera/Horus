@@ -459,8 +459,13 @@ async def get_page(
     """
     body = await request.json()
     registry = get_vault_registry(request)
+    # Filesystem-read op: non-default vaults live only on the writer's per-vault
+    # clone (readers are stateless), so route those to the writer. Default vault
+    # stays on the reader pool.
+    _name = _resolve_vault_for_write(body, uuid_registry, settings)
+    _use_writer = bool(registry and _name != settings.vault_default and registry.get(_name))
     vault_name, base_url = _resolve_endpoint(
-        body, write=False, settings=settings, registry=registry, uuid_registry=uuid_registry
+        body, write=_use_writer, settings=settings, registry=registry, uuid_registry=uuid_registry
     )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
@@ -493,8 +498,12 @@ async def get_related(
     """
     body = await request.json()
     registry = get_vault_registry(request)
+    # Filesystem-read op: non-default vaults live only on the writer's per-vault
+    # clone (readers are stateless), so route those to the writer.
+    _name = _resolve_vault_for_write(body, uuid_registry, settings)
+    _use_writer = bool(registry and _name != settings.vault_default and registry.get(_name))
     vault_name, base_url = _resolve_endpoint(
-        body, write=False, settings=settings, registry=registry, uuid_registry=uuid_registry
+        body, write=_use_writer, settings=settings, registry=registry, uuid_registry=uuid_registry
     )
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
