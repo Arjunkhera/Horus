@@ -154,3 +154,14 @@ cd packages/cli && pnpm build && pnpm test && npm publish  # CLI release
 ```
 
 For deeper guidance, load `guides/horus-development-workflow.md` (`knowledge_get_page({ id: "51b4d3ec-f320-4d23-a2d7-2f618bbf1df1", vault: "vault-code" })`).
+
+## Integration / feature testing — `.testenv/manifest.yaml` (read before testing the live services)
+
+Unit tests (`pnpm test`, `pytest`) cover packages in isolation. To test the **running services** end-to-end (Anvil/Vault/Forge MCP surfaces), use the **testenv/v1 feature-coverage suite** in `.testenv/manifest.yaml` — do NOT hand-roll curl scripts or point tools at the live stack.
+
+- **Isolation:** never test against the live stack. The manifest's `launch` phase provisions a disposable shadow stack via `horus test-env acquire --standalone --json` (alt ports 9100–9399, isolated data dir, `-dev`-suffixed MCP names); `teardown` runs `horus test-env release`. `tests/smoke-*.sh` are shallow shape-only checks — the manifest is the real suite.
+- **Execution model:** runner-core (`testenv-run .testenv/manifest.yaml`) executes `run:`/`http:` actions itself but marks MCP `tool:` actions **`delegated`** — it does NOT call MCP. The **`sdlc-testenv` executor agent** performs the delegated calls over MCP (per each action's `connection: shadow.{anvil,vault,forge}`) and checks `expect`. So tool-flavor actions only "run" with an agent in the loop (NLP-driven), not from the bare runner.
+- **Validate after editing:** `node .testenv/validate.mjs` (needs `pnpm --filter @akhera-horus/testenv build` first). Names must match `^[\w][\w\s._-]*$`; `connection` must match `^\w+\.\w+$`.
+- **Authoring conventions:** the `test` phase is `policy: run-all` (full matrix per pass). Round-trips (create→read→mutate→delete) live in ONE self-contained `sequence` action; thread server-generated IDs between steps with `{{step.field}}` placeholders (the runner leaves these untouched — the executor substitutes them). Tag actions `[feature, <service>, <area>]`. Always clean up created state.
+- **Gotchas baked into the current matrix** (don't re-discover): `forge_workspace_create` can take >60s (registry materialization — use a generous timeout); Anvil view shapes differ (`table` → `{columns, rows}`, `board` → `{items}`); the Vault `guide` page type **requires** a `description` field. Excluded from the default matrix because they need registry auth / a seeded vault: `forge_repo_register`, `forge_publish`/`forge_add`/`forge_install`, `forge_develop`, `knowledge_write_page` (opens a real git PR), and UUID/graph content reads — add these behind a dedicated authenticated+seeded profile, not the default run.
+
