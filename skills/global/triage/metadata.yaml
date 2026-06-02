@@ -1,0 +1,18 @@
+id: triage
+name: Triage
+version: 1.0.0
+description: >
+  Inbox triager for personal task management. Surfaces inbox items, helps
+  reclassify into proper areas with priority and due dates. Supports
+  one-at-a-time and batch modes.
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - horus
+  - anvil
+  - personal-tasks
+  - triage
+  - inbox
+dependencies: {}
+files: []

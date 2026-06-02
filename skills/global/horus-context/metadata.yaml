@@ -1,0 +1,8 @@
+id: horus-context
+name: "Horus Context"
+version: "1.0.0"
+description: "Unified Horus mental model + cross-subsystem routing (Anvil local / Vault + Forge registry remote) — decide which subsystem to call and in what order."
+type: skill
+author: "Horus"
+tags: [horus, routing, context, anvil, vault, forge, orchestration]
+files: ["SKILL.md"]
