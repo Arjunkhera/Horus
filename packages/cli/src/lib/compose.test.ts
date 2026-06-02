@@ -156,6 +156,14 @@ describe('installComposeFile', () => {
     expect(doc.services['horus-ui'].image).toBe('ghcr.io/arjunkhera/horus/ui:latest');
   });
 
+  it('bind-mounts the workspaces dir so Forge workspaces persist across recreate', () => {
+    const doc = parseYaml(generateComposeFile(makeConfig()));
+    const volumes: string[] = doc.services['horus-ui'].volumes;
+    // FORGE_WORKSPACES_PATH=/horus/workspaces must be backed by a host bind mount,
+    // otherwise workspaces live only in the container and are lost on `horus down`.
+    expect(volumes).toContain('${HORUS_DATA_PATH}/workspaces:/horus/workspaces:rw');
+  });
+
   it('never bakes a literal GITHUB_TOKEN into the generated compose (sources from .env)', () => {
     // makeConfig sets github_hosts.default.token = 'test-token'
     const content = generateComposeFile(makeConfig());

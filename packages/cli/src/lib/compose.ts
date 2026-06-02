@@ -162,6 +162,7 @@ const HORUS_UI_SERVICE = `\
       - \${HORUS_DATA_PATH}/sessions:/horus/sessions:rw
       - \${HORUS_DATA_PATH}/repos:/horus/repos:rw
       - \${HORUS_DATA_PATH}/config:/horus/config:rw
+      - \${HORUS_DATA_PATH}/workspaces:/horus/workspaces:rw
     networks:
       - horus-net
     restart: unless-stopped

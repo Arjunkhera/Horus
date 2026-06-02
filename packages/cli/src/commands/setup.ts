@@ -9,6 +9,7 @@ import {
   loadConfig,
   saveConfig,
   writeEnvFile,
+  writeForgeConfigFile,
   configExists,
   defaultConfig,
   resolveConfigPath,
@@ -253,6 +254,28 @@ export const setupCommand = new Command('setup')
       envSpinner.succeed('Environment file written to ~/Horus/.env');
     } catch (error) {
       envSpinner.fail('Failed to generate .env');
+      console.error((error as Error).message);
+      process.exit(1);
+    }
+
+    // Wire the embedded Forge engine's registry to the control plane. Without a
+    // forge.yaml, @forge/core falls back to dead default registries and every
+    // workspace-config artifact fetch fails. Non-destructive: a hand-edited
+    // forge.yaml (managed marker removed) is left untouched.
+    const forgeSpinner = ora('Configuring Forge registry...').start();
+    try {
+      const forgeRes = writeForgeConfigFile(config);
+      if (forgeRes.written) {
+        forgeSpinner.succeed(
+          config.control_plane_url
+            ? 'Forge registry pointed at the control plane (~/Horus/data/config/forge.yaml)'
+            : 'Forge config written (local-only; no remote registry) (~/Horus/data/config/forge.yaml)',
+        );
+      } else {
+        forgeSpinner.info('Existing forge.yaml is hand-managed — left untouched');
+      }
+    } catch (error) {
+      forgeSpinner.fail('Failed to configure Forge registry');
       console.error((error as Error).message);
       process.exit(1);
     }
