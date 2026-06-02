@@ -188,6 +188,9 @@ async def lifespan(app: FastAPI):
             # Enable the per-vault sync loop (writer only) so merged pages in
             # provisioned vaults get pulled + reindexed into their own collection.
             vaults_base=VAULTS_BASE,
+            # Poll per-vault clones faster than the default repo so a merged PR
+            # is searchable within ~1 min rather than up to one full sync_interval.
+            per_vault_sync_interval=settings.per_vault_sync_interval,
         )
         app.state.git_pull_task = git_pull_task
         app.state.workspace_observer = workspace_observer

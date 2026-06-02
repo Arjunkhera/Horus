@@ -28,6 +28,11 @@ class VaultSettings:
     knowledge_repo_path: str = "/data/knowledge-repo"
     workspace_path: str = "/workspace"
     sync_interval: int = 300
+    # Per-vault clones poll faster than the default repo so a merged PR into a
+    # provisioned vault is searchable within ~1 min rather than up to one full
+    # sync_interval (300s). Pulls are cheap (git pull --ff-only) and a vault is
+    # only reindexed when its clone actually advanced, so a short interval is safe.
+    per_vault_sync_interval: int = 60
     port: int = 8000
     host: str = "0.0.0.0"
     log_level: str = "info"
@@ -45,6 +50,7 @@ class VaultSettings:
             "knowledge_repo_path",
             "workspace_path",
             "sync_interval",
+            "per_vault_sync_interval",
             "port",
             "host",
             "log_level",
@@ -91,6 +97,7 @@ def load_settings(
         "knowledge_repo_path": "default",
         "workspace_path": "default",
         "sync_interval": "default",
+        "per_vault_sync_interval": "default",
         "port": "default",
         "host": "default",
         "log_level": "default",
@@ -122,6 +129,7 @@ def load_settings(
                     "knowledge_repo_path": str,
                     "workspace_path": str,
                     "sync_interval": int,
+                    "per_vault_sync_interval": int,
                     "port": int,
                     "host": str,
                     "log_level": str,
@@ -166,6 +174,7 @@ def load_settings(
         "KNOWLEDGE_REPO_PATH": ("knowledge_repo_path", str),
         "WORKSPACE_PATH": ("workspace_path", str),
         "SYNC_INTERVAL": ("sync_interval", int),
+        "PER_VAULT_SYNC_INTERVAL": ("per_vault_sync_interval", int),
         "VAULT_PORT": ("port", int),
         "VAULT_HOST": ("host", str),
         "VAULT_LOG_LEVEL": ("log_level", str),

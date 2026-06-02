@@ -17,6 +17,7 @@ from src.sync.daemon import (
     namespace_slug,
     _read_vault_namespace,
     per_vault_sync_loop,
+    start_sync_daemon,
     ReindexLock,
 )
 from src.layer1.typesense_engine import TypesenseSearchEngine
@@ -146,3 +147,45 @@ async def test_per_vault_loop_noop_for_non_typesense_store():
     """The loop is a no-op when the base store is not a TypesenseSearchEngine."""
     # Returns immediately (no infinite loop, no sleep patch needed).
     await per_vault_sync_loop(MagicMock(), "/data/vaults", interval=1, reindex_lock=ReindexLock())
+
+
+class TestStartSyncDaemonPerVaultInterval:
+    """The per-vault loop polls on its own (faster) interval, decoupled from the default repo."""
+
+    @pytest.mark.asyncio
+    async def test_uses_explicit_per_vault_interval(self):
+        """An explicit per_vault_sync_interval is what the per-vault loop polls on."""
+        with patch("src.sync.daemon.git_pull_loop", new=AsyncMock()), \
+             patch("src.sync.daemon.start_workspace_watcher", return_value=None), \
+             patch("src.sync.daemon.per_vault_sync_loop", new=AsyncMock()) as pv:
+            git_task, _obs, pv_task = await start_sync_daemon(
+                store=TypesenseSearchEngine(collection_paths={"shared": "/x"}),
+                knowledge_repo_path="/data/knowledge-repo",
+                workspace_path="/workspace",
+                sync_interval=300,
+                vaults_base="/data/vaults",
+                per_vault_sync_interval=15,
+            )
+            for t in (git_task, pv_task):
+                if t:
+                    t.cancel()
+            # per_vault_sync_loop(store, vaults_base, interval, lock) — interval is arg[2]
+            assert pv.call_args.args[2] == 15
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_sync_interval_when_omitted(self):
+        """When no per-vault interval is given, the per-vault loop falls back to sync_interval."""
+        with patch("src.sync.daemon.git_pull_loop", new=AsyncMock()), \
+             patch("src.sync.daemon.start_workspace_watcher", return_value=None), \
+             patch("src.sync.daemon.per_vault_sync_loop", new=AsyncMock()) as pv:
+            git_task, _obs, pv_task = await start_sync_daemon(
+                store=TypesenseSearchEngine(collection_paths={"shared": "/x"}),
+                knowledge_repo_path="/data/knowledge-repo",
+                workspace_path="/workspace",
+                sync_interval=300,
+                vaults_base="/data/vaults",
+            )
+            for t in (git_task, pv_task):
+                if t:
+                    t.cancel()
+            assert pv.call_args.args[2] == 300
