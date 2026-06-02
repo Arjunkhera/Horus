@@ -277,56 +277,33 @@ export class RegistrySearchClient {
   // ── Cold rebuild ────────────────────────────────────────────────────────────
 
   /**
-   * Reconcile the Typesense collection against storage.
+   * Reconcile the Typesense collection against storage on startup.
    *
-   * Called on startup. Indexes every artifact from StorageBackend.listAll()
-   * unless the index is already COMPLETE — i.e. its document count equals the
-   * stored artifact count. This self-heals a *partial* index (artifacts that
-   * landed in storage but failed to index, e.g. a transient Typesense outage at
-   * publish time): the old behaviour skipped whenever the index was merely
-   * non-empty, so a partial index never recovered. Upserts are idempotent, so
-   * re-indexing already-present artifacts is harmless.
+   * Idempotently upserts EVERY artifact returned by StorageBackend.listAll().
+   * This always runs — it does not try to "skip when already populated."
    *
-   * Pass `{ force: true }` to re-upsert everything regardless of count.
+   * History: the original code skipped whenever the index was non-empty, so a
+   * partial index never recovered. A later fix skipped when the doc count equaled
+   * the stored artifact count — but that is defeated by a coincidental count
+   * match (e.g. a stale/phantom doc masking a genuinely missing artifact, as seen
+   * with `skill:sdlc-docs` in prod: 146 docs == 146 artifacts, yet sdlc-docs
+   * absent). The only reliable reconcile is to upsert the full storage set every
+   * time; upserts are idempotent and the artifact count is small, so the startup
+   * cost is negligible. Publish-time indexing remains the fast path; this is the
+   * safety net that guarantees the index converges to storage on every restart.
    *
    * Best-effort: errors are logged but do not abort startup.
    */
   async rebuild(
     storage: StorageBackend,
     logger?: { info: (msg: string) => void; warn: (obj: unknown, msg: string) => void },
-    opts?: { force?: boolean },
   ): Promise<void> {
     try {
       await this.ensureCollection();
 
-      // Current index size (0 if the collection doesn't exist yet).
-      let docCount = 0;
-      try {
-        const col = await this.ts.collections(COLLECTION).retrieve();
-        docCount = col.num_documents;
-      } catch {
-        // Collection doesn't exist yet — proceed with rebuild
-      }
-
-      // Source of truth: the artifacts actually in storage.
+      // Source of truth: the artifacts actually in storage. Upsert all of them.
       const allMeta = await storage.listAll();
-
-      // Skip only when the index is already complete (count matches storage).
-      // A mismatch — empty (0) or partial (< count) — triggers a reconcile.
-      if (!opts?.force && allMeta.length > 0 && docCount === allMeta.length) {
-        logger?.info(
-          `Search index already complete (${docCount} docs == ${allMeta.length} artifacts), skipping rebuild`,
-        );
-        return;
-      }
-
-      if (opts?.force) {
-        logger?.info(`Force reindex requested — re-upserting ${allMeta.length} artifacts from storage`);
-      } else {
-        logger?.info(
-          `Search index incomplete (${docCount} docs vs ${allMeta.length} artifacts), reconciling from storage`,
-        );
-      }
+      logger?.info(`Reconciling search index from storage: ${allMeta.length} artifacts`);
 
       let indexed = 0;
 

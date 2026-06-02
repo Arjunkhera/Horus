@@ -92,22 +92,15 @@ async function main(): Promise<void> {
   }
 
   // 10. Reconcile the artifact search index from storage on startup. rebuild()
-  // self-heals a partial index (re-indexes when the Typesense doc count differs
-  // from the stored artifact count), not just an empty one. Set
-  // FORGE_REGISTRY_FORCE_REINDEX=1 to force a full re-upsert regardless of count.
+  // idempotently upserts every stored artifact every time, so the index always
+  // converges to storage — healing any partial index from a failed publish-time
+  // index, regardless of doc count.
   if (search) {
-    const forceReindex =
-      process.env.FORGE_REGISTRY_FORCE_REINDEX === '1' ||
-      process.env.FORGE_REGISTRY_FORCE_REINDEX === 'true';
     void search
-      .rebuild(
-        storage,
-        {
-          info: (msg) => app.log.info(msg),
-          warn: (obj, msg) => app.log.warn(obj, msg),
-        },
-        { force: forceReindex },
-      )
+      .rebuild(storage, {
+        info: (msg) => app.log.info(msg),
+        warn: (obj, msg) => app.log.warn(obj, msg),
+      })
       .catch(() => {
         // rebuild is best-effort; startup continues regardless
       });
