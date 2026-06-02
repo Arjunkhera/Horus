@@ -117,7 +117,9 @@ export class WorkspaceCreator {
     // takes precedence over a version embedded in configName.
     const atIdx = options.configName.lastIndexOf('@');
     const configId = atIdx > 0 ? options.configName.slice(0, atIdx) : options.configName;
-    const inlineVersion = atIdx > 0 ? options.configName.slice(atIdx + 1) : undefined;
+    // `|| undefined` so a trailing '@' (empty version) falls through to '*'
+    // rather than producing an invalid `workspace-config:id@` ref.
+    const inlineVersion = atIdx > 0 ? options.configName.slice(atIdx + 1) || undefined : undefined;
     const configVersion = options.configVersion ?? inlineVersion ?? '*';
 
     let configArtifact;
