@@ -38,7 +38,7 @@ images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-400a4fd
+    newTag: sha-253778a
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-5d1f953
   - name: ghcr.io/arjunkhera/horus/operator-service
