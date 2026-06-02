@@ -10,6 +10,7 @@ import {
   saveConfig,
   writeEnvFile,
   writeForgeConfigFile,
+  ensureDataDirs,
   configExists,
   defaultConfig,
   resolveConfigPath,
@@ -241,6 +242,7 @@ export const setupCommand = new Command('setup')
     try {
       saveConfig(config);
       ensureFsLayout(); // providers/, logs/, keys/
+      ensureDataDirs(config); // data/{config,sessions,repos,workspaces} — user-owned, before any container runs
       configSpinner.succeed('Configuration saved to ~/Horus/config.yaml (providers/, logs/, keys/ ready)');
     } catch (error) {
       configSpinner.fail('Failed to save configuration');
@@ -275,9 +277,22 @@ export const setupCommand = new Command('setup')
         forgeSpinner.info('Existing forge.yaml is hand-managed — left untouched');
       }
     } catch (error) {
-      forgeSpinner.fail('Failed to configure Forge registry');
-      console.error((error as Error).message);
-      process.exit(1);
+      // Non-fatal: a forge.yaml write failure must not abort setup (the rest of
+      // the stack still comes up). The common cause is a root-owned data/config
+      // dir on an existing install (Docker created it on a prior `up`), which the
+      // user-run CLI cannot write into — surface a concrete remediation.
+      const err = error as NodeJS.ErrnoException;
+      if (err?.code === 'EACCES' || err?.code === 'EPERM') {
+        forgeSpinner.warn('Could not write forge.yaml — ~/Horus/data/config is not writable by the current user.');
+        console.log(
+          chalk.dim(
+            `  Forge workspace creation needs this file. Fix ownership and re-run setup:\n` +
+              `    sudo chown -R "$(id -un)" "${resolveConfigPath(config.data_dir)}" && horus setup -y`,
+          ),
+        );
+      } else {
+        forgeSpinner.warn(`Could not write forge.yaml: ${err?.message ?? String(error)}`);
+      }
     }
 
     const composeSpinner = ora('Installing docker-compose.yml...').start();
