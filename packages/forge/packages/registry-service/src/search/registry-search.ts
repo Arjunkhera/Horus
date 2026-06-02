@@ -277,21 +277,29 @@ export class RegistrySearchClient {
   // ── Cold rebuild ────────────────────────────────────────────────────────────
 
   /**
-   * Rebuild the entire Typesense collection from storage.
+   * Reconcile the Typesense collection against storage.
    *
-   * Called on startup when the collection is missing or empty.
-   * Iterates all artifacts via StorageBackend.listAll() and indexes each.
+   * Called on startup. Indexes every artifact from StorageBackend.listAll()
+   * unless the index is already COMPLETE — i.e. its document count equals the
+   * stored artifact count. This self-heals a *partial* index (artifacts that
+   * landed in storage but failed to index, e.g. a transient Typesense outage at
+   * publish time): the old behaviour skipped whenever the index was merely
+   * non-empty, so a partial index never recovered. Upserts are idempotent, so
+   * re-indexing already-present artifacts is harmless.
+   *
+   * Pass `{ force: true }` to re-upsert everything regardless of count.
    *
    * Best-effort: errors are logged but do not abort startup.
    */
   async rebuild(
     storage: StorageBackend,
     logger?: { info: (msg: string) => void; warn: (obj: unknown, msg: string) => void },
+    opts?: { force?: boolean },
   ): Promise<void> {
     try {
       await this.ensureCollection();
 
-      // Check whether rebuild is needed
+      // Current index size (0 if the collection doesn't exist yet).
       let docCount = 0;
       try {
         const col = await this.ts.collections(COLLECTION).retrieve();
@@ -300,15 +308,26 @@ export class RegistrySearchClient {
         // Collection doesn't exist yet — proceed with rebuild
       }
 
-      if (docCount > 0) {
-        logger?.info('Search index already populated, skipping cold rebuild');
+      // Source of truth: the artifacts actually in storage.
+      const allMeta = await storage.listAll();
+
+      // Skip only when the index is already complete (count matches storage).
+      // A mismatch — empty (0) or partial (< count) — triggers a reconcile.
+      if (!opts?.force && allMeta.length > 0 && docCount === allMeta.length) {
+        logger?.info(
+          `Search index already complete (${docCount} docs == ${allMeta.length} artifacts), skipping rebuild`,
+        );
         return;
       }
 
-      logger?.info('Search index is empty, starting cold rebuild from storage');
+      if (opts?.force) {
+        logger?.info(`Force reindex requested — re-upserting ${allMeta.length} artifacts from storage`);
+      } else {
+        logger?.info(
+          `Search index incomplete (${docCount} docs vs ${allMeta.length} artifacts), reconciling from storage`,
+        );
+      }
 
-      // Get all artifact metadata from storage
-      const allMeta = await storage.listAll();
       let indexed = 0;
 
       for (const meta of allMeta) {

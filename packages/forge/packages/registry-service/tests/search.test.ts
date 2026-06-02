@@ -328,20 +328,88 @@ describe('RegistrySearchClient', () => {
   });
 
   describe('rebuild()', () => {
-    it('skips rebuild when collection already has documents', async () => {
-      const ts = makeTypesenseClient([DOC_VERIFIED]);
+    // A storage meta entry whose count matches a 1-doc index (complete state).
+    const META_VERIFIED: ArtifactIndexMeta = {
+      type: 'skill',
+      id: 'verified-skill',
+      version: '1.0.0',
+      name: 'Verified Skill',
+      description: 'An official verified skill',
+      tags: ['official'],
+      verified: true,
+      publishedAt: 1700000200000,
+    };
+
+    it('skips rebuild when the index is already complete (count matches storage)', async () => {
+      const ts = makeTypesenseClient([DOC_VERIFIED]); // docCount = 1
+      const upsertSpy = ts._col.documents().upsert as ReturnType<typeof vi.fn>;
       const client = new (RegistrySearchClient as unknown as {
         new (ts: unknown): RegistrySearchClient;
       })(ts);
 
       const storage = makeStorage();
+      vi.mocked(storage.listAll).mockResolvedValue([META_VERIFIED]); // storage count = 1
+
       const infoSpy = vi.fn();
       await client.rebuild(storage, { info: infoSpy, warn: vi.fn() });
 
-      expect(storage.listAll).not.toHaveBeenCalled();
+      // listAll is consulted to compare counts, but nothing is re-indexed.
+      expect(storage.listAll).toHaveBeenCalledOnce();
+      expect(upsertSpy).not.toHaveBeenCalled();
       expect(infoSpy).toHaveBeenCalledWith(
-        expect.stringContaining('already populated'),
+        expect.stringContaining('already complete'),
       );
+    });
+
+    it('self-heals a PARTIAL index (re-indexes when docCount < storage count)', async () => {
+      // Index has 1 doc but storage has 3 artifacts — the f6cebf63 bug scenario
+      // where artifacts landed in S3 but never got indexed.
+      const upsertSpy = vi.fn().mockResolvedValue({});
+      const stableDocuments = { upsert: upsertSpy, search: vi.fn() };
+      const ts = {
+        collections: overloadedCollections(
+          {
+            documents: () => stableDocuments,
+            retrieve: vi.fn().mockResolvedValue({ num_documents: 1 }), // partial
+            delete: vi.fn(),
+          },
+          makeCollectionsList([{ name: 'forge_registry_artifacts' }]),
+        ),
+      };
+      const client = new (RegistrySearchClient as unknown as {
+        new (ts: unknown): RegistrySearchClient;
+      })(ts);
+
+      const storage = makeStorage();
+      vi.mocked(storage.listAll).mockResolvedValue([
+        { ...META_VERIFIED, id: 'a' },
+        { ...META_VERIFIED, id: 'b' },
+        { ...META_VERIFIED, id: 'c' },
+      ]);
+
+      const infoSpy = vi.fn();
+      await client.rebuild(storage, { info: infoSpy, warn: vi.fn() });
+
+      // All three artifacts are reconciled despite the index being non-empty.
+      expect(upsertSpy).toHaveBeenCalledTimes(3);
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('incomplete'));
+    });
+
+    it('force re-upserts everything even when the index is complete', async () => {
+      const ts = makeTypesenseClient([DOC_VERIFIED]); // docCount = 1
+      const upsertSpy = ts._col.documents().upsert as ReturnType<typeof vi.fn>;
+      const client = new (RegistrySearchClient as unknown as {
+        new (ts: unknown): RegistrySearchClient;
+      })(ts);
+
+      const storage = makeStorage();
+      vi.mocked(storage.listAll).mockResolvedValue([META_VERIFIED]); // count matches
+
+      const infoSpy = vi.fn();
+      await client.rebuild(storage, { info: infoSpy, warn: vi.fn() }, { force: true });
+
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Force reindex'));
     });
 
     it('iterates storage.listAll() and indexes each artifact', async () => {
