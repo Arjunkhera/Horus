@@ -135,6 +135,8 @@ export class PublishPipeline {
     private readonly auth: AuthStrategy,
     private readonly serviceVersion: string,
     private readonly search?: RegistrySearchClient,
+    /** Logger for surfacing best-effort search-index failures at publish time. */
+    private readonly logger?: { warn: (obj: unknown, msg: string) => void },
     /** Name of the active auth strategy — threaded into every audit entry */
     private readonly strategyName: string = 'builtin',
   ) {}
@@ -366,9 +368,13 @@ export class PublishPipeline {
         publishedAt: Math.floor(new Date(publishedAt).getTime() / 1000),
       };
 
-      // Fire-and-forget with best-effort error suppression
-      void this.search.indexArtifact(doc).catch(() => {
-        // Typesense unavailable — publish still succeeds
+      // Index synchronously (awaited) so the attempt isn't lost to a detached
+      // promise if the process exits right after publish. indexArtifact catches
+      // and logs internally via the passed logger; the outer catch keeps publish
+      // resilient if indexing throws. A partial index is also self-healed on the
+      // next restart by RegistrySearchClient.rebuild()'s storage-count reconcile.
+      await this.search.indexArtifact(doc, this.logger).catch(() => {
+        // Typesense unavailable — publish still succeeds (failure already logged)
       });
     }
 

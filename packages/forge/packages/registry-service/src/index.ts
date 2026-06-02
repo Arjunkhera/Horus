@@ -64,6 +64,7 @@ async function main(): Promise<void> {
     auth,
     config.server.coreVersion,
     search ?? undefined,
+    { warn: (obj, msg) => bootstrapLogger.warn(obj, msg) },
   );
 
   // 7b. Create repo storage adapter. The repo registry is SHARED, so it lives in
@@ -90,13 +91,23 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 10. Cold rebuild artifact search index if empty
+  // 10. Reconcile the artifact search index from storage on startup. rebuild()
+  // self-heals a partial index (re-indexes when the Typesense doc count differs
+  // from the stored artifact count), not just an empty one. Set
+  // FORGE_REGISTRY_FORCE_REINDEX=1 to force a full re-upsert regardless of count.
   if (search) {
+    const forceReindex =
+      process.env.FORGE_REGISTRY_FORCE_REINDEX === '1' ||
+      process.env.FORGE_REGISTRY_FORCE_REINDEX === 'true';
     void search
-      .rebuild(storage, {
-        info: (msg) => app.log.info(msg),
-        warn: (obj, msg) => app.log.warn(obj, msg),
-      })
+      .rebuild(
+        storage,
+        {
+          info: (msg) => app.log.info(msg),
+          warn: (obj, msg) => app.log.warn(obj, msg),
+        },
+        { force: forceReindex },
+      )
       .catch(() => {
         // rebuild is best-effort; startup continues regardless
       });
