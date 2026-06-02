@@ -1,6 +1,6 @@
 id: horus-forge
 name: "Horus Forge"
-version: "2.3.0"
+version: "2.4.0"
 description: "Forge MCP reference — local execution (forge_develop, workspaces, sessions) and the control-plane S3-backed registry (artifacts, repo index, publish, install)."
 type: skill
 author: "Horus"
