@@ -340,8 +340,12 @@ describe('RegistrySearchClient', () => {
       publishedAt: 1700000200000,
     };
 
-    it('skips rebuild when the index is already complete (count matches storage)', async () => {
-      const ts = makeTypesenseClient([DOC_VERIFIED]); // docCount = 1
+    it('always upserts every stored artifact even when the doc count matches', async () => {
+      // Regression for sdlc-docs: index reports 1 doc and storage has 1 artifact,
+      // but the indexed doc is a stale/phantom (different id) so the real artifact
+      // is missing. A count-equality "skip" would wrongly bail; always-reconcile
+      // re-upserts the storage set so the genuine artifact gets indexed.
+      const ts = makeTypesenseClient([DOC_VERIFIED]); // docCount = 1 (phantom)
       const upsertSpy = ts._col.documents().upsert as ReturnType<typeof vi.fn>;
       const client = new (RegistrySearchClient as unknown as {
         new (ts: unknown): RegistrySearchClient;
@@ -353,15 +357,12 @@ describe('RegistrySearchClient', () => {
       const infoSpy = vi.fn();
       await client.rebuild(storage, { info: infoSpy, warn: vi.fn() });
 
-      // listAll is consulted to compare counts, but nothing is re-indexed.
       expect(storage.listAll).toHaveBeenCalledOnce();
-      expect(upsertSpy).not.toHaveBeenCalled();
-      expect(infoSpy).toHaveBeenCalledWith(
-        expect.stringContaining('already complete'),
-      );
+      expect(upsertSpy).toHaveBeenCalledTimes(1); // reconciled, not skipped
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Reconciling search index'));
     });
 
-    it('self-heals a PARTIAL index (re-indexes when docCount < storage count)', async () => {
+    it('self-heals a PARTIAL index (re-indexes all stored artifacts)', async () => {
       // Index has 1 doc but storage has 3 artifacts — the f6cebf63 bug scenario
       // where artifacts landed in S3 but never got indexed.
       const upsertSpy = vi.fn().mockResolvedValue({});
@@ -392,24 +393,7 @@ describe('RegistrySearchClient', () => {
 
       // All three artifacts are reconciled despite the index being non-empty.
       expect(upsertSpy).toHaveBeenCalledTimes(3);
-      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('incomplete'));
-    });
-
-    it('force re-upserts everything even when the index is complete', async () => {
-      const ts = makeTypesenseClient([DOC_VERIFIED]); // docCount = 1
-      const upsertSpy = ts._col.documents().upsert as ReturnType<typeof vi.fn>;
-      const client = new (RegistrySearchClient as unknown as {
-        new (ts: unknown): RegistrySearchClient;
-      })(ts);
-
-      const storage = makeStorage();
-      vi.mocked(storage.listAll).mockResolvedValue([META_VERIFIED]); // count matches
-
-      const infoSpy = vi.fn();
-      await client.rebuild(storage, { info: infoSpy, warn: vi.fn() }, { force: true });
-
-      expect(upsertSpy).toHaveBeenCalledTimes(1);
-      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Force reindex'));
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Reconciling search index'));
     });
 
     it('iterates storage.listAll() and indexes each artifact', async () => {
