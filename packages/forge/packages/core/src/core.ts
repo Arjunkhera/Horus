@@ -263,10 +263,29 @@ export class ForgeCore {
   /**
    * Add artifact ref(s) to forge.yaml.
    * Validates the artifact exists in the registry before adding.
+   *
+   * @param options.initIfMissing When true, a missing forge.yaml at the
+   *   workspace root is scaffolded (named after the root directory) instead of
+   *   throwing CONFIG_NOT_FOUND. This lets artifacts be added to an arbitrary
+   *   path or cwd that has never been initialized as a Forge workspace.
    */
-  async add(refStrings: string | string[]): Promise<ForgeConfig> {
+  async add(
+    refStrings: string | string[],
+    options: { initIfMissing?: boolean } = {},
+  ): Promise<ForgeConfig> {
     const refs = Array.isArray(refStrings) ? refStrings : [refStrings];
-    const config = await this.workspaceManager.readConfig();
+    let config: ForgeConfig;
+    try {
+      config = await this.workspaceManager.readConfig();
+    } catch (err) {
+      if (options.initIfMissing && err instanceof ForgeError && err.code === 'CONFIG_NOT_FOUND') {
+        // No forge.yaml here yet — scaffold one so add can proceed at any path.
+        await this.init(path.basename(this.workspaceRoot) || 'workspace');
+        config = await this.workspaceManager.readConfig();
+      } else {
+        throw err;
+      }
+    }
     const registry = await this.buildRegistry();
 
     for (const refStr of refs) {
