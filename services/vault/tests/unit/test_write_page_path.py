@@ -137,3 +137,62 @@ class TestWritePageFlatUUID:
         assert branch.startswith("vault/write-"), f"Branch should start with 'vault/write-', got: {branch}"
         # Short UUID is first 8 chars of our test UUID
         assert _TEST_UUID[:8] in branch, f"Branch should contain UUID prefix, got: {branch}"
+
+
+def _run_with_store(content, mock_loader, mock_settings, store, vault_namespace="default"):
+    """Run _write_page_sync with an injected (vault-scoped) store and return it."""
+    request = WritePageRequest(path="repos/foo.md", content=content)
+    with patch("src.api.routes.PageValidator") as MockValidator, \
+         patch("src.api.routes.GitWriter") as MockWriter:
+        validator_result = MagicMock()
+        validator_result.valid = True
+        validator_result.errors = []
+        MockValidator.return_value.validate.return_value = validator_result
+        MockWriter.return_value.write_page.return_value = ("https://github.com/pr/1", "abc123")
+        response = _write_page_sync(
+            request, mock_loader, mock_settings,
+            store=store, vault_namespace=vault_namespace,
+        )
+        return response
+
+
+class TestWritePageIndexOnWrite:
+    """Index-on-write: a successful write upserts the page into the (vault-scoped)
+    search engine immediately so it is searchable without waiting for PR merge +
+    the periodic reindex. This is what makes provisioned per-vault pages
+    searchable (they have no per-vault sync loop)."""
+
+    def test_write_upserts_into_search_index(self, mock_loader, mock_settings):
+        """The page is upserted to the injected store at pages/<uuid>.md."""
+        store = MagicMock()
+        response = _run_with_store(VALID_CONTENT_WITH_UUID, mock_loader, mock_settings, store)
+        store.upsert_document.assert_called_once()
+        args, _ = store.upsert_document.call_args
+        assert args[0] == f"pages/{_TEST_UUID}.md"
+        # The content passed is the full page markdown (used to build the doc).
+        assert "Foo Repo" in args[1]
+        assert response.path == f"pages/{_TEST_UUID}.md"
+
+    def test_write_uses_vault_scoped_store(self, mock_loader, mock_settings):
+        """For a provisioned vault, the upsert goes to the vault-scoped store
+        (get_store_override hands write_page a per-vault engine), so the doc lands
+        in the right collection."""
+        vault_store = MagicMock()
+        _run_with_store(
+            VALID_CONTENT_WITH_UUID, mock_loader, mock_settings,
+            vault_store, vault_namespace="vault-office",
+        )
+        vault_store.upsert_document.assert_called_once()
+
+    def test_index_on_write_failure_does_not_fail_write(self, mock_loader, mock_settings):
+        """A failing upsert must not break the write (the PR was already opened)."""
+        store = MagicMock()
+        store.upsert_document.side_effect = RuntimeError("typesense down")
+        # Should not raise — fire-and-forget.
+        response = _run_with_store(VALID_CONTENT_WITH_UUID, mock_loader, mock_settings, store)
+        assert response.pr_url == "https://github.com/pr/1"
+
+    def test_no_store_is_tolerated(self, mock_loader, mock_settings):
+        """When no store is injected, write still succeeds (no index step)."""
+        response = _run_with_store(VALID_CONTENT_WITH_UUID, mock_loader, mock_settings, store=None)
+        assert response.path == f"pages/{_TEST_UUID}.md"
