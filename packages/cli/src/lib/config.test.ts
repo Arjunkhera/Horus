@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { parse as parseYaml } from 'yaml';
 import {
   defaultConfig,
   generateEnv,
+  generateForgeConfig,
+  writeForgeConfigFile,
+  FORGE_CONFIG_MANAGED_MARKER,
   loadPreprovisionedConfig,
   getConfigValue,
   setConfigValue,
@@ -33,6 +37,100 @@ describe('generateEnv — alpha env vars', () => {
   it('local-only: empty control-plane url is emitted (mode is config-driven)', () => {
     const env = generateEnv(defaultConfig());
     expect(env).toContain('HORUS_CONTROL_PLANE_URL=');
+  });
+});
+
+describe('generateForgeConfig — embedded Forge registry wiring', () => {
+  it('connected: points local AND global registries at the control-plane Forge registry', () => {
+    const config = defaultConfig();
+    config.control_plane_url = 'https://cp.example.com';
+    const doc = parseYaml(generateForgeConfig(config));
+    const byName = Object.fromEntries(doc.registries.map((r: any) => [r.name, r]));
+    expect(byName.local.url).toBe('https://cp.example.com/api/v1/forge');
+    expect(byName.global.url).toBe('https://cp.example.com/api/v1/forge');
+    // tokenEnv lets the engine authenticate; both names present so @forge/core
+    // does NOT re-inject its hardcoded localhost:8744 / CloudFront defaults.
+    expect(byName.local.tokenEnv).toBe('TOKEN_PROVIDER_CONFIG');
+    expect(byName.local.writable).toBe(true);
+    expect(byName.global.writable).toBe(false);
+  });
+
+  it('connected: never emits the dead default registries', () => {
+    const config = defaultConfig();
+    config.control_plane_url = 'https://cp.example.com';
+    const yaml = generateForgeConfig(config);
+    expect(yaml).not.toContain('cloudfront');
+    expect(yaml).not.toContain('localhost:8744');
+  });
+
+  it('strips a trailing slash on the control-plane url', () => {
+    const config = defaultConfig();
+    config.control_plane_url = 'https://cp.example.com/';
+    const doc = parseYaml(generateForgeConfig(config));
+    expect(doc.registries[0].url).toBe('https://cp.example.com/api/v1/forge');
+  });
+
+  it('local-only: avoids the dead CloudFront host (no remote registry available)', () => {
+    const config = defaultConfig();
+    config.control_plane_url = '';
+    const yaml = generateForgeConfig(config);
+    expect(yaml).not.toContain('cloudfront');
+    const doc = parseYaml(yaml);
+    expect(doc.registries.every((r: any) => r.url === 'http://localhost:8744')).toBe(true);
+  });
+
+  it('emits container workspace paths + host paths and the anvil MCP endpoint', () => {
+    const config = defaultConfig();
+    config.data_dir = '/home/me/Horus/data';
+    config.control_plane_url = 'https://cp.example.com';
+    const doc = parseYaml(generateForgeConfig(config));
+    expect(doc.workspace.mount_path).toBe('/horus/workspaces');
+    expect(doc.workspace.host_workspaces_path).toBe('/home/me/Horus/data/workspaces');
+    expect(doc.workspace.host_managed_repos_path).toBe('/home/me/Horus/data/repos');
+    expect(doc.mcp_endpoints.anvil.url).toBe('http://anvil:8100');
+    expect(doc.repos.scan_paths).toContain('/horus/repos');
+  });
+});
+
+describe('writeForgeConfigFile — idempotent, non-destructive', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'forgecfg-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('writes forge.yaml under <data_dir>/config and reports written', () => {
+    const config = defaultConfig();
+    config.data_dir = dir;
+    config.control_plane_url = 'https://cp.example.com';
+    const res = writeForgeConfigFile(config);
+    expect(res.written).toBe(true);
+    expect(res.path).toBe(join(dir, 'config', 'forge.yaml'));
+    expect(existsSync(res.path)).toBe(true);
+    expect(readFileSync(res.path, 'utf-8')).toContain(FORGE_CONFIG_MANAGED_MARKER);
+  });
+
+  it('regenerates a previously CLI-managed file', () => {
+    const config = defaultConfig();
+    config.data_dir = dir;
+    config.control_plane_url = 'https://cp.example.com';
+    writeForgeConfigFile(config);
+    const res2 = writeForgeConfigFile(config);
+    expect(res2.written).toBe(true);
+  });
+
+  it('leaves a hand-managed file (marker removed) untouched', () => {
+    const config = defaultConfig();
+    config.data_dir = dir;
+    config.control_plane_url = 'https://cp.example.com';
+    const res = writeForgeConfigFile(config);
+    const handEdited = 'registries: []\n# user owns this file\n';
+    writeFileSync(res.path, handEdited);
+    const res2 = writeForgeConfigFile(config);
+    expect(res2.written).toBe(false);
+    expect(readFileSync(res.path, 'utf-8')).toBe(handEdited);
   });
 });
 
