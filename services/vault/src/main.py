@@ -32,7 +32,7 @@ from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
 from .graph import GraphClient, GraphConnectionError
 from .layer2.graph_export import import_graph
 from .layer2.uuid_registry import UUIDRegistry
-from .layer2.vault_repo_resolver import VaultRepoResolver
+from .layer2.vault_repo_resolver import VaultRepoResolver, VAULTS_BASE
 from .security.principal import install_principal_middleware
 from .service_mode import get_vault_mode, should_run_sync, install_read_only_guard
 
@@ -178,20 +178,25 @@ async def lifespan(app: FastAPI):
 
     if should_run_sync(mode):
         logger.info("Starting sync daemon (mode=%s)...", mode)
-        git_pull_task, workspace_observer = await start_sync_daemon(
+        git_pull_task, workspace_observer, per_vault_task = await start_sync_daemon(
             store=store,
             knowledge_repo_path=settings.knowledge_repo_path,
             workspace_path=settings.workspace_path,
             sync_interval=settings.sync_interval,
             debounce_seconds=5.0,
             on_reindex=_rebuild_registry,
+            # Enable the per-vault sync loop (writer only) so merged pages in
+            # provisioned vaults get pulled + reindexed into their own collection.
+            vaults_base=VAULTS_BASE,
         )
         app.state.git_pull_task = git_pull_task
         app.state.workspace_observer = workspace_observer
+        app.state.per_vault_task = per_vault_task
     else:
         logger.info("Reader mode — sync daemon disabled (stateless)")
         app.state.git_pull_task = None
         app.state.workspace_observer = None
+        app.state.per_vault_task = None
 
     logger.info("Vault Knowledge Service started successfully")
 
@@ -201,10 +206,15 @@ async def lifespan(app: FastAPI):
     # SHUTDOWN
     # ============================================================================
     logger.info("Shutting down Vault Knowledge Service...")
-    if app.state.git_pull_task is not None or app.state.workspace_observer is not None:
+    if (
+        app.state.git_pull_task is not None
+        or app.state.workspace_observer is not None
+        or getattr(app.state, "per_vault_task", None) is not None
+    ):
         await stop_sync_daemon(
             git_pull_task=app.state.git_pull_task,
-            workspace_observer=app.state.workspace_observer
+            workspace_observer=app.state.workspace_observer,
+            per_vault_task=getattr(app.state, "per_vault_task", None),
         )
     app.state.graph.close()
     logger.info("Vault Knowledge Service shutdown complete")

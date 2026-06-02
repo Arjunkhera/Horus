@@ -22,6 +22,20 @@ logger = logging.getLogger(__name__)
 DEFAULT_NAMESPACE = "default"
 VAULTS_BASE = "/data/vaults"
 
+# Marker file (written beside each per-vault clone) recording the logical vault
+# namespace. The per-vault sync loop reads it to enumerate vaults after a
+# restart — the on-disk dir slug ('/'→'-') is otherwise lossy for 'owner/vault'
+# namespaces. Kept in lockstep with services/vault/src/sync/daemon.py.
+VAULT_NAMESPACE_MARKER = ".vault-namespace"
+
+
+def write_namespace_marker(vault_dir: Path, namespace: str) -> None:
+    """Persist the vault namespace beside its clone (best-effort)."""
+    try:
+        (vault_dir / VAULT_NAMESPACE_MARKER).write_text(namespace + "\n", encoding="utf-8")
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.warning("Failed to write namespace marker for %s: %s", namespace, exc)
+
 
 class VaultRepoResolver:
     """Maps vault namespace → local knowledge-repo path on the writer PVC."""
@@ -83,6 +97,7 @@ class VaultRepoResolver:
                     "Vault %r: reusing existing clone at %s",
                     vault_namespace, repo_dir,
                 )
+                write_namespace_marker(repo_dir.parent, vault_namespace)
                 self._git_pull(repo_dir)
                 return str(repo_dir)
 
@@ -97,6 +112,7 @@ class VaultRepoResolver:
                     "Vault %r: cloned %s → %s",
                     vault_namespace, git_repo, repo_dir,
                 )
+                write_namespace_marker(repo_dir.parent, vault_namespace)
             except subprocess.CalledProcessError as e:
                 logger.error(
                     "Clone failed for vault %r (%s): %s",

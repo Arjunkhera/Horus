@@ -990,25 +990,6 @@ def _write_page_sync(
     if registry and page_uuid:
         registry.register(page_uuid, flat_path)
 
-    # Index-on-write: upsert the page into the search index immediately so it is
-    # searchable right after write, without waiting for the PR to merge and the
-    # periodic per-repo reindex to run. Mirrors the workspace watcher's per-file
-    # upsert. The injected `store` is already scoped to the target vault's
-    # collection (via get_store_override / X-Vault-Collection), so the document
-    # lands in the correct per-vault Typesense collection with the correct
-    # vault_name. Without this, writes to provisioned per-vault repos were never
-    # indexed (no per-vault sync loop), so search returned nothing. Fire-and-forget:
-    # a failure here must not fail the write that already committed + opened a PR.
-    if store is not None and page_uuid and hasattr(store, "upsert_document"):
-        try:
-            store.upsert_document(flat_path, request.content)
-            logger.info(
-                "Index-on-write: upserted %s into vault '%s' search index",
-                flat_path, vault_namespace,
-            )
-        except Exception as _idx_exc:
-            logger.warning("Index-on-write failed for %s: %s", flat_path, _idx_exc)
-
     # Wiki-link auto-edge extraction (Section B): scan body for [[...]] links
     # and create MENTIONS edges in Neo4j.  Runs fire-and-forget — never blocks
     # the write response.
