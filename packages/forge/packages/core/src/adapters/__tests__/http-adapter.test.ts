@@ -126,6 +126,49 @@ describe('HttpAdapter', () => {
     // No assertion on Authorization header — just verify no error thrown
   });
 
+  it('write() sends a JSON body of base64-encoded files (not multipart)', async () => {
+    // Regression: the publish route parses JSON `{ files: { name: base64 } }`,
+    // not multipart/form-data. A FormData body was silently dropped server-side
+    // and surfaced to callers as UNKNOWN_ERROR despite a valid bundle.
+    const bundle = validSkillBundle();
+    await adapter.write('skill', 'my-skill', bundle);
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const reqInit = init as RequestInit;
+    const headers = reqInit.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(typeof reqInit.body).toBe('string');
+
+    const parsed = JSON.parse(reqInit.body as string) as {
+      files: Record<string, string>;
+    };
+    expect(Object.keys(parsed.files).sort()).toEqual(['SKILL.md', 'metadata.yaml']);
+    // metadata.yaml round-trips through base64 back to YAML containing the id
+    const metaYaml = Buffer.from(parsed.files['metadata.yaml']!, 'base64').toString('utf-8');
+    expect(metaYaml).toContain('my-skill');
+    expect(Buffer.from(parsed.files['SKILL.md']!, 'base64').toString('utf-8')).toBe(
+      bundle.content,
+    );
+  });
+
+  it('write() error surfaces the HTTP status and server error code', async () => {
+    const errAdapter = new HttpAdapter({
+      baseUrl: BASE_URL,
+      token: TOKEN,
+      coreVersion: CORE_VERSION,
+      fetch: mockFetch({
+        status: 500,
+        body: { error: 'INTERNAL_ERROR', message: 'An unexpected error occurred' },
+      }),
+    });
+    const err = (await errAdapter
+      .write('skill', 'my-skill', validSkillBundle())
+      .catch((e) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('HTTP 500');
+    expect(err.message).toContain('INTERNAL_ERROR');
+  });
+
   // ── write(): pre-upload validation ───────────────────────────────────────
 
   it('write() throws PreUploadValidationError for invalid metadata without sending HTTP', async () => {

@@ -264,22 +264,23 @@ export class HttpAdapter implements DataAdapter {
     const metaYaml = stringifyYaml(bundle.meta);
     const contentFile = CONTENT_FILES[type];
 
-    const body = new FormData();
-    body.append(
-      'metadata.yaml',
-      new Blob([metaYaml], { type: 'text/yaml' }),
-      'metadata.yaml',
-    );
+    // The publish route (POST /artifacts/:type/:id/:version) accepts a JSON
+    // body of base64-encoded files — `{ files: { <name>: <base64> } }` — NOT
+    // multipart/form-data. No multipart content-type parser is registered on
+    // the server, so a FormData body was parsed as empty, the pipeline threw,
+    // and the global error handler returned a generic 500 ("An unexpected
+    // error occurred") that the MCP layer surfaced as UNKNOWN_ERROR — even
+    // though the bundle was valid. Mirror the base64 contract used by read().
+    const files: Record<string, string> = {
+      'metadata.yaml': Buffer.from(metaYaml, 'utf-8').toString('base64'),
+    };
     if (bundle.content) {
-      body.append(
-        contentFile,
-        new Blob([bundle.content], { type: 'text/plain' }),
-        contentFile,
-      );
+      files[contentFile] = Buffer.from(bundle.content, 'utf-8').toString('base64');
     }
 
     // ── Step 3: Send with version header ─────────────────────────────────────
     const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
       'X-Forge-Core-Version': this.coreVersion,
     };
     if (this.token) {
@@ -289,7 +290,7 @@ export class HttpAdapter implements DataAdapter {
     const res = await this.fetch(url, {
       method: 'POST',
       headers,
-      body,
+      body: JSON.stringify({ files }),
     });
 
     // ── Step 4: Handle version-skew errors (409 / 426) ───────────────────────
@@ -310,14 +311,20 @@ export class HttpAdapter implements DataAdapter {
     }
 
     if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
+      // Surface the real status and the server's error code/message so a
+      // failure is never collapsed into an opaque "unexpected error". The
+      // registry returns `{ error: <CODE>, message: <text> }` on failure.
+      let detail = '';
       try {
-        const errBody = (await res.json()) as { message?: string };
-        if (errBody.message) detail = errBody.message;
+        const errBody = (await res.json()) as { error?: string; message?: string };
+        const parts = [errBody.error, errBody.message].filter(Boolean);
+        if (parts.length) detail = `: ${parts.join(' — ')}`;
       } catch {
-        // ignore
+        // Body not JSON-parseable — status code alone is the detail.
       }
-      throw new Error(`Failed to publish ${type}:${id}@${version}: ${detail}`);
+      throw new Error(
+        `Failed to publish ${type}:${id}@${version} (HTTP ${res.status})${detail}`,
+      );
     }
   }
 
