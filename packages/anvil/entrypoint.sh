@@ -98,7 +98,19 @@ fi
 # Step 2: Configure git for token-based auth if GITHUB_TOKEN is set
 if [ -n "$GITHUB_TOKEN" ] && [ -d "$NOTES_PATH/.git" ]; then
   git -C "$NOTES_PATH" config credential.helper "store"
-  echo "https://oauth2:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
+  # Derive the host from $REPO_URL so ongoing fetch/push works for any host
+  # (e.g. GitHub Enterprise like github.example.com), not just github.com.
+  # Hardcoding github.com here meant the initial clone succeeded but every
+  # subsequent pull failed for non-github.com hosts ("could not read Username").
+  REPO_HOST=$(echo "$REPO_URL" | sed -E 's#https?://([^/]+)/.*#\1#')
+  : > ~/.git-credentials
+  if [ -n "$REPO_HOST" ]; then
+    echo "https://oauth2:${GITHUB_TOKEN}@${REPO_HOST}" >> ~/.git-credentials
+  fi
+  # Keep github.com for back-compat (no-op when REPO_HOST already is github.com).
+  if [ "$REPO_HOST" != "github.com" ]; then
+    echo "https://oauth2:${GITHUB_TOKEN}@github.com" >> ~/.git-credentials
+  fi
 fi
 
 # Step 2.5: Set git identity for auto-commits
