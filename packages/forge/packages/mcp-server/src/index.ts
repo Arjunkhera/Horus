@@ -17,6 +17,32 @@ import { parse as parseYaml } from 'yaml';
 
 const startTime = Date.now();
 
+/**
+ * Resolve the filesystem root that forge_add / forge_install should operate on.
+ *
+ * Precedence:
+ *   1. Explicit `path` — an arbitrary install location. Absolute paths are used
+ *      as-is; relative paths resolve against the server's cwd.
+ *   2. `workspaceId` — a registered workspace under FORGE_WORKSPACES_PATH
+ *      (default `/data/workspaces`). Back-compat behaviour.
+ *   3. Neither — default to the current working directory.
+ *
+ * Note (containerized deployments): the forge engine runs inside the horus-ui
+ * container, so an explicit `path` must be reachable there — i.e. a mounted
+ * path (workspaces, sessions, managed repos) or a container-internal path. An
+ * unmounted host path will not resolve.
+ */
+export function resolveInstallRoot(args: { workspaceId?: string; path?: string }): string {
+  if (args.path && args.path.trim() !== '') {
+    return path.isAbsolute(args.path) ? args.path : path.resolve(process.cwd(), args.path);
+  }
+  if (args.workspaceId && args.workspaceId.trim() !== '') {
+    const workspacesRoot = process.env.FORGE_WORKSPACES_PATH ?? '/data/workspaces';
+    return path.join(workspacesRoot, args.workspaceId);
+  }
+  return process.cwd();
+}
+
 // ─── Dep verification helpers ──────────────────────────────────────────────
 
 interface DepVerificationSummary {
@@ -118,7 +144,7 @@ const TOOLS = [
   {
     name: 'forge_add',
     description:
-      'Add one or more artifact refs to forge.yaml. Use after searching to add an artifact to the workspace configuration.',
+      'Add one or more artifact refs to forge.yaml. Target the location with EITHER workspaceId (a registered workspace) OR path (an arbitrary directory); if neither is given, the current working directory is used. When the target has no forge.yaml yet, one is created automatically so artifacts can be added to a fresh path.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -131,20 +157,28 @@ const TOOLS = [
           type: 'string',
           description: 'Target workspace ID (e.g., "sdlc-workspace-1"). Resolves to /data/workspaces/<workspaceId>.',
         },
+        path: {
+          type: 'string',
+          description: 'Target directory to install into (absolute, or relative to cwd). Takes precedence over workspaceId. A forge.yaml is created here if missing. Must be reachable by the forge engine (a mounted/container path in connected deployments).',
+        },
       },
-      required: ['refs', 'workspaceId'],
+      required: ['refs'],
     },
   },
   {
     name: 'forge_install',
     description:
-      'Run the full install pipeline: resolve all artifacts from forge.yaml and emit them to the workspace. Call this after forge_add.',
+      'Run the full install pipeline: resolve all artifacts from forge.yaml and emit them to the target. Target with EITHER workspaceId (a registered workspace) OR path (an arbitrary directory); if neither is given, the current working directory is used. Call this after forge_add.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         workspaceId: {
           type: 'string',
           description: 'Target workspace ID (e.g., "sdlc-workspace-1"). Resolves to /data/workspaces/<workspaceId>.',
+        },
+        path: {
+          type: 'string',
+          description: 'Target directory to install into (absolute, or relative to cwd). Takes precedence over workspaceId. Must contain a forge.yaml (run forge_add first) and be reachable by the forge engine (a mounted/container path in connected deployments).',
         },
         target: {
           type: 'string',
@@ -156,7 +190,7 @@ const TOOLS = [
           description: 'Preview changes without writing files',
         },
       },
-      required: ['workspaceId'],
+      required: [],
     },
   },
   {
@@ -592,17 +626,17 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_add': {
-          const { refs, workspaceId } = args as { refs: string[]; workspaceId: string };
-          const workspacesRoot = process.env.FORGE_WORKSPACES_PATH ?? '/data/workspaces';
-          const workspacePath = path.join(workspacesRoot, workspaceId);
-          const forgeForWorkspace = new ForgeCore(workspacePath);
-          const config = await forgeForWorkspace.add(refs);
+          const { refs, workspaceId, path: targetPath } = args as { refs: string[]; workspaceId?: string; path?: string };
+          const installRoot = resolveInstallRoot({ workspaceId, path: targetPath });
+          const forgeForWorkspace = new ForgeCore(installRoot);
+          const config = await forgeForWorkspace.add(refs, { initIfMissing: true });
           return {
             content: [{
               type: 'text',
               text: JSON.stringify({
                 added: refs,
                 workspaceId,
+                path: installRoot,
                 config: {
                   skills: Object.keys(config.artifacts.skills),
                   agents: Object.keys(config.artifacts.agents),
@@ -614,10 +648,9 @@ function buildServer(workspaceRoot: string): Server {
         }
 
         case 'forge_install': {
-          const { workspaceId, target, dryRun } = (args ?? {}) as { workspaceId: string; target?: string; dryRun?: boolean };
-          const workspacesRoot = process.env.FORGE_WORKSPACES_PATH ?? '/data/workspaces';
-          const workspacePath = path.join(workspacesRoot, workspaceId);
-          const forgeForWorkspace = new ForgeCore(workspacePath);
+          const { workspaceId, path: targetPath, target, dryRun } = (args ?? {}) as { workspaceId?: string; path?: string; target?: string; dryRun?: boolean };
+          const installRoot = resolveInstallRoot({ workspaceId, path: targetPath });
+          const forgeForWorkspace = new ForgeCore(installRoot);
           const report = await forgeForWorkspace.install({ target: target as any, dryRun });
 
           // Build dep verification summary from the resolved artifacts
@@ -630,6 +663,7 @@ function buildServer(workspaceRoot: string): Server {
               type: 'text',
               text: JSON.stringify({
                 workspaceId,
+                path: installRoot,
                 installed: report.installed.map(r => `${r.type}:${r.id}@${r.version}`),
                 filesWritten: report.filesWritten,
                 conflicts: report.conflicts.length,

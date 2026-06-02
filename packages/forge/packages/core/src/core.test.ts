@@ -76,6 +76,36 @@ describe('ForgeCore — integration', () => {
     });
   });
 
+  describe('add() — initIfMissing (install to a fresh path)', () => {
+    it('scaffolds forge.yaml when missing and adds the ref', async () => {
+      // tmpDir was created by mkdtemp but never `init`ed — no forge.yaml yet.
+      const cfgPath = path.join(tmpDir, 'forge.yaml');
+      const before = await fs.access(cfgPath).then(() => true).catch(() => false);
+      expect(before).toBe(false);
+
+      const config = await forge.add('skill:developer@1.0.0', { initIfMissing: true });
+
+      // forge.yaml was created and the ref was added.
+      expect(config.artifacts.skills['developer']).toBe('1.0.0');
+      const after = await fs.access(cfgPath).then(() => true).catch(() => false);
+      expect(after).toBe(true);
+      // Workspace name is derived from the directory basename.
+      expect(config.name).toBe(path.basename(tmpDir));
+    });
+
+    it('throws CONFIG_NOT_FOUND when missing and initIfMissing is not set', async () => {
+      await expect(forge.add('skill:developer@1.0.0')).rejects.toThrow(/forge\.yaml not found/);
+    });
+
+    it('does not re-scaffold when forge.yaml already exists', async () => {
+      await forge.init('test-workspace');
+      const config = await forge.add('skill:developer@1.0.0', { initIfMissing: true });
+      // Existing name preserved (not overwritten by the basename-derived init).
+      expect(config.name).toBe('test-workspace');
+      expect(config.artifacts.skills['developer']).toBe('1.0.0');
+    });
+  });
+
   describe('list()', () => {
     it('returns empty list when nothing installed', async () => {
       await forge.init('test-workspace');
