@@ -21,14 +21,42 @@ export const GLOBAL_CONFIG_DIR = process.env.FORGE_CONFIG_PATH
 export const GLOBAL_CONFIG_PATH = path.join(GLOBAL_CONFIG_DIR, 'forge.yaml');
 
 /**
- * The default local HTTP registry (solo-dev registry-service on port 8744).
- * Always present at the front of the registry list so local artifacts take
- * priority (local-first resolution).
+ * Resolve the default Forge registry URL — the in-cluster forge-registry behind
+ * the Horus control-plane gateway. Both the injected `local` and `global`
+ * defaults resolve to this same gateway; there is no standalone localhost
+ * registry-service in the current architecture.
+ *
+ * Resolution order:
+ *   FORGE_REGISTRY_GATEWAY_URL — if set, used directly.
+ *   HORUS_CONTROL_PLANE_URL    — otherwise derived as ${HORUS_CONTROL_PLANE_URL}/api/v1/forge.
+ *   (fallback)                 — the public Horus control plane.
+ *
+ * Never returns a dead host (the retired localhost:8744 registry-service or the
+ * decommissioned CloudFront distribution).
+ */
+export function resolveDefaultRegistryUrl(): string {
+  const explicit = process.env.FORGE_REGISTRY_GATEWAY_URL;
+  if (explicit) return explicit;
+  const cpUrl = process.env.HORUS_CONTROL_PLANE_URL;
+  if (cpUrl) return `${cpUrl.replace(/\/$/, '')}/api/v1/forge`;
+  return 'https://horus.arjunkhera.io/api/v1/forge';
+}
+
+/**
+ * The default writable registry. Always present at the front of the registry
+ * list so it wins under local-first artifact resolution.
+ *
+ * In the current architecture there is no standalone localhost registry-service;
+ * the writable registry is the control-plane Forge gateway, so this default
+ * resolves to the same URL as DEFAULT_GLOBAL_REGISTRY. It is only the fallback
+ * used when forge.yaml is absent — the normal path is the CLI-written forge.yaml,
+ * whose `local` entry carries the publisher token (tokenEnv) for authenticated
+ * publishes (a tokenless entry can read but not write).
  */
 export const DEFAULT_LOCAL_REGISTRY: RegistryConfig = {
   type: 'http',
   name: 'local',
-  url: 'http://localhost:8744',
+  url: resolveDefaultRegistryUrl(),
   writable: true,
 };
 
@@ -42,24 +70,11 @@ export const DEFAULT_LOCAL_REGISTRY: RegistryConfig = {
  * Writes (publish) require an authenticated, writable registry entry pointing
  * at the same gateway with a publisher token — the gateway gates non-read
  * methods, so a tokenless 'global' entry cannot publish.
- *
- * Runtime env overrides (applied in loadGlobalConfig):
- *   FORGE_REGISTRY_GATEWAY_URL — if set, overrides the 'global' registry URL directly.
- *   HORUS_CONTROL_PLANE_URL    — if FORGE_REGISTRY_GATEWAY_URL is absent, derived as
- *                                 ${HORUS_CONTROL_PLANE_URL}/api/v1/forge.
  */
-export function resolveDefaultGlobalRegistryUrl(): string {
-  const explicit = process.env.FORGE_REGISTRY_GATEWAY_URL;
-  if (explicit) return explicit;
-  const cpUrl = process.env.HORUS_CONTROL_PLANE_URL;
-  if (cpUrl) return `${cpUrl.replace(/\/$/, '')}/api/v1/forge`;
-  return 'https://horus.arjunkhera.io/api/v1/forge';
-}
-
 export const DEFAULT_GLOBAL_REGISTRY: RegistryConfig = {
   type: 'http',
   name: 'global',
-  url: resolveDefaultGlobalRegistryUrl(),
+  url: resolveDefaultRegistryUrl(),
   writable: false,
 };
 
@@ -121,7 +136,7 @@ export function ensureDefaultRegistries(
  *
  * Unlike artifacts (local-first resolution), repo metadata is shared and lives
  * in the deployed Forge registry, so repo operations must target the shared
- * endpoint — never the solo-dev `local` (localhost:8744) entry. The same client
+ * endpoint — never the writable `local` entry. The same client
  * serves reads AND writes, so a WRITABLE shared registry must win over the
  * read-only public `global` CDN (which blocks POST/PATCH/DELETE). Preference:
  *   1. `enterprise` — the deployed registry in enterprise/air-gapped mode (writable).
@@ -177,7 +192,7 @@ export async function loadGlobalConfig(
 
     // Re-resolve the 'global' registry URL in case FORGE_REGISTRY_GATEWAY_URL or
     // HORUS_CONTROL_PLANE_URL is set at runtime (horus-ui in-process mode).
-    const globalRegistryUrl = resolveDefaultGlobalRegistryUrl();
+    const globalRegistryUrl = resolveDefaultRegistryUrl();
     if (globalRegistryUrl !== 'https://horus.arjunkhera.io/api/v1/forge') {
       const globalEntry = config.registries.find(r => r.name === 'global');
       if (globalEntry) {

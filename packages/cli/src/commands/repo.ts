@@ -33,10 +33,19 @@ repoCommand
     const config = loadConfig();
 
     // Build the shared registry base URL: explicit --registry flag wins, then
-    // the configured enterprise_registry_url, then the local registry-service
-    // port (8744) as a solo-dev fallback.
-    const registryUrl =
-      opts.registry ?? config.enterprise_registry_url ?? 'http://localhost:8744';
+    // the configured enterprise_registry_url, then the control-plane Forge
+    // registry derived from control_plane_url. There is no localhost fallback —
+    // the repo registry is the shared, deployed one.
+    const cpRegistryUrl = config.control_plane_url
+      ? `${config.control_plane_url.replace(/\/$/, '')}/api/v1/forge`
+      : undefined;
+    const registryUrl = opts.registry ?? config.enterprise_registry_url ?? cpRegistryUrl;
+
+    if (!registryUrl) {
+      console.log(chalk.red('No shared repo registry is configured.'));
+      console.log(chalk.dim('Connect to a control plane (`horus connect`) or pass `--registry <url>`.'));
+      process.exit(1);
+    }
 
     const client = new RepoRegistryClient({ baseUrl: registryUrl });
 
