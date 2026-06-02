@@ -31,6 +31,7 @@ This repo ships three thin-pointer skills under `.claude/skills/<name>/SKILL.md`
 | User asks to add a new MCP tool to Anvil, Forge, or Vault MCP | **horus-mcp-tool-add** | Names the registration file, schema location, and test pattern for each MCP server. References per-package guides. |
 | User asks to add a new Anvil type to the Reader, fix a Reader UI bug, add a page or route, change Reader styling, or make any edit to `packages/horus-ui-client/` | **horus-reader-dev** | Covers the no-bundler architecture, script load order, type display system (`TYPE_ORDER` + `activeTypes`), CSS type color recipe, and `forge_develop` workflow for the Reader. |
 | User asks to deploy, redeploy, troubleshoot, or operate the Forge Remote Registry; mentions terraform, EC2, CloudFront, registry infrastructure | **forge-registry-ops** | Architecture quick ref, script inventory, critical gotchas, Vault page links for full procedures. |
+| User asks to onboard/add a user to a Horus control plane, mint a connection bundle, provision a vault for someone, or set up their own client from a bundle | **horus-onboard-user** | Routes operator-mint vs user-setup, tenant/role/vault decisions (incl. optional vault provisioning), and the existing-anvil-repo / existing-install variables to the right `horus operator …` / `horus setup` commands. References `docs/runbooks/`. |
 
 ## Always Load (Vault Pages)
 
