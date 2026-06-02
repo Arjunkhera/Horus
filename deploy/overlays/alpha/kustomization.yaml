@@ -27,11 +27,14 @@ resources:
 # operator-service re-pinned to sha-de7df7e: reads GITHUB_TOKEN per-request from a
 # mounted (hot-reloading) Secret volume instead of a frozen env var — fixes stale
 # token / 401 Bad credentials after PAT rotation (bug 52f1cda8, PR #382).
+# vault re-pinned to sha-b69a234: set HOME in the writer entrypoint so the runtime
+# per-vault `git clone` finds the credential store — fixes 500 on writes to
+# provisioned (private) vaults like vault-office (PR #417).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-86202be
+    newTag: sha-b69a234
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-5d1f953
   - name: ghcr.io/arjunkhera/horus/operator-service
