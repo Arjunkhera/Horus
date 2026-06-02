@@ -151,7 +151,11 @@ phases:
   # runner-core reports these as `delegated`; the sdlc-testenv agent executes them.
   # ---------------------------------------------------------------------------
   test:
-    policy: fail-fast
+    # run-all (not fail-fast): this is a feature-coverage matrix — we want every
+    # service's results in one pass, not an abort at the first red. Each action is
+    # self-contained (round-trips live inside a single `sequence`) so parallel
+    # execution under `concurrency` is safe; no cross-action ordering dependency.
+    policy: run-all
 
     actions:
       # Basic Anvil round-trip: create a note via shadow MCP, confirm it lands.
@@ -183,6 +187,478 @@ phases:
         evidence:
           capture: response
           saveTo: evidence/isolation-proof.json
+
+      # =======================================================================
+      # FEATURE COVERAGE — Forge, Vault, Anvil (stack-level, agent-delegated).
+      # Each action calls a real MCP tool against the isolated SHADOW stack via
+      # its `connection:`. runner-core marks `tool:` actions `delegated`; the
+      # sdlc-testenv executor performs the call over MCP and checks `expect`.
+      #
+      # Convention for round-trips: multi-step flows use `sequence` so create →
+      # read → mutate → delete is ONE self-contained action (no cross-action
+      # ordering dependency under run-all). Server-generated IDs are threaded
+      # between steps with `{{step.field}}` placeholders — the runner does NOT
+      # expand these (only {slot}/{workdir} etc. are runner template vars); the
+      # executor substitutes the real value captured from the prior step's
+      # response. State created here lives only in the ephemeral shadow stack
+      # and is removed by teardown, but round-trips clean up after themselves.
+      #
+      # Heavy / externally-dependent / irreversible tools are intentionally out
+      # of this breadth pass: forge_develop (clones a repo), forge_publish /
+      # forge_add / forge_install (mutate the shared registry), knowledge_write_page
+      # (opens a real git PR). Add these later behind a dedicated profile.
+      # =======================================================================
+
+      # ----- FORGE: artifact registry (read path) ----------------------------
+      - name: forge-artifact-search
+        connection: shadow.forge
+        invoke:
+          tool: forge_search
+          args:
+            query: "sdlc"
+        expect:
+          returns: results
+        evidence:
+          capture: response
+          saveTo: evidence/forge-artifact-search.json
+        tags: [feature, forge, registry, search]
+
+      - name: forge-artifact-resolve
+        connection: shadow.forge
+        invoke:
+          tool: forge_resolve
+          args:
+            ref: "workspace-config:sdlc-default"
+        expect:
+          returns: version
+        tags: [feature, forge, registry, resolve]
+
+      - name: forge-artifact-list-available
+        connection: shadow.forge
+        invoke:
+          tool: forge_list
+          args:
+            scope: "available"
+        expect:
+          returns: artifacts
+        tags: [feature, forge, registry, list]
+
+      # ----- FORGE: workspace lifecycle (create -> status -> delete) ----------
+      - name: forge-workspace-lifecycle
+        connection: shadow.forge
+        invoke:
+          sequence:
+            - name: create
+              invoke:
+                tool: forge_workspace_create
+                args:
+                  config: "sdlc-default"
+                  name: "testenv-feature-ws"
+              expect:
+                returns: workspace_id
+            - name: status
+              invoke:
+                tool: forge_workspace_status
+                args:
+                  id: "{{create.workspace.id}}"
+              expect:
+                returns: status
+            - name: list-contains
+              invoke:
+                tool: forge_workspace_list
+                args: {}
+              expect:
+                contains: "testenv-feature-ws"
+            - name: delete
+              invoke:
+                tool: forge_workspace_delete
+                args:
+                  id: "{{create.workspace.id}}"
+                  force: true
+              expect:
+                returns: success
+        evidence:
+          capture: response
+          saveTo: evidence/forge-workspace-lifecycle.json
+        tags: [feature, forge, workspace, lifecycle]
+
+      # ----- FORGE: repo index (read + register round-trip) -------------------
+      - name: forge-repo-list
+        connection: shadow.forge
+        invoke:
+          tool: forge_repo_list
+          args: {}
+        expect:
+          returns: repos
+        tags: [feature, forge, repo-index, list]
+
+      - name: forge-repo-resolve
+        connection: shadow.forge
+        invoke:
+          tool: forge_repo_resolve
+          args:
+            name: "Horus"
+        # forge_repo_resolve wraps the hit in { match: { org, name, canonicalUrl, ... } }.
+        # A registry-only entry has no localPath, so assert on the resolved name.
+        expect:
+          field: name
+          equals: "Horus"
+        tags: [feature, forge, repo-index, resolve]
+
+      # NOTE: forge_repo_register / _get / _remove (write round-trip) are NOT
+      # exercised here. In the isolated test-env the repo registry proxies to the
+      # control-plane HTTP registry, which rejects writes with UNAUTHORIZED
+      # (no Authorization header is carried into the shadow stack). Repo-index
+      # *reads* (list/resolve) work because they hit the local cache. Add the
+      # register round-trip behind an authenticated profile later.
+
+      # ----- FORGE: code sessions (read) --------------------------------------
+      - name: forge-session-list
+        connection: shadow.forge
+        invoke:
+          tool: forge_session_list
+          args: {}
+        expect:
+          returns: sessions
+        tags: [feature, forge, session, list]
+
+      # ----- VAULT: knowledge service (read / validate / suggest) -------------
+      # Content-dependent reads (get_page by UUID, graph edges, write_page PR)
+      # need a seeded vault and are intentionally excluded — these exercise the
+      # endpoints' shape and validation behaviour, which hold on an empty vault.
+      - name: vault-schema
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_get_schema
+          args: {}
+        expect:
+          returns: page_types
+        tags: [feature, vault, schema]
+
+      - name: vault-search
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_search
+          args:
+            query: "anvil"
+            limit: 5
+        expect:
+          returns: results
+        evidence:
+          capture: response
+          saveTo: evidence/vault-search.json
+        tags: [feature, vault, search]
+
+      - name: vault-resolve-context
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_resolve_context
+          args:
+            repo: "anvil"
+            include_full: false
+        expect:
+          returns: operational_pages
+        tags: [feature, vault, resolve-context]
+
+      - name: vault-list-by-scope
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_list_by_scope
+          args:
+            scope: { program: "horus" }
+            limit: 10
+        expect:
+          returns: pages
+        tags: [feature, vault, list-by-scope]
+
+      - name: vault-validate-page-valid
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_validate_page
+          args:
+            content: |
+              ---
+              title: Testenv Feature Page
+              type: guide
+              mode: reference
+              description: A well-formed guide page used to assert the validator accepts valid input.
+              scope:
+                program: horus
+              ---
+
+              # Testenv Feature Page
+
+              A well-formed page used to assert the validator accepts valid input.
+        expect:
+          field: valid
+          equals: true
+        tags: [feature, vault, validate]
+
+      - name: vault-validate-page-invalid
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_validate_page
+          args:
+            content: |
+              ---
+              type: not-a-real-type
+              ---
+
+              # Missing required frontmatter
+        expect:
+          field: valid
+          equals: false
+        tags: [feature, vault, validate, negative]
+
+      - name: vault-suggest-metadata
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_suggest_metadata
+          args:
+            content: |
+              # Deploying the Forge Registry
+
+              Steps to provision the registry on EC2 with CloudFront and S3.
+        expect:
+          returns: suggestions
+        tags: [feature, vault, suggest-metadata]
+
+      - name: vault-check-duplicates
+        connection: shadow.vault
+        invoke:
+          tool: knowledge_check_duplicates
+          args:
+            title: "A Definitely Novel Testenv Topic"
+            content: "Unique content that should not match any existing vault page."
+        expect:
+          returns: novel
+        tags: [feature, vault, check-duplicates]
+
+      # ----- ANVIL: types + note CRUD round-trip ------------------------------
+      - name: anvil-list-types
+        connection: shadow.anvil
+        invoke:
+          tool: anvil_list_types
+          args: {}
+        expect:
+          returns: types
+        tags: [feature, anvil, types]
+
+      - name: anvil-note-crud
+        connection: shadow.anvil
+        invoke:
+          sequence:
+            - name: create
+              invoke:
+                tool: anvil_create_note
+                args:
+                  type: "note"
+                  title: "testenv-feature-note"
+                  body: "initial body"
+              expect:
+                returns: noteId
+            - name: get
+              invoke:
+                tool: anvil_get_note
+                args:
+                  noteId: "{{create.noteId}}"
+              expect:
+                field: title
+                equals: "testenv-feature-note"
+            - name: update
+              invoke:
+                tool: anvil_update_note
+                args:
+                  noteId: "{{create.noteId}}"
+                  body: "updated body"
+              expect:
+                returns: noteId
+            - name: delete
+              invoke:
+                tool: anvil_delete_note
+                args:
+                  noteId: "{{create.noteId}}"
+                  force: true
+              expect:
+                returns: deleted
+        evidence:
+          capture: response
+          saveTo: evidence/anvil-note-crud.json
+        tags: [feature, anvil, note, crud]
+
+      # ----- ANVIL: views (table + board) -------------------------------------
+      - name: anvil-query-view-table
+        connection: shadow.anvil
+        invoke:
+          tool: anvil_query_view
+          args:
+            view: "table"
+            filters: { type: "task" }
+            limit: 10
+        # table view returns { columns, rows }; board view returns { items }.
+        expect:
+          returns: rows
+        tags: [feature, anvil, view, table]
+
+      - name: anvil-query-view-board
+        connection: shadow.anvil
+        invoke:
+          tool: anvil_query_view
+          args:
+            view: "board"
+            groupBy: "status"
+            filters: { type: "task" }
+        expect:
+          returns: items
+        tags: [feature, anvil, view, board]
+
+      - name: anvil-search
+        connection: shadow.anvil
+        invoke:
+          tool: anvil_search
+          args:
+            query: "feature"
+            limit: 5
+        expect:
+          returns: results
+        tags: [feature, anvil, search]
+
+      # ----- ANVIL: graph — entity + edge round-trip --------------------------
+      - name: anvil-entity-edge-graph
+        connection: shadow.anvil
+        invoke:
+          sequence:
+            - name: create-a
+              invoke:
+                tool: anvil_create_entity
+                args:
+                  type: "note"
+                  title: "testenv-feature-entity-A"
+              expect:
+                returns: entityId
+            - name: create-b
+              invoke:
+                tool: anvil_create_entity
+                args:
+                  type: "note"
+                  title: "testenv-feature-entity-B"
+              expect:
+                returns: entityId
+            - name: link
+              invoke:
+                tool: anvil_create_edge
+                args:
+                  sourceId: "{{create-a.entityId}}"
+                  targetId: "{{create-b.entityId}}"
+                  intent: "references"
+              expect:
+                returns: intent
+            - name: get-edges
+              invoke:
+                tool: anvil_get_edges
+                args:
+                  noteId: "{{create-a.entityId}}"
+              expect:
+                returns: edges
+            - name: get-related
+              invoke:
+                tool: anvil_get_related
+                args:
+                  noteId: "{{create-a.entityId}}"
+              expect:
+                returns: forward
+            - name: unlink
+              invoke:
+                tool: anvil_delete_edge
+                args:
+                  sourceId: "{{create-a.entityId}}"
+                  targetId: "{{create-b.entityId}}"
+              expect:
+                returns: deleted
+            - name: delete-a
+              invoke:
+                tool: anvil_delete_entity
+                args:
+                  noteId: "{{create-a.entityId}}"
+                  force: true
+              expect:
+                returns: deleted
+            - name: delete-b
+              invoke:
+                tool: anvil_delete_entity
+                args:
+                  noteId: "{{create-b.entityId}}"
+                  force: true
+              expect:
+                returns: deleted
+        evidence:
+          capture: response
+          saveTo: evidence/anvil-entity-edge-graph.json
+        tags: [feature, anvil, graph, edge]
+
+      # ----- ANVIL: hierarchy — parent_of + children/subtree -----------------
+      - name: anvil-hierarchy
+        connection: shadow.anvil
+        invoke:
+          sequence:
+            - name: create-parent
+              invoke:
+                tool: anvil_create_entity
+                args:
+                  type: "project"
+                  title: "testenv-feature-parent"
+                  fields: { status: "active" }
+              expect:
+                returns: entityId
+            - name: create-child
+              invoke:
+                tool: anvil_create_entity
+                args:
+                  type: "task"
+                  title: "testenv-feature-child"
+                  fields: { status: "open" }
+              expect:
+                returns: entityId
+            - name: link-parent-of
+              invoke:
+                tool: anvil_create_edge
+                args:
+                  sourceId: "{{create-parent.entityId}}"
+                  targetId: "{{create-child.entityId}}"
+                  intent: "parent_of"
+              expect:
+                returns: intent
+            - name: get-children
+              invoke:
+                tool: anvil_get_children
+                args:
+                  entityId: "{{create-parent.entityId}}"
+              expect:
+                contains: "testenv-feature-child"
+            - name: get-subtree
+              invoke:
+                tool: anvil_get_subtree
+                args:
+                  entityId: "{{create-parent.entityId}}"
+              expect:
+                returns: descendants
+            - name: delete-child
+              invoke:
+                tool: anvil_delete_entity
+                args:
+                  noteId: "{{create-child.entityId}}"
+                  force: true
+              expect:
+                returns: deleted
+            - name: delete-parent
+              invoke:
+                tool: anvil_delete_entity
+                args:
+                  noteId: "{{create-parent.entityId}}"
+                  force: true
+              expect:
+                returns: deleted
+        tags: [feature, anvil, graph, hierarchy]
 
       # -----------------------------------------------------------------------
       # F1 @horus/auth — pure unit/type actions (needsStack: false, Design E3).
