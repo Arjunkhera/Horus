@@ -407,6 +407,13 @@ export function generateEnv(config: Config): string {
     ? resolvePath(config.host_repos_path)
     : '';
 
+  // Resolve the GitHub token for the Anvil notes repo from github_hosts (keyed
+  // by host). Persisting it to .env means `horus up` can authenticate ongoing
+  // sync without the token being present in the shell env — otherwise a bare
+  // `horus up` after setup silently drops the token and Anvil sync degrades.
+  const anvilNotesToken =
+    resolveGitHubHost(config.repos.anvil_notes, config.github_hosts)?.token ?? '';
+
   // Build FORGE_SCAN_PATHS by auto-discovering repos under host_repos_path,
   // with manual overrides from host_repos_extra_scan_dirs as a fallback.
   const baseScanPath = '/data/repos';
@@ -477,6 +484,9 @@ export function generateEnv(config: Config): string {
     '',
     '# Anvil notes repo (must be HTTPS — container services do not have SSH keys)',
     `ANVIL_REPO_URL=${config.repos.anvil_notes}`,
+    '# GitHub token for Anvil notes sync, resolved from github_hosts by host.',
+    '# Persisted so `horus up` authenticates without the token in the shell env.',
+    `GITHUB_TOKEN=${anvilNotesToken}`,
     '',
   ];
 
