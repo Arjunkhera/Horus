@@ -333,7 +333,7 @@ export function createMcpServer(ctx: ToolContext): Server {
     {
       name: 'horus_search',
       description:
-        'Search across all Horus systems (Anvil + Vault + Forge) via the shared Typesense index. Use this as the preferred tool for cross-system queries. Optionally scope to a single source.',
+        'Search across all Horus systems (Anvil + Vault + Forge). Anvil notes are read from the local Typesense index; in connected mode Vault pages and Forge registry artifacts are federated from the control plane. Use this as the preferred tool for cross-system queries. Optionally scope to a single source (anvil, vault, forge).',
       inputSchema: {
         type: 'object',
         properties: {
