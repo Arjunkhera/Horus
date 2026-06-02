@@ -30,14 +30,15 @@ resources:
 # vault re-pinned to sha-b69a234: set HOME in the writer entrypoint so the runtime
 # per-vault `git clone` finds the credential store — fixes 500 on writes to
 # provisioned (private) vaults like vault-office (PR #417).
-# vault re-pinned to sha-1f0935c: index-on-write — upsert pages into the vault's
-# Typesense collection at write time so provisioned per-vault pages are
-# searchable (no per-vault sync loop previously indexed them) (PR #419).
+# vault re-pinned to sha-400a4fd: per-vault sync loop — the writer pulls +
+# reindexes each provisioned vault clone on PR merge, so provisioned-vault pages
+# become searchable (write -> merge -> searchable). Reverts the #419 index-on-write
+# attempt, which search dropped because content wasn't on disk (PR #421).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-1f0935c
+    newTag: sha-400a4fd
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-5d1f953
   - name: ghcr.io/arjunkhera/horus/operator-service
