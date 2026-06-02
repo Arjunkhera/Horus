@@ -11,6 +11,7 @@ Both tasks coordinate via a shared lock to prevent concurrent re-indexing.
 import asyncio
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 from datetime import datetime
@@ -19,6 +20,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 from ..layer1.interface import SearchStore
+from ..layer2.vault_repo_resolver import VAULT_NAMESPACE_MARKER
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +393,123 @@ def start_workspace_watcher(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Per-vault sync (multi-vault)
+# ---------------------------------------------------------------------------
+
+
+def namespace_slug(namespace: str) -> str:
+    """Logical vault namespace → its Typesense collection name.
+
+    Must match the operator-service ``namespaceSlug`` that produced the
+    ``typesense_collection`` stored in the vault-registry (and injected as
+    ``X-Vault-Collection``): non-alphanumerics collapse to ``_``, trimmed.
+    Keep in lockstep with services/operator-service/src/infra.ts.
+    """
+    return re.sub(r"[^a-zA-Z0-9]+", "_", namespace).strip("_")
+
+
+def _read_vault_namespace(vault_dir: Path) -> str:
+    """Resolve a per-vault clone dir to its logical namespace.
+
+    Reads the marker the writer persists at clone time (handles 'owner/vault'
+    namespaces whose '/'→'-' dir slug is lossy). Falls back to the dir name for
+    clones created before the marker existed (flat namespaces round-trip).
+    """
+    marker = vault_dir / VAULT_NAMESPACE_MARKER
+    try:
+        if marker.is_file():
+            ns = marker.read_text(encoding="utf-8").strip()
+            if ns:
+                return ns
+    except Exception:
+        pass
+    return vault_dir.name
+
+
+async def _git_pull_ff(repo_path: str) -> str:
+    """git pull --ff-only on a clone. Returns 'changed', 'uptodate', or 'error'."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "git", "-C", repo_path, "pull", "--ff-only",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            logger.error(
+                "Per-vault git pull failed for %s: %s",
+                repo_path, stderr.decode().strip(),
+            )
+            return "error"
+        out = stdout.decode().strip()
+        if "Already up to date" in out or "Already up-to-date" in out:
+            return "uptodate"
+        return "changed"
+    except Exception as e:
+        logger.error("Per-vault git pull error for %s: %s", repo_path, e)
+        return "error"
+
+
+async def per_vault_sync_loop(
+    base_store: SearchStore,
+    vaults_base: str,
+    interval: int,
+    reindex_lock: ReindexLock,
+) -> None:
+    """Pull + reindex every provisioned per-vault clone.
+
+    The default vault is kept current by ``git_pull_loop``; provisioned vaults
+    each have their own clone under ``<vaults_base>/<slug>/knowledge-repo`` and
+    their own Typesense collection. Nothing else pulls or reindexes them, so a
+    page merged into a provisioned vault is never searchable. This loop closes
+    the gap, mirroring the default vault's behaviour per-vault:
+
+    - First pass (startup / restart catch-up): reindex every clone on disk.
+    - Thereafter: pull each clone and reindex only the ones that received new
+      commits (i.e. a merged PR).
+
+    Reindex runs in-process (writer → Typesense), so it does NOT depend on the
+    router forwarding a principal. No-op unless the base store is a
+    TypesenseSearchEngine (per-vault scoping requires ``for_vault()``).
+    """
+    from ..layer1.typesense_engine import TypesenseSearchEngine
+    if not isinstance(base_store, TypesenseSearchEngine):
+        logger.info("Per-vault sync loop disabled (base store is not Typesense)")
+        return
+
+    logger.info(
+        "Starting per-vault sync loop (base: %s, interval: %ss)", vaults_base, interval
+    )
+    first_pass = True
+    while True:
+        try:
+            base = Path(vaults_base)
+            if base.is_dir():
+                for vault_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+                    repo = vault_dir / "knowledge-repo"
+                    if not (repo / ".git").is_dir():
+                        continue
+                    namespace = _read_vault_namespace(vault_dir)
+                    pull = await _git_pull_ff(str(repo))
+                    if pull == "error":
+                        continue
+                    if first_pass or pull == "changed":
+                        collection = namespace_slug(namespace)
+                        engine = base_store.for_vault(
+                            collection, namespace, {"shared": str(repo)}
+                        )
+                        await reindex_lock.reindex(engine, f"per-vault:{namespace}")
+        except asyncio.CancelledError:
+            logger.info("Per-vault sync loop cancelled")
+            raise
+        except Exception as e:
+            logger.error("Error in per-vault sync loop: %s", e, exc_info=True)
+
+        first_pass = False
+        await asyncio.sleep(interval)
+
+
 async def start_sync_daemon(
     store: SearchStore,
     knowledge_repo_path: str,
@@ -398,67 +517,85 @@ async def start_sync_daemon(
     sync_interval: int,
     debounce_seconds: float = 5.0,
     on_reindex=None,
-) -> tuple[Optional[asyncio.Task[None]], Optional[Any]]:
+    vaults_base: Optional[str] = None,
+) -> tuple[Optional[asyncio.Task[None]], Optional[Any], Optional[asyncio.Task[None]]]:
     """
-    Start both sync daemon components.
+    Start the sync daemon components.
 
-    Convenience function to start git pull loop and workspace watcher together.
+    Convenience function to start the git pull loop, workspace watcher, and
+    (when ``vaults_base`` is given) the per-vault sync loop together.
 
     Args:
         store: SearchStore instance
-        knowledge_repo_path: Path to knowledge repo
+        knowledge_repo_path: Path to the default knowledge repo
         workspace_path: Path to workspace
         sync_interval: Seconds between git pulls
         debounce_seconds: Seconds to debounce workspace changes
-        on_reindex: Optional callback invoked after each successful reindex
+        on_reindex: Optional callback invoked after each successful default reindex
+        vaults_base: Base dir holding per-vault clones (enables the per-vault
+            sync loop). Omit/None to disable.
 
     Returns:
-        Tuple of (git_pull_task, workspace_observer)
-        Either component may be None if it failed to start
+        Tuple of (git_pull_task, workspace_observer, per_vault_task)
+        Any component may be None if it was disabled or failed to start.
     """
     logger.info("Starting sync daemon...")
 
-    # Create shared reindex lock
+    # Create shared reindex lock for the default-repo components.
     reindex_lock = ReindexLock(on_reindex=on_reindex)
-    
+
     # Start git pull loop as asyncio task
     git_pull_task: asyncio.Task[None] = asyncio.create_task(
         git_pull_loop(store, knowledge_repo_path, sync_interval, reindex_lock)
     )
-    
+
     # Start workspace watcher
     workspace_observer = start_workspace_watcher(
         store, workspace_path, reindex_lock, debounce_seconds
     )
-    
+
+    # Start per-vault sync loop (provisioned vaults). Uses its own lock — it
+    # reindexes a different Typesense collection per vault, so it can run
+    # concurrently with the default reindex, and it does not rebuild the default
+    # UUID registry (no on_reindex callback).
+    per_vault_task: Optional[asyncio.Task[None]] = None
+    if vaults_base:
+        per_vault_lock = ReindexLock(on_reindex=None)
+        per_vault_task = asyncio.create_task(
+            per_vault_sync_loop(store, vaults_base, sync_interval, per_vault_lock)
+        )
+
     logger.info("Sync daemon started")
-    return git_pull_task, workspace_observer
+    return git_pull_task, workspace_observer, per_vault_task
 
 
 async def stop_sync_daemon(
     git_pull_task: Optional[asyncio.Task[None]],
-    workspace_observer: Optional[Any]
+    workspace_observer: Optional[Any],
+    per_vault_task: Optional[asyncio.Task[None]] = None,
 ) -> None:
     """
-    Stop both sync daemon components gracefully.
-    
+    Stop the sync daemon components gracefully.
+
     Args:
         git_pull_task: Git pull loop task (or None)
         workspace_observer: Workspace watcher observer (or None)
+        per_vault_task: Per-vault sync loop task (or None)
     """
     logger.info("Stopping sync daemon...")
-    
-    # Stop git pull loop
-    if git_pull_task and not git_pull_task.done():
-        git_pull_task.cancel()
-        try:
-            await git_pull_task
-        except asyncio.CancelledError:
-            pass
-    
+
+    # Stop the asyncio loops
+    for task in (git_pull_task, per_vault_task):
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
     # Stop workspace watcher
     if workspace_observer:
         workspace_observer.stop()
         workspace_observer.join(timeout=5.0)
-    
+
     logger.info("Sync daemon stopped")
