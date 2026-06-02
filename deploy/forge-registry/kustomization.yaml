@@ -8,16 +8,15 @@ commonLabels:
   app.kubernetes.io/component: forge
 
 # Pinned image tag (ADR-0007 — never :latest).
-# Re-pinned to sha-aa74de7: self-healing Typesense reindex + surfaced publish
-# index failures (PR #409, aa74de7). The prior pin sha-f607219 ran the buggy
-# rebuild() that skipped whenever the index was non-empty, so a partial index
-# (e.g. skill:sdlc-docs present in S3 but absent from Typesense) never recovered.
-# This image reconciles the index against storage on startup, so rolling this
-# deployment re-indexes the missing artifacts. Predecessor sha-f607219 added the
-# S3-backed shared repo index (PR #361/#363).
+# Re-pinned to sha-a3d7d23: rebuild() now UNCONDITIONALLY reconciles the Typesense
+# index against storage on startup (PR #412, a3d7d23). The prior pin sha-aa74de7
+# (PR #409) skipped reindex when doc count == artifact count, which a stale/phantom
+# doc defeated (146==146 yet skill:sdlc-docs absent), so the partial index never
+# healed. Always-upsert guarantees every stored artifact is indexed on each roll.
+# Lineage: sha-f607219 added the S3-backed shared repo index (PR #361/#363).
 images:
   - name: ghcr.io/arjunkhera/horus/forge-registry
-    newTag: sha-aa74de7
+    newTag: sha-a3d7d23
 
 resources:
   - forge-registry.yaml
