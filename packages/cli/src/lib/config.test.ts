@@ -11,6 +11,7 @@ import {
   ensureDataDirs,
   FORGE_CONFIG_MANAGED_MARKER,
   loadPreprovisionedConfig,
+  resolveAnvilNotesRepo,
   getConfigValue,
   setConfigValue,
 } from './config.js';
@@ -233,5 +234,63 @@ describe('config get/set — alpha keys', () => {
     expect(getConfigValue(config, 'token-provider-kind')).toBe('static');
     expect(getConfigValue(config, 'token-provider-config')).toBe('tok-9');
     expect(getConfigValue(config, 'ai.model')).toBe('claude-opus-4-7');
+  });
+});
+
+describe('resolveAnvilNotesRepo — --anvil-repo precedence over an empty bundle value', () => {
+  it('a non-empty CLI flag wins over an empty bundle repos.anvil_notes', () => {
+    expect(resolveAnvilNotesRepo('', 'https://github.com/me/notes', undefined)).toBe(
+      'https://github.com/me/notes',
+    );
+  });
+
+  it('ANVIL_REPO_URL env wins over an empty bundle value when no flag is given', () => {
+    expect(resolveAnvilNotesRepo('', undefined, 'https://github.com/me/env-notes')).toBe(
+      'https://github.com/me/env-notes',
+    );
+  });
+
+  it('the CLI flag wins over the env var', () => {
+    expect(
+      resolveAnvilNotesRepo('', 'https://github.com/me/flag', 'https://github.com/me/env'),
+    ).toBe('https://github.com/me/flag');
+  });
+
+  it('preserves a non-empty bundle value when there is no flag or env override', () => {
+    expect(resolveAnvilNotesRepo('https://github.com/me/bundle', undefined, undefined)).toBe(
+      'https://github.com/me/bundle',
+    );
+  });
+
+  it('an empty/whitespace flag does not clobber a real bundle value', () => {
+    expect(resolveAnvilNotesRepo('https://github.com/me/bundle', '   ', undefined)).toBe(
+      'https://github.com/me/bundle',
+    );
+  });
+
+  it('resolves to empty string when nothing is provided', () => {
+    expect(resolveAnvilNotesRepo('', undefined, undefined)).toBe('');
+    expect(resolveAnvilNotesRepo(undefined, undefined, undefined)).toBe('');
+  });
+});
+
+describe('setup --config <bundle> --anvil-repo <url> — end-to-end env resolution', () => {
+  it('writes ANVIL_REPO_URL=<flag url> into the env when the bundle carries an empty anvil_notes', () => {
+    // Mirrors the bug: an operator bundle with an empty repos.anvil_notes adopted
+    // via loadPreprovisionedConfig, then the --anvil-repo flag applied on top.
+    const bundle = defaultConfig();
+    bundle.control_plane_url = 'https://cp.example.com';
+    bundle.repos.anvil_notes = ''; // operator bundle has no way to populate this
+
+    // Precedence step performed by `horus setup` in the pre-provisioned branch.
+    bundle.repos.anvil_notes = resolveAnvilNotesRepo(
+      bundle.repos.anvil_notes,
+      'https://github.com/me/RealNotes',
+      undefined,
+    );
+
+    const env = generateEnv(bundle);
+    expect(env).toContain('ANVIL_REPO_URL=https://github.com/me/RealNotes');
+    expect(env).not.toMatch(/ANVIL_REPO_URL=\s*$/m);
   });
 });

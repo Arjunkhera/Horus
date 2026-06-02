@@ -271,6 +271,23 @@ const preprovisionedSchema = z
   .passthrough();
 
 /**
+ * Resolve the effective Anvil notes repo URL when a pre-provisioned bundle is
+ * in play. A non-empty `--anvil-repo` flag (or ANVIL_REPO_URL env) always wins
+ * over the value carried in the bundle, which is frequently empty because the
+ * operator `user add` flow has no way to populate `repos.anvil_notes`. Without
+ * this, an empty bundle value silently overrode an explicit flag and Anvil
+ * started a local-only notes repo. A trimmed, non-empty override takes
+ * precedence; otherwise the bundle value (possibly empty) is preserved.
+ */
+export function resolveAnvilNotesRepo(
+  bundleValue: string | undefined,
+  cliFlag: string | undefined,
+  envValue: string | undefined,
+): string {
+  return cliFlag?.trim() || envValue?.trim() || bundleValue?.trim() || '';
+}
+
+/**
  * Load and zod-validate a pre-provisioned config.yaml from an explicit path
  * (`horus setup --config <path>`). Throws with a readable message on invalid
  * YAML or schema violations. Validated values are merged over defaults via the

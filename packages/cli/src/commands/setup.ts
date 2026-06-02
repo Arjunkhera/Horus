@@ -16,6 +16,7 @@ import {
   resolveConfigPath,
   loadPreprovisionedConfig,
   detectPreprovisionedConfig,
+  resolveAnvilNotesRepo,
   ensureFsLayout,
   type Config,
 } from '../lib/config.js';
@@ -96,6 +97,14 @@ export const setupCommand = new Command('setup')
         console.log(chalk.red((err as Error).message));
         process.exit(1);
       }
+      // A non-empty `--anvil-repo` (or ANVIL_REPO_URL env) must win over a
+      // possibly-empty `repos.anvil_notes` carried in the bundle — otherwise the
+      // flag is silently ignored and Anvil falls back to a local-only notes repo.
+      config.repos.anvil_notes = resolveAnvilNotesRepo(
+        config.repos.anvil_notes,
+        opts.anvilRepo,
+        process.env.ANVIL_REPO_URL,
+      );
       const requested = (opts.runtime as 'docker' | 'podman' | undefined) ?? config!.runtime;
       selectedRuntime = available.includes(requested) ? requested : available[0];
     } else if (isYes) {
@@ -328,6 +337,19 @@ export const setupCommand = new Command('setup')
       }
     } else {
       mkdirSync(notesDest, { recursive: true });
+      // Surface the silent local-only fallback: in connected mode an empty notes
+      // repo means Anvil starts empty and never syncs the user's real notes.
+      if (config.control_plane_url) {
+        console.log(
+          chalk.yellow('  ⚠ No Anvil notes repo resolved — ANVIL_REPO_URL is empty.'),
+        );
+        console.log(
+          chalk.dim('    Anvil will start an empty local-only notes repo and will NOT sync your notes.'),
+        );
+        console.log(
+          chalk.dim('    Pass --anvil-repo <url>, or run: horus config set repo.anvil-notes <url> && horus down && horus up'),
+        );
+      }
     }
 
     // ── Pull images (unless --no-pull) — non-fatal ───────────────────────────
