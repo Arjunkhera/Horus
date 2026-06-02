@@ -1,0 +1,8 @@
+id: horus-anvil
+name: "Horus Anvil"
+version: "2.1.0"
+description: "Anvil V2 MCP reference for the local state plane — entity CRUD, dynamic type system, graph layer, PKM, views, dashboards, sync, and cross-system search."
+type: skill
+author: "Horus"
+tags: [anvil, mcp, entity, graph, pkm, local, notes, tasks]
+files: ["SKILL.md"]
