@@ -122,12 +122,12 @@ export type ReposConfig = z.infer<typeof ReposConfigSchema>;
  *
  * @example
  * # ~/Horus/data/config/forge.yaml
+ * # V1 supports only type: http registries (the control-plane Forge gateway).
  * registries:
- *   - type: git
- *     name: team-registry
- *     url: https://github.com/myorg/forge-registry.git
- *     branch: main
- *     path: registry
+ *   - type: http
+ *     name: global
+ *     url: https://horus.example.com/api/v1/forge
+ *     writable: false
  *
  * workspace:
  *   mount_path: ~/Horus/data/workspaces

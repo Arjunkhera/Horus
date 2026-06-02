@@ -65,7 +65,7 @@ export function normalizeRegistryConfig(reg: RegistryConfig): RegistryConfig {
  *   name: 'my-workspace',
  *   version: '0.1.0',
  *   target: 'claude-code',
- *   registries: [{ type: 'filesystem', name: 'local', path: './registry' }],
+ *   registries: [{ type: 'http', name: 'local', url: 'https://horus.example.com/api/v1/forge', writable: true }],
  *   artifacts: {}
  * });
  */
