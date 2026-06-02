@@ -264,22 +264,23 @@ export class HttpAdapter implements DataAdapter {
     const metaYaml = stringifyYaml(bundle.meta);
     const contentFile = CONTENT_FILES[type];
 
-    const body = new FormData();
-    body.append(
-      'metadata.yaml',
-      new Blob([metaYaml], { type: 'text/yaml' }),
-      'metadata.yaml',
-    );
+    // The publish route (POST /artifacts/:type/:id/:version) accepts a JSON
+    // body of base64-encoded files — `{ files: { <name>: <base64> } }` — NOT
+    // multipart/form-data. No multipart content-type parser is registered on
+    // the server, so a FormData body was parsed as empty, the pipeline threw,
+    // and the global error handler returned a generic 500 ("An unexpected
+    // error occurred") that the MCP layer surfaced as UNKNOWN_ERROR — even
+    // though the bundle was valid. Mirror the base64 contract used by read().
+    const files: Record<string, string> = {
+      'metadata.yaml': Buffer.from(metaYaml, 'utf-8').toString('base64'),
+    };
     if (bundle.content) {
-      body.append(
-        contentFile,
-        new Blob([bundle.content], { type: 'text/plain' }),
-        contentFile,
-      );
+      files[contentFile] = Buffer.from(bundle.content, 'utf-8').toString('base64');
     }
 
     // ── Step 3: Send with version header ─────────────────────────────────────
     const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
       'X-Forge-Core-Version': this.coreVersion,
     };
     if (this.token) {
@@ -289,35 +290,43 @@ export class HttpAdapter implements DataAdapter {
     const res = await this.fetch(url, {
       method: 'POST',
       headers,
-      body,
+      body: JSON.stringify({ files }),
     });
 
-    // ── Step 4: Handle version-skew errors (409 / 426) ───────────────────────
-    if (res.status === 409 || res.status === 426) {
-      let skewBody: VersionSkewBody | undefined;
+    // ── Step 4: Handle errors ────────────────────────────────────────────────
+    if (!res.ok) {
+      // Read the error body exactly once and reuse it for both version-skew
+      // detection and the generic failure message — a Response body can only
+      // be consumed once, so the previous two-block form threw on the second
+      // read for a non-skew 409/426 and lost the server's error detail.
+      let errBody:
+        | (Partial<VersionSkewBody> & { error?: string; message?: string })
+        | undefined;
       try {
-        skewBody = (await res.json()) as VersionSkewBody;
+        errBody = await res.json();
       } catch {
-        // Body not parseable — fall through to generic error
+        // Body not JSON-parseable — fall through with the status code alone.
       }
 
-      if (skewBody?.code === 'CORE_VERSION_INCOMPATIBLE') {
+      // Version-skew errors (409 / 426 with the incompatibility code).
+      if (
+        (res.status === 409 || res.status === 426) &&
+        errBody?.code === 'CORE_VERSION_INCOMPATIBLE'
+      ) {
         throw new ForgeCoreVersionMismatchError(
-          skewBody.serviceVersion,
-          skewBody.clientVersion,
+          errBody.serviceVersion ?? '',
+          errBody.clientVersion ?? '',
         );
       }
-    }
 
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const errBody = (await res.json()) as { message?: string };
-        if (errBody.message) detail = errBody.message;
-      } catch {
-        // ignore
-      }
-      throw new Error(`Failed to publish ${type}:${id}@${version}: ${detail}`);
+      // Generic failure: surface the real status and the server's error
+      // code/message so a failure is never collapsed into an opaque
+      // "unexpected error". The registry returns `{ error, message }`.
+      const parts = [errBody?.error, errBody?.message].filter(Boolean);
+      const detail = parts.length ? `: ${parts.join(' — ')}` : '';
+      throw new Error(
+        `Failed to publish ${type}:${id}@${version} (HTTP ${res.status})${detail}`,
+      );
     }
   }
 
