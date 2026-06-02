@@ -14,6 +14,21 @@ if [ "$(id -u)" -eq 0 ] && [ "${HORUS_RUNTIME:-docker}" != "podman" ]; then
   exec gosu appuser "$0" "$@"
 fi
 
+# ── HOME ──────────────────────────────────────────────────────────────────────
+# k3s/containerd does NOT set HOME for the container user, and gosu does not set
+# it either. Without HOME, git cannot locate the global config / credential store
+# (~/.gitconfig, ~/.git-credentials): `git config --global` writes to an
+# unpredictable place, and — critically — the uvicorn app and the per-vault
+# `git clone` subprocesses it spawns at runtime never find the `store` credential
+# helper, so clones of provisioned (private) vaults fail with
+# `fatal: could not read Username for 'https://github.com'` (exit 128).
+# Pin HOME to the running user's passwd home so the credential store is written,
+# owned, and read by the SAME user across entrypoint → uvicorn → git subprocess.
+# (Exported here so it is inherited by the backgrounded uvicorn process below.)
+HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+[ -z "$HOME" ] && HOME="/home/appuser"
+export HOME
+
 # Variables at top
 KNOWLEDGE_REPO_PATH=${KNOWLEDGE_REPO_PATH:-/data/knowledge-repo}
 WORKSPACE_PATH=${WORKSPACE_PATH:-/data/workspace}
