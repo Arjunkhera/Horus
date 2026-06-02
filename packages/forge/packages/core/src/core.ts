@@ -204,7 +204,7 @@ export class ForgeCore {
     }
     const globalConfig = await loadGlobalConfig(this.globalConfigPath);
     // Repo metadata is SHARED (lives in the deployed registry), so target the
-    // shared endpoint — not the solo-dev `local` (localhost:8744) registry.
+    // shared endpoint — not the writable `local` registry.
     const reg = selectSharedRepoRegistry(globalConfig.registries);
     if (!reg) {
       this._repoRegistryClient = null;

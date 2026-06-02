@@ -164,11 +164,13 @@ describe('Multi-registry setup', () => {
       expect(config.registries[2]!.name).toBe('global');
     });
 
-    it('expands local filesystem registry path', async () => {
+    it('default local registry is an http control-plane registry (not localhost:8744)', async () => {
       const config = await loadGlobalConfig(configPath);
       const local = config.registries.find(r => r.name === 'local');
       expect(local).toBeDefined();
-      expect((local as any).path).toBe(path.join(os.homedir(), '.Horus/data/registry'));
+      expect(local!.type).toBe('http');
+      expect((local as any).url).toBeDefined();
+      expect((local as any).url).not.toContain('localhost:8744');
     });
   });
 

@@ -12,34 +12,43 @@ import type {
 } from '../models/index.js';
 import { ForgeConfigSchema, LockFileSchema } from '../models/index.js';
 import { ForgeError } from '../adapters/errors.js';
+import { resolveDefaultRegistryUrl } from '../config/global-config-loader.js';
 
 const FORGE_YAML = 'forge.yaml';
 const FORGE_LOCK = 'forge.lock';
 
-const FORGE_YAML_TEMPLATE = `# Forge workspace configuration
-name: {name}
+/**
+ * Render the default workspace forge.yaml. Both the writable `local` and the
+ * read-only `global` registry resolve to the control-plane Forge gateway
+ * (derived from HORUS_CONTROL_PLANE_URL / FORGE_REGISTRY_GATEWAY_URL); there is
+ * no standalone localhost registry-service in the current architecture.
+ */
+function renderForgeYaml(name: string): string {
+  const registryUrl = resolveDefaultRegistryUrl();
+  return `# Forge workspace configuration
+name: ${name}
 version: '0.1.0'
 target: claude-code
 
 registries:
-  # Personal local registry service (writable, highest priority)
-  # Run: forge registry start --port 8744
+  # Writable registry (highest priority): the control-plane Forge gateway.
+  # Publishing requires a publisher token supplied via tokenEnv.
   - type: http
     name: local
-    url: http://localhost:8744
+    url: ${registryUrl}
     writable: true
-  # Public global registry (read-only fallback): in-cluster forge-registry behind
-  # the Horus gateway. Anonymous reads are public; publishing needs an
-  # authenticated writable entry on the same gateway with a publisher token.
+  # Public global registry (read-only fallback): the same control-plane gateway.
+  # Anonymous reads are public; publishing needs an authenticated writable entry.
   - type: http
     name: global
-    url: https://horus.arjunkhera.io/api/v1/forge
+    url: ${registryUrl}
 
 artifacts:
   skills: {}
   agents: {}
   plugins: {}
 `;
+}
 
 const FORGE_LOCK_TEMPLATE: LockFile = {
   version: '1',
@@ -191,7 +200,7 @@ export class WorkspaceManager {
     await fs.mkdir(this.workspaceRoot, { recursive: true });
 
     // Write config from template
-    const configContent = FORGE_YAML_TEMPLATE.replace('{name}', name);
+    const configContent = renderForgeYaml(name);
     await fs.writeFile(configPath, configContent, 'utf-8');
 
     // Write empty lockfile
