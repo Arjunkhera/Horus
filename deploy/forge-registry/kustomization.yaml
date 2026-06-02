@@ -8,14 +8,16 @@ commonLabels:
   app.kubernetes.io/component: forge
 
 # Pinned image tag (ADR-0007 — never :latest).
-# Re-pinned to sha-f607219: enable the S3-backed shared repo index
-# (POST/GET/PATCH/DELETE /repos). The base pin 0.1.0-alpha.1 (cut 2026-05-30
-# 15:55) predates the S3 RepoStorageAdapter wiring (PR #361, 270b977) + the
-# DELETE /repos fix (PR #363, f607219), so the repo routes never mounted and
-# /repos returned 404 for valid principals. Artifact routes were unaffected.
+# Re-pinned to sha-aa74de7: self-healing Typesense reindex + surfaced publish
+# index failures (PR #409, aa74de7). The prior pin sha-f607219 ran the buggy
+# rebuild() that skipped whenever the index was non-empty, so a partial index
+# (e.g. skill:sdlc-docs present in S3 but absent from Typesense) never recovered.
+# This image reconciles the index against storage on startup, so rolling this
+# deployment re-indexes the missing artifacts. Predecessor sha-f607219 added the
+# S3-backed shared repo index (PR #361/#363).
 images:
   - name: ghcr.io/arjunkhera/horus/forge-registry
-    newTag: sha-f607219
+    newTag: sha-aa74de7
 
 resources:
   - forge-registry.yaml
