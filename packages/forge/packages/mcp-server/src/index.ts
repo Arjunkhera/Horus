@@ -44,6 +44,28 @@ export function resolveInstallRoot(args: { workspaceId?: string; path?: string }
 }
 
 /**
+ * Async variant of {@link resolveInstallRoot} that resolves a `workspaceId`
+ * through the workspace metadata store before falling back to the pure
+ * `<root>/<id>` rule. forge_workspace_create names the workspace directory by
+ * the human name (not the id) and uses the configured mount_path, which may
+ * differ from FORGE_WORKSPACES_PATH — so the recorded `path` is the source of
+ * truth. An explicit `path` (or cwd fallback) is unchanged. Workspaces not in
+ * the store (e.g. `horus setup`-scaffolded) keep the back-compat `<root>/<id>`
+ * behaviour.
+ */
+async function resolveInstallRootResolved(
+  args: { workspaceId?: string; path?: string },
+  forge: ForgeCore,
+): Promise<string> {
+  const hasPath = !!(args.path && args.path.trim() !== '');
+  if (!hasPath && args.workspaceId && args.workspaceId.trim() !== '') {
+    const record = await forge.workspaceStatus(args.workspaceId).catch(() => null);
+    if (record?.path) return record.path;
+  }
+  return resolveInstallRoot(args);
+}
+
+/**
  * Decide whether forge_add should scaffold a forge.yaml when the target has
  * none. We auto-init only when the caller targeted an explicit `path` or fell
  * back to cwd — both are deliberate "install here" intents. When a
@@ -169,7 +191,7 @@ const TOOLS = [
         },
         workspaceId: {
           type: 'string',
-          description: 'Target workspace ID (e.g., "sdlc-workspace-1"). Resolves to /data/workspaces/<workspaceId>.',
+          description: 'Target workspace ID (e.g., "ws-03425fdc" from forge_workspace_create, or a horus setup workspace name). Resolved to the workspace\'s on-disk path via the workspace metadata store.',
         },
         path: {
           type: 'string',
@@ -188,7 +210,7 @@ const TOOLS = [
       properties: {
         workspaceId: {
           type: 'string',
-          description: 'Target workspace ID (e.g., "sdlc-workspace-1"). Resolves to /data/workspaces/<workspaceId>.',
+          description: 'Target workspace ID (e.g., "ws-03425fdc" from forge_workspace_create, or a horus setup workspace name). Resolved to the workspace\'s on-disk path via the workspace metadata store.',
         },
         path: {
           type: 'string',
@@ -641,7 +663,7 @@ function buildServer(workspaceRoot: string): Server {
 
         case 'forge_add': {
           const { refs, workspaceId, path: targetPath } = args as { refs: string[]; workspaceId?: string; path?: string };
-          const installRoot = resolveInstallRoot({ workspaceId, path: targetPath });
+          const installRoot = await resolveInstallRootResolved({ workspaceId, path: targetPath }, forge);
           const forgeForWorkspace = new ForgeCore(installRoot);
           const config = await forgeForWorkspace.add(refs, {
             initIfMissing: shouldInitIfMissing({ workspaceId, path: targetPath }),
@@ -665,7 +687,7 @@ function buildServer(workspaceRoot: string): Server {
 
         case 'forge_install': {
           const { workspaceId, path: targetPath, target, dryRun } = (args ?? {}) as { workspaceId?: string; path?: string; target?: string; dryRun?: boolean };
-          const installRoot = resolveInstallRoot({ workspaceId, path: targetPath });
+          const installRoot = await resolveInstallRootResolved({ workspaceId, path: targetPath }, forge);
           const forgeForWorkspace = new ForgeCore(installRoot);
           const report = await forgeForWorkspace.install({ target: target as any, dryRun });
 

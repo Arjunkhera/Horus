@@ -111,10 +111,20 @@ export class WorkspaceCreator {
   constructor(private readonly forge: ForgeCore) {}
 
   async create(options: WorkspaceCreateOptions): Promise<WorkspaceRecord> {
-    // Step 1: Resolve workspace config from registry
+    // Step 1: Resolve workspace config from registry.
+    // Accept a versioned ref in configName ("doc-gen@0.1.0") as well as the
+    // bare id ("doc-gen") + separate configVersion. An explicit configVersion
+    // takes precedence over a version embedded in configName.
+    const atIdx = options.configName.lastIndexOf('@');
+    const configId = atIdx > 0 ? options.configName.slice(0, atIdx) : options.configName;
+    // `|| undefined` so a trailing '@' (empty version) falls through to '*'
+    // rather than producing an invalid `workspace-config:id@` ref.
+    const inlineVersion = atIdx > 0 ? options.configName.slice(atIdx + 1) || undefined : undefined;
+    const configVersion = options.configVersion ?? inlineVersion ?? '*';
+
     let configArtifact;
     try {
-      const refString = `workspace-config:${options.configName}@${options.configVersion ?? '*'}`;
+      const refString = `workspace-config:${configId}@${configVersion}`;
       configArtifact = await this.forge.resolve(refString);
     } catch (err: any) {
       throw new ForgeError(
@@ -132,7 +142,7 @@ export class WorkspaceCreator {
 
     // Step 3: Generate workspace name and ID
     const id = generateWorkspaceId();
-    const name = options.name ?? `${options.configName}-${id}`;
+    const name = options.name ?? `${configId}-${id}`;
 
     // Validate name if user-provided
     if (options.name) {
