@@ -180,13 +180,17 @@ export async function registerWithClaudeCode(
   const failed: string[] = [];
 
   for (const [name, entry] of Object.entries(mcpServers)) {
-    // claude mcp add expects the base URL without the path suffix
-    const baseUrl = entry.url.replace(/\/(mcp|sse)$/, '');
+    // Register the full MCP endpoint URL verbatim. The HTTP transport POSTs to
+    // exactly this URL — it does NOT append `/mcp`. Servers mounted on a sub-path
+    // (vault → /vault/mcp, forge → /forge/mcp via horus-ui) break if the suffix
+    // is stripped; anvil serves MCP at both `/mcp` and `/`, so the full URL is
+    // safe for all three.
+    const mcpUrl = entry.url;
     // Remove first so re-runs and URL changes are handled cleanly (ignore exit code)
     await execa('claude', ['mcp', 'remove', '--scope', 'user', name], { reject: false });
     const result = await execa(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', name, baseUrl],
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', name, mcpUrl],
       { reject: false },
     );
     if (result.exitCode === 0) {
@@ -447,9 +451,8 @@ export async function runConnect(
       } else {
         cliSpinner.warn('claude CLI not found on PATH — register manually:');
         for (const [name, entry] of Object.entries(httpServers)) {
-          const baseUrl = entry.url.replace(/\/(mcp|sse)$/, '');
           console.log(
-            chalk.dim(`  claude mcp add --transport http --scope user ${name} ${baseUrl}`),
+            chalk.dim(`  claude mcp add --transport http --scope user ${name} ${entry.url}`),
           );
         }
       }
