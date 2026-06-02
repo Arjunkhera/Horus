@@ -140,6 +140,21 @@ export function ensureFsLayout(): { providers: string; logs: string; keys: strin
   return dirs;
 }
 
+/**
+ * Ensure the data subdirectories that get bind-mounted into containers exist,
+ * created up-front by the invoking user. If Docker creates them on first `up`
+ * they are owned by root, which then blocks the (user-run) CLI from writing
+ * into them — notably `~/Horus/data/config/forge.yaml`. Creating them here keeps
+ * them user-owned on fresh installs. Idempotent; never changes the ownership of
+ * pre-existing directories.
+ */
+export function ensureDataDirs(config: Config): void {
+  const dataDir = resolvePath(config.data_dir);
+  for (const sub of ['config', 'sessions', 'repos', 'workspaces']) {
+    mkdirSync(pathJoin(dataDir, sub), { recursive: true });
+  }
+}
+
 // ── Config I/O ──────────────────────────────────────────────────────────────
 
 export function configExists(): boolean {

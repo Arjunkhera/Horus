@@ -8,6 +8,7 @@ import {
   generateEnv,
   generateForgeConfig,
   writeForgeConfigFile,
+  ensureDataDirs,
   FORGE_CONFIG_MANAGED_MARKER,
   loadPreprovisionedConfig,
   getConfigValue,
@@ -89,6 +90,32 @@ describe('generateForgeConfig — embedded Forge registry wiring', () => {
     expect(doc.workspace.host_managed_repos_path).toBe('/home/me/Horus/data/repos');
     expect(doc.mcp_endpoints.anvil.url).toBe('http://anvil:8100');
     expect(doc.repos.scan_paths).toContain('/horus/repos');
+  });
+});
+
+describe('ensureDataDirs — user-owned data subdirs before containers run', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'datadirs-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('creates config/sessions/repos/workspaces under data_dir', () => {
+    const config = defaultConfig();
+    config.data_dir = dir;
+    ensureDataDirs(config);
+    for (const sub of ['config', 'sessions', 'repos', 'workspaces']) {
+      expect(existsSync(join(dir, sub))).toBe(true);
+    }
+  });
+
+  it('is idempotent', () => {
+    const config = defaultConfig();
+    config.data_dir = dir;
+    ensureDataDirs(config);
+    expect(() => ensureDataDirs(config)).not.toThrow();
   });
 });
 
