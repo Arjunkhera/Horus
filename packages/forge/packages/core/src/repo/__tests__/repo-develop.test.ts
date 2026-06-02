@@ -499,8 +499,12 @@ describe('repoDevelop', () => {
       expect(cloneCalls.length).toBe(1);
       const cloneArgs = cloneCalls[0][1] as string[];
       expect(cloneArgs[1]).toBe(userRepoPath); // source = user-tier path
-      // dest is now tmpPath (atomic rename) — ends with .tmp.<pid> before rename
-      expect(cloneArgs[2]).toContain(path.join(tmpDir, 'repos', 'TestRepo'));
+      // dest is the URL-derived managed path ({repos}/{host}/{org}/{name}) plus
+      // the atomic-rename tmp suffix (.tmp.<pid>). Converging on the URL-derived
+      // layout is what de-duplicates user-tier and resolve/Tier-3 clones.
+      expect(cloneArgs[2]).toContain(
+        path.join(tmpDir, 'repos', 'github.com', 'Org', 'TestRepo'),
+      );
       expect(cloneArgs[2]).toContain('.tmp.');
     });
 
@@ -548,6 +552,39 @@ describe('repoDevelop', () => {
       }
 
       // No clone should have been triggered
+      const { execFile } = await import('child_process');
+      const mockExecFile = vi.mocked(execFile);
+      const cloneCalls = mockExecFile.mock.calls.filter(
+        (call) => (call[1] as string[])?.[0] === 'clone',
+      );
+      expect(cloneCalls.length).toBe(0);
+    });
+
+    // Regression: a clone created by forge_repo_resolve/ensureClone lives at the
+    // URL-derived path {repos}/{host}/{org}/{name}. Tier-2 previously only looked
+    // at the flat path {repos}/{name}, missed it, and fell through to Tier-3,
+    // which re-cloned onto the existing dir → POSIX rename ENOTEMPTY, on every
+    // call. Tier-2 must now discover the URL-derived clone and reuse it.
+    it('finds and reuses a URL-derived managed clone (no re-clone / ENOTEMPTY)', async () => {
+      // Remove the flat managed-pool dir so only the URL-derived clone exists.
+      await fs.rm(fakeRepoPath, { recursive: true, force: true });
+      await fs.mkdir(path.join(tmpDir, 'repos', 'github.com', 'Org', 'TestRepo'), {
+        recursive: true,
+      });
+
+      const opts: RepoDevelopOptions = {
+        repo: 'TestRepo',
+        workItem: 'wi-urlderived1',
+        workflow: INLINE_WORKFLOW,
+      };
+      const result = await repoDevelop(opts, globalConfig, null, async () => {});
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.repoSource).toBe('managed');
+      }
+
+      // The existing URL-derived clone must be reused — never re-cloned.
       const { execFile } = await import('child_process');
       const mockExecFile = vi.mocked(execFile);
       const cloneCalls = mockExecFile.mock.calls.filter(
@@ -837,8 +874,8 @@ describe('repoDevelop', () => {
         repoDevelop({ repo: 'TestRepo', workItem: 'wi-fail1' }, globalConfig, { repos: [entry] }, async () => {}),
       ).rejects.toMatchObject({ code: 'CLONE_FAILED' });
 
-      // No .tmp. directory should remain in the managed pool
-      const poolDir = path.join(tmpDir, 'repos');
+      // No .tmp. directory should remain beside the URL-derived managed path
+      const poolDir = path.join(tmpDir, 'repos', 'github.com', 'Org');
       const entries = await fs.readdir(poolDir).catch(() => [] as string[]);
       expect(entries.filter(e => e.includes('.tmp.'))).toHaveLength(0);
     });

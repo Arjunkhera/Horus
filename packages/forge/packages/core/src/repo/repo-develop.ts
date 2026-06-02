@@ -203,6 +203,12 @@ async function detectWorkflow(
  * Used for tier-3 resolution when the repo isn't indexed locally,
  * or to create a writable managed clone from a read-only user-tier repo.
  *
+ * Idempotent (mirrors clone-semantics.ensureClone): if destPath is already a
+ * valid git clone, it is reused as-is and this is a no-op. Only a missing or
+ * partial/corrupt destPath is (re)cloned. This guards against ENOTEMPTY when an
+ * earlier resolve already populated destPath — POSIX rename() onto a non-empty
+ * directory fails, and that failure would otherwise recur on every call.
+ *
  * Uses an atomic rename pattern: clones into a temp directory first, then
  * renames to destPath on success. On failure the temp dir is cleaned up,
  * ensuring destPath is never left in a partial state.
@@ -211,6 +217,21 @@ async function cloneToManagedPool(
   sourceUrl: string,
   destPath: string,
 ): Promise<void> {
+  // Reuse an existing valid clone; only clear a partial/corrupt one. Without
+  // this, fs.rename below throws ENOTEMPTY against a pre-existing clone.
+  try {
+    await fs.access(destPath);
+    // Exists — validate it's a real git repo before reusing.
+    await execFileAsync('git', ['rev-parse', '--git-dir'], {
+      cwd: destPath,
+      timeout: 5000,
+    });
+    return;
+  } catch {
+    // Missing, or present-but-corrupt — clear any partial state and clone fresh.
+    await fs.rm(destPath, { recursive: true, force: true }).catch(() => {});
+  }
+
   const tmpPath = `${destPath}.tmp.${process.pid}`;
   await fs.mkdir(path.dirname(destPath), { recursive: true });
   // Local clones over virtiofs (Podman) are significantly slower than remote
@@ -252,6 +273,68 @@ async function cloneToManagedPool(
         : 'Check the remote URL and your network/SSH access.',
     );
   }
+}
+
+/**
+ * Locate an existing, valid managed clone for a repo, checking BOTH layouts:
+ *   - URL-derived:   {repos}/{host}/{org}/{name}  (clone-layout.repoClonePath;
+ *                    written by forge_repo_resolve/ensureClone and Tier-3)
+ *   - flat (legacy): {repos}/{name}
+ *
+ * Returns the absolute path of the first valid git clone found, or null.
+ * This cross-layout detection is what keeps Tier-2 from missing a clone that
+ * resolve/Tier-3 placed under the URL-derived layout — the split-brain that
+ * otherwise dropped every call through to a re-clone and ENOTEMPTY.
+ *
+ * `managedReposPath` IS the repos root (clone-layout.horusReposRoot), so the
+ * URL-derived clones live two levels below it ({host}/{org}/{name}).
+ */
+async function findManagedClonePath(
+  managedReposPath: string,
+  repoName: string,
+): Promise<string | null> {
+  const isValidClone = async (dir: string): Promise<boolean> => {
+    try {
+      await fs.access(dir);
+      await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: dir, timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // 1. Flat legacy layout.
+  const flat = path.join(managedReposPath, repoName);
+  if (await isValidClone(flat)) return flat;
+
+  // 2. URL-derived layout: scan {repos}/{host}/{org}/ for a dir matching the
+  //    repo name (case-insensitive — coordinate casing may differ from the
+  //    requested name).
+  const listDirs = async (dir: string): Promise<string[]> => {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      return entries.filter(e => e.isDirectory()).map(e => e.name);
+    } catch {
+      return [];
+    }
+  };
+
+  for (const host of await listDirs(managedReposPath)) {
+    if (host === repoName) continue; // the flat case, already checked
+    const hostDir = path.join(managedReposPath, host);
+    for (const org of await listDirs(hostDir)) {
+      const orgDir = path.join(hostDir, org);
+      const leaf = (await listDirs(orgDir)).find(
+        n => n.toLowerCase() === repoName.toLowerCase(),
+      );
+      if (leaf) {
+        const candidate = path.join(orgDir, leaf);
+        if (await isValidClone(candidate)) return candidate;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -351,9 +434,11 @@ async function resolveDefaultRemote(
  * a read-only filesystem.
  *
  * When the repo was resolved from the user tier, this function ensures a
- * managed clone exists at `managedReposPath/<name>` (always writable) and
- * returns its path. If the repo is already in the managed pool, the
- * original path is returned unchanged.
+ * writable managed clone exists and returns its path. To avoid the
+ * managed-pool split-brain, it converges on the SAME URL-derived path
+ * (clone-layout.repoClonePath) that forge_repo_resolve/ensureClone and Tier-3
+ * use, keyed off the repo's remote URL. When no remote URL is known it falls
+ * back to the legacy flat `managedReposPath/<name>` layout.
  */
 async function ensureWritableWorktreeBase(
   repoEntry: RepoIndexEntry,
@@ -364,28 +449,29 @@ async function ensureWritableWorktreeBase(
     return { worktreeBasePath: repoEntry.localPath, effectiveSource: repoSource };
   }
 
-  const managedClonePath = path.join(managedReposPath, repoEntry.name);
-  let managedCloneExists = false;
-  try {
-    await fs.access(managedClonePath);
-    // Validate it's a real git repo — guards against partial clones left by
-    // prior failures or container restarts mid-clone
-    await execFileAsync('git', ['rev-parse', '--git-dir'], {
-      cwd: managedClonePath,
-      timeout: 5000,
-    });
-    managedCloneExists = true;
-  } catch {
-    // Not yet cloned, or clone is corrupt — remove any partial state and start fresh
-    await fs.rm(managedClonePath, { recursive: true, force: true }).catch(() => {});
+  // Reuse an existing managed clone in EITHER layout (URL-derived or legacy
+  // flat) before creating a new one — this de-duplicates against a clone that
+  // forge_repo_resolve/Tier-3 may have already made and avoids a redundant
+  // re-clone (the ENOTEMPTY root cause).
+  const existing = await findManagedClonePath(managedReposPath, repoEntry.name);
+  if (existing) {
+    return { worktreeBasePath: existing, effectiveSource: 'managed' };
   }
 
-  if (!managedCloneExists) {
-    // Clone from the user-tier (read-only) path into the managed pool (rw).
-    // cloneToManagedPool accepts any valid git source — a local path works
-    // the same as a remote URL for `git clone`.
-    await cloneToManagedPool(repoEntry.localPath, managedClonePath);
-  }
+  // None yet — create one at the URL-derived path so it converges with the
+  // resolve/Tier-3 layout. managedReposPath IS the repos root, so repoClonePath
+  // wants the data path one level up ({dataPath}/repos === managedReposPath).
+  // Fall back to the legacy flat layout when no usable remote URL is known.
+  const dataPath = path.dirname(managedReposPath);
+  const managedClonePath =
+    repoEntry.remoteUrl && !isLocalPath(repoEntry.remoteUrl)
+      ? repoClonePath(repoEntry.remoteUrl, dataPath)
+      : path.join(managedReposPath, repoEntry.name);
+
+  // cloneToManagedPool is idempotent: it reuses a valid clone and (re)clones
+  // only a missing/partial one, so it never throws ENOTEMPTY against a
+  // pre-existing clone even if one appears between the check above and here.
+  await cloneToManagedPool(repoEntry.localPath, managedClonePath);
 
   return { worktreeBasePath: managedClonePath, effectiveSource: 'managed' };
 }
@@ -514,11 +600,10 @@ export async function repoDevelop(
     }
   }
 
-  // ── Tier-2: Check managed pool ────────────────────────────────────────────
+  // ── Tier-2: Check managed pool (both flat and URL-derived layouts) ────────
   if (!repoEntry) {
-    const managedPath = path.join(managedReposPath, repoName);
-    try {
-      await fs.access(managedPath);
+    const managedPath = await findManagedClonePath(managedReposPath, repoName);
+    if (managedPath) {
       // Found in managed pool — build a synthetic entry
       repoEntry = {
         name: repoName,
@@ -541,9 +626,8 @@ export async function repoDevelop(
         const remoteUrl = await runGit(['remote', 'get-url', 'origin'], managedPath, 5000);
         if (remoteUrl) repoEntry = { ...repoEntry, remoteUrl };
       } catch { /* ignore */ }
-    } catch {
-      // Not in managed pool either
     }
+    // else: not in managed pool either — fall through to Tier-3
   }
 
   // ── Tier-3: Clone from remote registry ───────────────────────────────────
