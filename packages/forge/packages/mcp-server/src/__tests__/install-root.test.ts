@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
-import { resolveInstallRoot } from '../index.js';
+import { resolveInstallRoot, shouldInitIfMissing } from '../index.js';
 
 describe('resolveInstallRoot — forge_add / forge_install target resolution', () => {
   const origEnv = process.env.FORGE_WORKSPACES_PATH;
@@ -39,5 +39,27 @@ describe('resolveInstallRoot — forge_add / forge_install target resolution', (
   it('treats empty/whitespace strings as absent', () => {
     delete process.env.FORGE_WORKSPACES_PATH;
     expect(resolveInstallRoot({ path: '   ', workspaceId: '' })).toBe(process.cwd());
+  });
+});
+
+describe('shouldInitIfMissing — forge_add auto-scaffold gating', () => {
+  it('inits when an explicit path is given', () => {
+    expect(shouldInitIfMissing({ path: '/srv/project' })).toBe(true);
+  });
+
+  it('inits when targeting cwd (neither path nor workspaceId)', () => {
+    expect(shouldInitIfMissing({})).toBe(true);
+  });
+
+  it('does NOT init when a workspaceId is given (a missing one should error)', () => {
+    expect(shouldInitIfMissing({ workspaceId: 'ws-1' })).toBe(false);
+  });
+
+  it('inits when both are given (path wins, and path implies init)', () => {
+    expect(shouldInitIfMissing({ path: '/srv/project', workspaceId: 'ws-1' })).toBe(true);
+  });
+
+  it('treats whitespace workspaceId as absent → inits (cwd)', () => {
+    expect(shouldInitIfMissing({ workspaceId: '   ' })).toBe(true);
   });
 });

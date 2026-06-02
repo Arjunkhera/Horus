@@ -43,6 +43,20 @@ export function resolveInstallRoot(args: { workspaceId?: string; path?: string }
   return process.cwd();
 }
 
+/**
+ * Decide whether forge_add should scaffold a forge.yaml when the target has
+ * none. We auto-init only when the caller targeted an explicit `path` or fell
+ * back to cwd — both are deliberate "install here" intents. When a
+ * `workspaceId` is given, a missing forge.yaml almost always means a wrong or
+ * mistyped id, so we let it surface as CONFIG_NOT_FOUND instead of silently
+ * creating a new workspace at the wrong location.
+ */
+export function shouldInitIfMissing(args: { workspaceId?: string; path?: string }): boolean {
+  const hasPath = !!(args.path && args.path.trim() !== '');
+  const hasWorkspaceId = !!(args.workspaceId && args.workspaceId.trim() !== '');
+  return hasPath || !hasWorkspaceId;
+}
+
 // ─── Dep verification helpers ──────────────────────────────────────────────
 
 interface DepVerificationSummary {
@@ -144,7 +158,7 @@ const TOOLS = [
   {
     name: 'forge_add',
     description:
-      'Add one or more artifact refs to forge.yaml. Target the location with EITHER workspaceId (a registered workspace) OR path (an arbitrary directory); if neither is given, the current working directory is used. When the target has no forge.yaml yet, one is created automatically so artifacts can be added to a fresh path.',
+      'Add one or more artifact refs to forge.yaml. Target the location with EITHER workspaceId (a registered workspace) OR path (an arbitrary directory); if neither is given, the current working directory is used. When targeting a path or cwd, a forge.yaml is created automatically if missing. When targeting a workspaceId, a missing forge.yaml is an error (it usually means a wrong id).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -629,7 +643,9 @@ function buildServer(workspaceRoot: string): Server {
           const { refs, workspaceId, path: targetPath } = args as { refs: string[]; workspaceId?: string; path?: string };
           const installRoot = resolveInstallRoot({ workspaceId, path: targetPath });
           const forgeForWorkspace = new ForgeCore(installRoot);
-          const config = await forgeForWorkspace.add(refs, { initIfMissing: true });
+          const config = await forgeForWorkspace.add(refs, {
+            initIfMissing: shouldInitIfMissing({ workspaceId, path: targetPath }),
+          });
           return {
             content: [{
               type: 'text',
