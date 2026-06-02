@@ -92,9 +92,53 @@ async function searchVaultViaControlPlane(
 }
 
 /**
+ * Search the Forge registry via the control plane's public artifact-search
+ * endpoint (the same `${cp}/api/v1/forge/artifacts` that `forge_search` uses)
+ * and map artifact hits into horus_search's result shape.
+ *
+ * Forge artifacts live in the Forge registry's own Typesense collection, NOT in
+ * the local `horus_documents` index (which holds only anvil docs), so forge
+ * results must be federated rather than read from the local index.
+ */
+async function searchForgeViaControlPlane(
+  cpBase: string,
+  query: string,
+  limit: number,
+): Promise<HorusSearchResult[]> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // The endpoint is public (anonymous reads), but send the token if present.
+  const token = controlPlaneToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const resp = await fetch(
+    `${cpBase}/api/v1/forge/artifacts?q=${encodeURIComponent(query)}`,
+    { method: 'GET', headers },
+  );
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`HTTP ${resp.status}: ${text}`);
+  }
+
+  const data = (await resp.json()) as { hits?: Array<Record<string, unknown>> };
+  return (data.hits ?? []).slice(0, limit).map((h) => ({
+    id: String(h['id'] ?? ''),
+    source: 'forge',
+    source_type: String(h['type'] ?? ''),
+    title: String(h['name'] ?? h['artifact_id'] ?? ''),
+    tags: Array.isArray(h['tags']) ? (h['tags'] as string[]) : [],
+    // The endpoint sorts by relevance/recency; use publishedAt as a stable score.
+    score: typeof h['publishedAt'] === 'number' ? (h['publishedAt'] as number) : 0,
+    snippet: typeof h['description'] === 'string' ? (h['description'] as string) : '',
+  }));
+}
+
+/**
  * Handle horus_search request.
- * Queries the shared horus_documents Typesense collection across all Horus systems.
- * Optionally scopes to a single source (anvil, vault, forge).
+ *
+ * Searches the local `horus_documents` Typesense collection (anvil docs) and,
+ * in connected mode, federates vault- and forge-scoped search to the control
+ * plane — neither lives in the local index. Optionally scopes to a single
+ * source (anvil, vault, forge).
  */
 export async function handleHorusSearch(
   input: HorusSearchInput,
@@ -108,6 +152,7 @@ export async function handleHorusSearch(
   // index holds the vault docs the local Typesense does not.
   const cpBase = controlPlaneBase();
   const federateVault = cpBase !== '' && (input.source === 'vault' || input.source == null);
+  const federateForge = cpBase !== '' && (input.source === 'forge' || input.source == null);
   let vaultResults: HorusSearchResult[] = [];
   if (federateVault) {
     try {
@@ -123,11 +168,35 @@ export async function handleHorusSearch(
     }
   }
 
-  // Vault-only search needs no local Typesense at all.
+  let forgeResults: HorusSearchResult[] = [];
+  if (federateForge) {
+    try {
+      forgeResults = await searchForgeViaControlPlane(cpBase, input.query, limit);
+    } catch (err) {
+      // Forge-only request → surface the failure. Otherwise degrade to local.
+      if (input.source === 'forge') {
+        return makeError(
+          ERROR_CODES.SERVER_ERROR,
+          `forge search via control plane failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  // Vault-only and forge-only searches are served entirely by the control plane;
+  // the local Typesense index holds neither.
   if (input.source === 'vault') {
     return {
       results: vaultResults,
       total: vaultResults.length,
+      limit,
+      offset,
+    };
+  }
+  if (input.source === 'forge') {
+    return {
+      results: forgeResults,
+      total: forgeResults.length,
       limit,
       offset,
     };
@@ -181,12 +250,14 @@ export async function handleHorusSearch(
 
     const localTotal = (response.found as number | undefined) ?? results.length;
 
-    // No source filter in connected mode: local Typesense covers anvil/forge;
-    // append the federated vault hits so cross-system search includes the vault.
-    if (vaultResults.length > 0) {
+    // Cross-system (no source filter): the local Typesense index covers only
+    // anvil docs; append the federated vault and forge hits so the result set
+    // spans all three systems.
+    const federated = [...vaultResults, ...forgeResults];
+    if (federated.length > 0) {
       return {
-        results: [...results, ...vaultResults],
-        total: localTotal + vaultResults.length,
+        results: [...results, ...federated],
+        total: localTotal + federated.length,
         limit,
         offset,
       };
