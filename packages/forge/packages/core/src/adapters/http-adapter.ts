@@ -293,35 +293,37 @@ export class HttpAdapter implements DataAdapter {
       body: JSON.stringify({ files }),
     });
 
-    // ── Step 4: Handle version-skew errors (409 / 426) ───────────────────────
-    if (res.status === 409 || res.status === 426) {
-      let skewBody: VersionSkewBody | undefined;
+    // ── Step 4: Handle errors ────────────────────────────────────────────────
+    if (!res.ok) {
+      // Read the error body exactly once and reuse it for both version-skew
+      // detection and the generic failure message — a Response body can only
+      // be consumed once, so the previous two-block form threw on the second
+      // read for a non-skew 409/426 and lost the server's error detail.
+      let errBody:
+        | (Partial<VersionSkewBody> & { error?: string; message?: string })
+        | undefined;
       try {
-        skewBody = (await res.json()) as VersionSkewBody;
+        errBody = await res.json();
       } catch {
-        // Body not parseable — fall through to generic error
+        // Body not JSON-parseable — fall through with the status code alone.
       }
 
-      if (skewBody?.code === 'CORE_VERSION_INCOMPATIBLE') {
+      // Version-skew errors (409 / 426 with the incompatibility code).
+      if (
+        (res.status === 409 || res.status === 426) &&
+        errBody?.code === 'CORE_VERSION_INCOMPATIBLE'
+      ) {
         throw new ForgeCoreVersionMismatchError(
-          skewBody.serviceVersion,
-          skewBody.clientVersion,
+          errBody.serviceVersion ?? '',
+          errBody.clientVersion ?? '',
         );
       }
-    }
 
-    if (!res.ok) {
-      // Surface the real status and the server's error code/message so a
-      // failure is never collapsed into an opaque "unexpected error". The
-      // registry returns `{ error: <CODE>, message: <text> }` on failure.
-      let detail = '';
-      try {
-        const errBody = (await res.json()) as { error?: string; message?: string };
-        const parts = [errBody.error, errBody.message].filter(Boolean);
-        if (parts.length) detail = `: ${parts.join(' — ')}`;
-      } catch {
-        // Body not JSON-parseable — status code alone is the detail.
-      }
+      // Generic failure: surface the real status and the server's error
+      // code/message so a failure is never collapsed into an opaque
+      // "unexpected error". The registry returns `{ error, message }`.
+      const parts = [errBody?.error, errBody?.message].filter(Boolean);
+      const detail = parts.length ? `: ${parts.join(' — ')}` : '';
       throw new Error(
         `Failed to publish ${type}:${id}@${version} (HTTP ${res.status})${detail}`,
       );

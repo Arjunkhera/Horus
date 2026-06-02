@@ -320,6 +320,38 @@ describe('HttpAdapter', () => {
     expect(err).not.toBeInstanceOf(PreUploadValidationError);
   });
 
+  it('write() reads the error body once on a non-skew 409 (no double-consume)', async () => {
+    // A real Response body can only be read once. Simulate that: json() resolves
+    // the first time and rejects thereafter. The single-read error path must
+    // still surface the server's error code in the thrown message.
+    let consumed = false;
+    const oneShotFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: () => {
+        if (consumed) return Promise.reject(new TypeError('body already read'));
+        consumed = true;
+        return Promise.resolve({
+          error: 'VERSION_CONFLICT',
+          message: 'Version already exists',
+        });
+      },
+    } as unknown as Response);
+    const oneShotAdapter = new HttpAdapter({
+      baseUrl: BASE_URL,
+      coreVersion: CORE_VERSION,
+      fetch: oneShotFetch as unknown as typeof fetch,
+    });
+
+    const err = (await oneShotAdapter
+      .write('skill', 'my-skill', validSkillBundle())
+      .catch((e) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ForgeCoreVersionMismatchError);
+    expect(err.message).toContain('HTTP 409');
+    expect(err.message).toContain('VERSION_CONFLICT');
+  });
+
   // ── list() / listVersions() / read() / exists() ───────────────────────────
 
   const b64 = (s: string): string => Buffer.from(s, 'utf-8').toString('base64');
