@@ -82,24 +82,24 @@ The bundle is YAML of this shape (the `config` value is a secret JWT — never c
 
 ```yaml
 version: "1"
-control_plane_url: https://horus.arjunkhera.io
+control_plane_url: https://your-cp-host.example.com    # whatever your operator gave you
 token_provider:
   kind: static
   config: <static JWT>
 vaults:
-  default: https://horus.arjunkhera.io/api/v1/vault
-  vault-code: https://horus.arjunkhera.io/api/v1/vault
+  default: https://your-cp-host.example.com/api/v1/vault
+  vault-code: https://your-cp-host.example.com/api/v1/vault
 ```
 
 ### B2. (Recommended) Sanity-check the token *before* setup
 
-De-risk by confirming the token authenticates against the gateway. Replace the host
-if your control plane differs.
+De-risk by confirming the token authenticates against the gateway. The control-plane
+URL is read straight from your bundle, so this works for any deployment.
 
 ```bash
-BUNDLE="$HOME/horus/local-arjun.bundle.yaml"   # path to your bundle
+BUNDLE="$HOME/horus/my.bundle.yaml"            # path to your bundle
 TOKEN=$(grep -E 'config:' "$BUNDLE" | sed -E 's/.*config:[[:space:]]*//' | tr -d '"')
-CP=https://horus.arjunkhera.io
+CP=$(grep -E '^control_plane_url:' "$BUNDLE" | sed -E 's/.*:[[:space:]]*//' | tr -d '"')
 
 # Gateway baseline — no token must be rejected, token must be accepted.
 curl -s -o /dev/null -w "%{http_code}\n" "$CP/api/v1/vault/"                       # expect 401
@@ -120,8 +120,8 @@ horus setup --config "$BUNDLE" --yes
 ```
 
 **Expect:** all 4 containers pulled + healthy → `✔ Static principal token configured —
-client is authenticated.` → `Mode: connected`, `Control plane:
-https://horus.arjunkhera.io`.
+client is authenticated.` → `Mode: connected`, `Control plane:` followed by your
+control-plane URL.
 
 > If a token wasn't shipped in the bundle (`token_provider.kind: none`), finish auth
 > after setup with `horus login`.

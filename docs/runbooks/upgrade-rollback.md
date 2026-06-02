@@ -60,8 +60,8 @@ image(s) (check the Actions tab / `gh run list`). You have push access to the re
 # commit, push. ArgoCD on the dev cluster auto-syncs.
 scripts/update-server.sh
 
-# Same, and smoke-test the gateway once it has rolled:
-scripts/update-server.sh --smoke horus-dev.arjunkhera.io
+# Same, and smoke-test the gateway once it has rolled (use your dev cluster's host):
+scripts/update-server.sh --smoke horus-dev.example.com
 
 # Only one service, an explicit sha, a different overlay:
 scripts/update-server.sh --services "horus-service" --sha a1b2c3d --overlay dev
@@ -168,7 +168,7 @@ exists with its own ArgoCD. Stand it up once:
    app-of-apps never picks it up.
 3. Point a DNS record at the dev cluster's EIP and set the Ingress host accordingly
    (the dev overlay inherits the base Ingress host — re-pin it in the overlay if you
-   want a separate hostname like `horus-dev.arjunkhera.io`).
+   want a separate hostname like `horus-dev.example.com`).
 
 From then on, the day-to-day loop is just §A / §B.
 

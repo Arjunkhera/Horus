@@ -16,9 +16,9 @@ service, the Vault Reader/Writer split + router, and the Forge registry — on a
 single-node **k3s** cluster via **ArgoCD + Kustomize**, then onboard users who connect
 through it.
 
-**Audience:** an operator with Docker + GHCR push rights, AWS access, and
-`kubectl`/ArgoCD access to the cluster. **This runbook is not runnable from an agent
-sandbox** (no Docker daemon, GHCR push blocked, no cluster).
+**Audience:** an operator with Docker + GHCR push rights, AWS (or equivalent) access,
+and `kubectl`/ArgoCD access to the cluster. **This runbook is not runnable from an
+agent sandbox** (no Docker daemon, GHCR push blocked, no cluster).
 
 **Source:** `deploy/ALPHA-INTEGRATION.md` (end-to-end bring-up) and
 `deploy/secrets/README.md` (Sealed Secrets). Manifests live under `deploy/`.
@@ -31,16 +31,59 @@ sandbox** (no Docker daemon, GHCR push blocked, no cluster).
 
 ---
 
+## Parameters — set these for YOUR environment
+
+**Every value below is an example. Replace them with your own infrastructure.** All
+commands in this runbook reference these shell variables, so export them once in your
+shell and the rest copy-pastes cleanly. The example values use
+[RFC 5737](https://datatracker.ietf.org/doc/html/rfc5737) documentation IPs and
+`example.com` — they are placeholders, not real endpoints.
+
+```bash
+# ── Cluster node (k3s host) ──────────────────────────────────────────────────
+export CP_HOST="203.0.113.10"               # public IP/DNS of your k3s node (SSH target)
+export CP_KEY="$HOME/.ssh/horus-cp.pem"     # SSH private key for the node
+export CP_USER="ubuntu"                      # SSH user on the node
+export CP_CONTEXT="horus-cp"                 # local kubeconfig context name to create
+
+# ── Public gateway (what clients connect to) ─────────────────────────────────
+export GW_HOST="horus.example.com"           # public hostname for the horus-service Ingress
+
+# ── Backing resources (referenced by the manifests / secrets you provide) ────
+export KNOWLEDGE_REPO="your-org/horus-knowledge"     # git repo the Vault writer owns
+export FORGE_BUCKET="your-org-forge-registry"        # S3 bucket for Forge artifacts
+export AWS_REGION="us-east-1"                         # your region
+```
+
+| Variable | What it is | Where it shows up |
+|----------|-----------|-------------------|
+| `CP_HOST` | k3s node public IP/DNS (SSH + kubeconfig server) | §Substrate, §6 tunnel |
+| `CP_KEY` / `CP_USER` | SSH credentials for the node | §Substrate, §6 |
+| `CP_CONTEXT` | local kubeconfig context label (cosmetic) | §Substrate |
+| `GW_HOST` | public Ingress hostname for `horus-service` | Ingress, DNS, smoke tests, `--cp-url` |
+| `KNOWLEDGE_REPO` | git repo the Vault writer pushes to / readers clone | `vault-secrets.GITHUB_REPO` |
+| `FORGE_BUCKET` | object-store bucket for Forge artifacts | `forge-registry-secrets` |
+
+> The maintainer's own reference cluster values (the live alpha instance) are kept in
+> private ops notes, **not** in this runbook — so this procedure is safe to run as-is
+> on fresh infrastructure.
+
+> **Set the gateway host in the manifests too.** `GW_HOST` is a runbook variable for
+> the *commands*; the Ingress object reads its host from your kustomize overlay. Set
+> it there before deploying — see §3. Do not hardcode it into `deploy/base`.
+
+---
+
 ## Architecture
 
 | Component | Kind | Role |
 |-----------|------|------|
-| `horus-service` | Deployment ×2 | **Only public surface** (HTTPS Ingress, host `horus.arjunkhera.io`). Verifies inbound client JWTs, mints a 60s `X-Horus-Principal` JWT, proxies to Vault/Forge. |
+| `horus-service` | Deployment ×2 | **Only public surface** (HTTPS Ingress, host `$GW_HOST`). Verifies inbound client JWTs, mints a 60s `X-Horus-Principal` JWT, proxies to Vault/Forge. |
 | `operator-service` | StatefulSet | Identity + provisioning. ClusterIP only (no ingress; NetworkPolicy denies external). Generates the two keypairs on first boot. |
 | `vault-router` | Deployment | Multi-vault proxy: routes reads → reader pool, writes → writer, per the vault-registry ConfigMap. |
 | `vault-reader` | Deployment ×N | Stateless reads from Typesense + Neo4j; clones knowledge repo to emptyDir on start. |
 | `vault-writer` | StatefulSet ×1 | Sole writer of the knowledge repo (PVC-backed git checkout). |
-| `forge-registry` | Deployment | Artifact registry, S3-backed (`horus-forge-registry`). Verifies `X-Horus-Principal` before writes. |
+| `forge-registry` | Deployment | Artifact registry, object-store-backed (`$FORGE_BUCKET`). Verifies `X-Horus-Principal` before writes. |
 | Typesense, Neo4j | StatefulSet | Shared datastores. |
 | cert-manager, sealed-secrets, observability, backup | ArgoCD apps | TLS, secret unsealing, Prometheus/Grafana, SQLite→S3 backup CronJob. |
 
@@ -51,27 +94,31 @@ principal — it is the single shared verification key.
 
 ---
 
-## Substrate (already provisioned — reference)
+## Substrate — provision a k3s node
 
-A single always-on EC2 node runs k3s + ArgoCD.
+A single always-on Linux node runs k3s + ArgoCD. The control plane is light; the
+example sizing below is the known-good minimum, not a hard requirement.
 
-| Attribute | Value |
-|-----------|-------|
-| Instance | `i-0698c4706c202cd3c` — t4g.large (ARM/Graviton, 2 vCPU, 8 GB) |
-| AMI | Ubuntu 22.04 LTS **arm64** |
-| Root volume | 40 GB gp3 |
-| Elastic IP | `13.219.32.204` (`eipalloc-0f0883acbb80306b4`) |
-| Region / account | us-east-1 / `065585372120` |
-| Security group | `horus-track-a-sg` — `22` from admin IP, `80`/`443` public (6443 **not** open) |
-| SSH key | `~/.ssh/horus-track-a.pem`, user `ubuntu` |
+| Attribute | Requirement | Example |
+|-----------|-------------|---------|
+| Compute | 2 vCPU / 8 GB, always-on | `t4g.large` (ARM/Graviton) |
+| Arch | **arm64 or amd64** — must match the published images (they are multi-arch) | arm64 |
+| OS | Modern Linux | Ubuntu 22.04 LTS |
+| Disk | ≥ 40 GB SSD | 40 GB gp3 |
+| Static address | A stable public IP for DNS + TLS | Elastic IP → `$CP_HOST` |
+| Firewall | `22` from your admin IP, `80`/`443` public; **`6443` closed** (reach the API via SSH tunnel) | security group |
+| SSH | A keypair you control | `$CP_KEY`, user `$CP_USER` |
 
-> **ARM substrate:** because the node is Graviton/arm64, every published image must be
-> multi-arch (amd64+arm64). A non-multi-arch image pulls fine but crash-loops on exec.
+> **Arch match:** the published images are multi-arch (amd64+arm64), so either node
+> arch works — but a single-arch image would crash-loop on the wrong node. If you
+> build images yourself, build multi-arch.
 
-If you ever rebuild the node from scratch:
+Install k3s + ArgoCD on the node:
 
 ```bash
-# On the node (Ubuntu) — k3s bundles Traefik ingress + local-path StorageClass.
+ssh -i "$CP_KEY" "$CP_USER@$CP_HOST"
+
+# On the node — k3s bundles Traefik ingress + a local-path StorageClass.
 curl -sfL https://get.k3s.io | sh -
 sudo k3s kubectl create namespace argocd
 sudo k3s kubectl apply -n argocd \
@@ -80,16 +127,20 @@ sudo k3s kubectl apply -n argocd \
 
 ### Get kubectl access from your machine
 
+`scripts/get-cp-kubeconfig.sh` reads `CP_HOST` / `CP_KEY` / `CP_CONTEXT` from the
+environment (the variables you exported above), pulls the node's admin kubeconfig,
+rewrites the loopback server URL to `$CP_HOST`, and writes a named context:
+
 ```bash
-scripts/get-cp-kubeconfig.sh          # writes ~/.kube/horus-track-a.yaml, context "horus-track-a"
-kubectl config use-context horus-track-a
-kubectl get nodes                      # gate: node Ready
+scripts/get-cp-kubeconfig.sh                 # writes ~/.kube/$CP_CONTEXT.yaml
+kubectl config use-context "$CP_CONTEXT"
+kubectl get nodes                            # gate: node Ready
 ```
 
 The kubeconfig bearer token is **cluster-admin** — treat the file as a secret
-(`chmod 600`, never commit). The DNS A-record `horus.arjunkhera.io → 13.219.32.204`
-must be **DNS-only** (grey cloud in Cloudflare, not proxied) or HTTP-01 TLS issuance
-and client-IP visibility break.
+(`chmod 600`, never commit). Point a DNS A-record `$GW_HOST → $CP_HOST` and, **if you
+front it with Cloudflare, set it to DNS-only** (grey cloud, not proxied) or HTTP-01
+TLS issuance and client-IP visibility break.
 
 ---
 
@@ -109,7 +160,8 @@ Six images: `horus-service`, `operator-service`, `vault` (one image, run as read
 manual `docker buildx --platform linux/amd64,linux/arm64 --push` fallback is in
 `deploy/ALPHA-INTEGRATION.md §2`.
 
-**Gate 1:** all six tags visible under `ghcr.io/arjunkhera/horus/*:0.1.0-alpha.1`.
+**Gate 1:** all six tags visible under `ghcr.io/arjunkhera/horus/*:0.1.0-alpha.1`
+(or your own registry, if you re-point the kustomize `images:` to a fork).
 
 ---
 
@@ -121,15 +173,16 @@ Secrets are committed **encrypted** as `*.sealed.yaml` under `deploy/secrets/`; 
 
 | SealedSecret | Holds |
 |--------------|-------|
-| `vault-secrets` | `NEO4J_AUTH`, `NEO4J_PASSWORD`, `TYPESENSE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_REPO=Arjunkhera/horus-knowledge` |
-| `forge-registry-secrets` | S3 access key id/secret for `horus-forge-registry` |
-| `backup-credentials` | AWS creds + `BACKUP_BUCKET` |
+| `vault-secrets` | `NEO4J_AUTH`, `NEO4J_PASSWORD`, `TYPESENSE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_REPO=$KNOWLEDGE_REPO` |
+| `forge-registry-secrets` | object-store access key id/secret for `$FORGE_BUCKET` |
+| `backup-credentials` | cloud creds + `BACKUP_BUCKET` |
 | `grafana-admin` | Grafana admin password |
 | `horus-service-secrets` | client JWKS + internal signing **private** key — derived in §4 |
 | `horus-principal-pub` | internal signing **public** JWK — derived in §4 |
 
 `deploy/secrets.example.yaml` documents the plaintext key shapes (never fill it in and
-commit it).
+commit it). **All of these are your own values** — generate fresh credentials per
+deployment; do not copy another environment's secrets.
 
 > **Single-point-of-loss:** back up the sealed-secrets controller key offline. Losing
 > it forces re-sealing all six secrets against a new cluster key.
@@ -140,6 +193,11 @@ sealed secrets; principal secrets added in §4.
 ---
 
 ## 3. Bootstrap ArgoCD (app-of-apps)
+
+First, set your gateway host in your overlay so the Ingress publishes on `$GW_HOST`
+(don't edit `deploy/base`). Use your environment's overlay — `deploy/overlays/alpha`
+and `deploy/overlays/dev` are existing examples; copy one for a new environment and
+adjust the Ingress host + image pins. Then:
 
 ```bash
 kubectl apply -f deploy/argocd/app-of-apps.yaml
@@ -152,7 +210,7 @@ sync-wave order:
 |------|------|
 | -2 | `cert-manager`, `sealed-secrets` (controllers + CRDs) |
 | -1 | `cluster-issuers` (LE staging/prod), `horus-secrets` (the six SealedSecrets) |
-| 0  | `horus-control-plane` (`deploy/overlays/alpha`), `horus-forge-registry`, `horus-observability`, `horus-backup` |
+| 0  | `horus-control-plane` (your overlay), `horus-forge-registry`, `horus-observability`, `horus-backup` |
 
 ```bash
 kubectl -n argocd get applications      # watch them go green
@@ -194,10 +252,9 @@ horus-principal-pub` both exist; horus-service + Vault pods restart healthy.
 ## 5. Smoke-test the contract surface
 
 ```bash
-HOST=horus.arjunkhera.io
-curl -s https://$HOST/health
-curl -s https://$HOST/api/v1/aggregate/status     # federates Vault + Forge /health
-curl -s https://$HOST/api/v1/forge/health         # principal-authenticated path
+curl -s "https://$GW_HOST/health"
+curl -s "https://$GW_HOST/api/v1/aggregate/status"   # federates Vault + Forge /health
+curl -s "https://$GW_HOST/api/v1/forge/health"       # principal-authenticated path
 kubectl -n horus-system get certificate horus-service-tls   # Ready=True once HTTP-01 completes
 ```
 
@@ -218,19 +275,19 @@ tunnel to the node (port 6443 is closed; the tunnel is the only path).
 ```bash
 # Tunnel: forward local :8090 → node → operator-service. Pick a fresh high node-side
 # port if you hit "address already in use".
-ssh -i ~/.ssh/horus-track-a.pem -o ExitOnForwardFailure=yes \
-  -L 8090:127.0.0.1:38090 ubuntu@13.219.32.204 \
+ssh -i "$CP_KEY" -o ExitOnForwardFailure=yes \
+  -L 8090:127.0.0.1:38090 "$CP_USER@$CP_HOST" \
   'sudo k3s kubectl -n horus-system port-forward svc/operator-service 38090:8090' &
 curl -fsS http://127.0.0.1:8090/health           # gate: operator healthy
 
-# Mint. CRITICAL: --tenant default (the CP vault is single-tenant 'default';
-# --tenant alpha causes 403 TENANT_MISMATCH on every vault read).
+# Mint. Use the tenant your vault was provisioned under (default in a single-tenant
+# deployment). A wrong --tenant causes 403 TENANT_MISMATCH on every vault read.
 horus operator user add <user-id> \
   --tenant default \
   --role registry-admin \
-  --vault default=https://horus.arjunkhera.io/api/v1/vault \
-  --vault vault-code=https://horus.arjunkhera.io/api/v1/vault \
-  --cp-url https://horus.arjunkhera.io \
+  --vault default=https://$GW_HOST/api/v1/vault \
+  --vault vault-code=https://$GW_HOST/api/v1/vault \
+  --cp-url https://$GW_HOST \
   --operator-url http://127.0.0.1:8090 \
   --out "<user-id>.bundle.yaml"
 ```
@@ -247,17 +304,17 @@ it.
 ```bash
 TOKEN=$(grep -E 'config:' "<user-id>.bundle.yaml" | sed -E 's/.*config:[[:space:]]*//' | tr -d '"')
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
-  https://horus.arjunkhera.io/api/v1/vault/     # expect 200
+  "https://$GW_HOST/api/v1/vault/"     # expect 200
 ```
 
 `200` → user can reach the remote Vault through the gateway, Reader/Writer split
-honored. `403 TENANT_MISMATCH` → re-mint with `--tenant default`.
+honored. `403 TENANT_MISMATCH` → re-mint with the correct `--tenant`.
 
 ---
 
 ## Known caveats
 
-- **Cloudflare must be DNS-only** for `horus.arjunkhera.io` — a proxied record breaks
+- **Cloudflare (if used) must be DNS-only** for `$GW_HOST` — a proxied record breaks
   HTTP-01 issuance and hides the client IP from Traefik.
 - **operator-service TLS trust:** its Node `fetch` must trust the cluster CA — set
   `NODE_EXTRA_CA_CERTS=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`.
