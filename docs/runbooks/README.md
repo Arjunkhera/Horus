@@ -14,6 +14,7 @@ it worked*.
 |---------|----------|--------------|
 | [client-setup.md](./client-setup.md) | End user | Install and run the 4-container Horus client (horus-ui + anvil + typesense + neo4j) on your machine — local-only or connected to a control plane. |
 | [control-plane-k3s.md](./control-plane-k3s.md) | Operator | Stand up the remote Horus control plane (gateway, operator, Vault reader/writer + router, Forge registry) on single-node k3s via ArgoCD, and onboard users. |
+| [upgrade-rollback.md](./upgrade-rollback.md) | Operator + user | Ship a code fix to the control plane and roll it back (GitOps sha-pin via `scripts/update-server.sh`), and keep local clients current (`horus update`). |
 
 ## Topology at a glance
 

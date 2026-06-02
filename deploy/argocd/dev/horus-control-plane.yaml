@@ -1,0 +1,44 @@
+# Standalone control-plane Application for the DEV cluster (second k3s node).
+#
+# Lives in deploy/argocd/dev/ — NOT deploy/argocd/apps/ — so the alpha cluster's
+# app-of-apps (which recurses deploy/argocd/apps) does NOT pick it up. Apply this
+# on the dev cluster's ArgoCD only:
+#
+#   kubectl apply -f deploy/argocd/dev/horus-control-plane.yaml
+#
+# The platform apps (cert-manager, sealed-secrets, cluster-issuers, horus-secrets)
+# are env-agnostic with an in-cluster destination — install those on the dev
+# cluster from deploy/argocd/apps/ as usual. Only the control-plane overlay differs
+# (dev vs alpha), which is why this app is dev-specific.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: horus-control-plane-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/arjunkhera/horus.git
+    targetRevision: HEAD
+    path: deploy/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: horus-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+  # Same as alpha: the vault-registry ConfigMap is git-seeded but its `data` is
+  # owned at runtime by operator-service. Don't let selfHeal revert those writes.
+  ignoreDifferences:
+    - group: ""
+      kind: ConfigMap
+      name: vault-registry
+      namespace: horus-system
+      jsonPointers:
+        - /data

@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: horus-system
+
+commonLabels:
+  app.kubernetes.io/part-of: horus-control-plane
+  horus.dev/env: dev
+
+resources:
+  - ../../base
+
+# Dev cluster (second k3s node on EC2) for fast code-fix iteration.
+# Image pins evolve INDEPENDENTLY of alpha (per ADR-0007 — never :latest).
+#
+# Bump horus-service / operator-service here with `scripts/update-server.sh`
+# (resolves the latest master `sha-<commit>`, rewrites the newTag below, commits,
+# and lets this cluster's ArgoCD auto-sync). Roll back with
+# `scripts/update-server.sh --rollback` (reverts the bump commit).
+#
+# Seeded from the alpha overlay's known-good pins on 2026-06-02 so the cluster is
+# immediately deployable; the update script then advances them.
+images:
+  - name: ghcr.io/arjunkhera/horus/horus-service
+    newTag: sha-d132db0
+  - name: ghcr.io/arjunkhera/horus/operator-service
+    newTag: sha-de7df7e
+  - name: ghcr.io/arjunkhera/horus/vault
+    newTag: sha-400a4fd
+  - name: ghcr.io/arjunkhera/horus/vault-router
+    newTag: sha-5d1f953
