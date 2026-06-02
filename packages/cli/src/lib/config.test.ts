@@ -39,6 +39,27 @@ describe('generateEnv — alpha env vars', () => {
     const env = generateEnv(defaultConfig());
     expect(env).toContain('HORUS_CONTROL_PLANE_URL=');
   });
+
+  it('persists GITHUB_TOKEN resolved from github_hosts for the notes repo host', () => {
+    const config = defaultConfig();
+    config.repos.anvil_notes = 'https://github.intuit.com/team/notes.git';
+    config.github_hosts = {
+      ghe: { host: 'github.intuit.com', token: 'ghp-ghe-secret' },
+      dotcom: { host: 'github.com', token: 'ghp-dotcom-secret' },
+    };
+
+    const env = generateEnv(config);
+
+    // Picks the token matching the notes repo's host, not some other host.
+    expect(env).toContain('GITHUB_TOKEN=ghp-ghe-secret');
+    expect(env).not.toContain('ghp-dotcom-secret');
+  });
+
+  it('emits an empty GITHUB_TOKEN when no github_host matches the notes repo', () => {
+    const env = generateEnv(defaultConfig());
+    expect(env).toContain('GITHUB_TOKEN=');
+    expect(env).not.toMatch(/GITHUB_TOKEN=\S/);
+  });
 });
 
 describe('generateForgeConfig — embedded Forge registry wiring', () => {
