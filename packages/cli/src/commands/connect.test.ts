@@ -100,7 +100,7 @@ describe('registerWithClaudeCode', () => {
     );
     expect(mockExeca).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100'],
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100/mcp'],
       { reject: false },
     );
     expect(mockExeca).toHaveBeenCalledWith(
@@ -110,7 +110,7 @@ describe('registerWithClaudeCode', () => {
     );
     expect(mockExeca).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'vault', 'http://localhost:8300'],
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'vault', 'http://localhost:8300/mcp'],
       { reject: false },
     );
     expect(mockExeca).toHaveBeenCalledWith(
@@ -120,20 +120,22 @@ describe('registerWithClaudeCode', () => {
     );
     expect(mockExeca).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'forge', 'http://localhost:8200'],
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'forge', 'http://localhost:8200/mcp'],
       { reject: false },
     );
   });
 
-  it('strips /mcp suffix from URL before passing to claude mcp add', async () => {
+  it('registers the full MCP URL verbatim, preserving a sub-path /mcp suffix', async () => {
     mockExeca.mockResolvedValue(makeResult(0));
-    await registerWithClaudeCode({ anvil: { url: 'http://localhost:8100/mcp' } });
+    // A server mounted on a sub-path (e.g. horus-ui's connected-mode vault proxy)
+    // must keep its full path — stripping /mcp would route to the wrong endpoint.
+    await registerWithClaudeCode({ vault: { url: 'http://localhost:8400/vault/mcp' } });
 
     // second call is the add (first is remove)
     expect(mockExeca).toHaveBeenNthCalledWith(
       2,
       'claude',
-      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'anvil', 'http://localhost:8100'],
+      ['mcp', 'add', '--transport', 'http', '--scope', 'user', 'vault', 'http://localhost:8400/vault/mcp'],
       { reject: false },
     );
   });
