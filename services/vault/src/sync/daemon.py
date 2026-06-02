@@ -518,6 +518,7 @@ async def start_sync_daemon(
     debounce_seconds: float = 5.0,
     on_reindex=None,
     vaults_base: Optional[str] = None,
+    per_vault_sync_interval: Optional[int] = None,
 ) -> tuple[Optional[asyncio.Task[None]], Optional[Any], Optional[asyncio.Task[None]]]:
     """
     Start the sync daemon components.
@@ -534,6 +535,9 @@ async def start_sync_daemon(
         on_reindex: Optional callback invoked after each successful default reindex
         vaults_base: Base dir holding per-vault clones (enables the per-vault
             sync loop). Omit/None to disable.
+        per_vault_sync_interval: Seconds between per-vault polls. Defaults to
+            ``sync_interval`` when omitted; set lower (e.g. 60s) so merged pages
+            in provisioned vaults surface faster than the default repo's cadence.
 
     Returns:
         Tuple of (git_pull_task, workspace_observer, per_vault_task)
@@ -561,8 +565,13 @@ async def start_sync_daemon(
     per_vault_task: Optional[asyncio.Task[None]] = None
     if vaults_base:
         per_vault_lock = ReindexLock(on_reindex=None)
+        pv_interval = (
+            per_vault_sync_interval
+            if per_vault_sync_interval is not None
+            else sync_interval
+        )
         per_vault_task = asyncio.create_task(
-            per_vault_sync_loop(store, vaults_base, sync_interval, per_vault_lock)
+            per_vault_sync_loop(store, vaults_base, pv_interval, per_vault_lock)
         )
 
     logger.info("Sync daemon started")

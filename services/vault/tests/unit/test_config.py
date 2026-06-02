@@ -118,6 +118,21 @@ class TestEnvVarOverride:
         assert settings.sync_interval == 600
         assert 'env:SYNC_INTERVAL' in sources['sync_interval']
 
+    def test_default_per_vault_sync_interval(self, tmp_path, monkeypatch):
+        """Per-vault sync polls faster than the default repo by default."""
+        config_path = tmp_path / "nonexistent.yaml"
+        settings, _ = load_settings(config_path=config_path)
+        assert settings.per_vault_sync_interval == 60
+
+    def test_env_var_per_vault_sync_interval(self, tmp_path, monkeypatch):
+        """PER_VAULT_SYNC_INTERVAL env var overrides default."""
+        monkeypatch.setenv('PER_VAULT_SYNC_INTERVAL', '15')
+        config_path = tmp_path / "nonexistent.yaml"
+        settings, sources = load_settings(config_path=config_path)
+
+        assert settings.per_vault_sync_interval == 15
+        assert 'env:PER_VAULT_SYNC_INTERVAL' in sources['per_vault_sync_interval']
+
     def test_invalid_env_var_type(self, tmp_path, monkeypatch):
         """Invalid env var values are logged but don't crash."""
         monkeypatch.setenv('VAULT_PORT', 'not-a-number')
