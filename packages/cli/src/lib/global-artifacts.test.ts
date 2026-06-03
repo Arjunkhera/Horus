@@ -77,6 +77,12 @@ describe('manifest', () => {
     expect(resolveGlobalRefs().sort()).toEqual([...DEFAULT_GLOBAL_ARTIFACTS].sort());
   });
 
+  it('ships the full SDLC suite as a built-in default', () => {
+    // `horus connect` installs the SDLC globally with no prior `global install`.
+    expect(DEFAULT_GLOBAL_ARTIFACTS).toContain('plugin:anvil-sdlc-v2');
+    expect(resolveGlobalRefs()).toContain('plugin:anvil-sdlc-v2');
+  });
+
   it('adds a ref (canonicalised, version stripped) and persists it', () => {
     expect(addManifestRef('plugin:local-sdlc@1.0.0')).toBe(true);
     expect(listManifestRefs()).toEqual(['plugin:local-sdlc']);

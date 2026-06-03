@@ -49,9 +49,12 @@ interface LeafArtifact {
 }
 
 /**
- * The built-in baseline installed on every `horus connect`. Preserves the
- * historical behaviour (the six core skills) so connect never regresses even
- * when the user manifest is empty.
+ * The built-in baseline installed on every `horus connect`, even when the user
+ * manifest is empty:
+ *  - the six core Horus reference skills, and
+ *  - `plugin:anvil-sdlc-v2` — the full repo-local SDLC suite (11 skills + 8
+ *    agents, native git worktrees, no forge_develop). This is the global
+ *    default SDLC; it supersedes and fully replaces the retired `local-sdlc`.
  */
 export const DEFAULT_GLOBAL_ARTIFACTS: string[] = [
   'skill:horus-anvil',
@@ -60,6 +63,7 @@ export const DEFAULT_GLOBAL_ARTIFACTS: string[] = [
   'skill:horus-context',
   'skill:capture',
   'skill:triage',
+  'plugin:anvil-sdlc-v2',
 ];
 
 // ── Ref parsing ────────────────────────────────────────────────────────────
