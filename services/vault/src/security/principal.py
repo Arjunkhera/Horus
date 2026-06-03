@@ -31,13 +31,19 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from ..service_mode import WRITE_PATHS
+
 PRINCIPAL_HEADER = "x-horus-principal"
 CLOCK_SKEW_LEEWAY_SECONDS = 30
 
-# Paths that never require a principal (liveness/readiness, docs, root).
-DEFAULT_SKIP_PATHS = frozenset(
-    {"/health", "/status", "/", "/docs", "/redoc", "/openapi.json", "/favicon.ico"}
-)
+# Only write/admin endpoints require a principal. Reads are NOT principal-gated
+# (the design contract — see vault-router's _FORWARD_HEADERS comment). This is a
+# deny-list keyed on WRITE_PATHS (the same set ReadOnlyGuardMiddleware rejects on
+# readers), so any non-mutating endpoint — including new ones — is ungated by
+# default. Critical: vault-router routes non-default-vault reads to the WRITER
+# pool (only it holds the per-vault git clone); gating reads there 401s every
+# multi-vault read and the router's UUID-registry rebuild (bug 281e98ed).
+DEFAULT_ENFORCE_PATHS = WRITE_PATHS
 
 
 @dataclass
@@ -126,13 +132,14 @@ def _unauthorized(message: str) -> JSONResponse:
 
 
 class PrincipalMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, verifier: Callable[[str], Principal], skip_paths=DEFAULT_SKIP_PATHS):
+    def __init__(self, app, verifier: Callable[[str], Principal], enforce_paths=DEFAULT_ENFORCE_PATHS):
         super().__init__(app)
         self._verify = verifier
-        self._skip = skip_paths
+        self._enforce = enforce_paths
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in self._skip:
+        # Reads are not principal-gated; only write/admin endpoints require a token.
+        if request.url.path not in self._enforce:
             return await call_next(request)
         token = request.headers.get(PRINCIPAL_HEADER)
         if not token:
