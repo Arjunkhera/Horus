@@ -106,6 +106,52 @@ async def registry_status(
     return status
 
 
+# ── Vault discovery ─────────────────────────────────────────────────────────
+
+@router.get("/vaults")
+async def list_vaults(
+    settings: SettingsDepends,
+    uuid_registry: UUIDRegistryDepends,
+    registry: RegistryDepends,
+) -> dict[str, Any]:
+    """Enumerate every vault this control plane serves.
+
+    Backed by the live VaultRegistry when configured (the k8s control plane),
+    falling back to the static VAULT_ENDPOINTS map (self-host compose). This is
+    the discovery surface any client can call to learn which vaults exist at
+    call time — a vault provisioned after a client's connection bundle was
+    minted appears here immediately, honoring the "every user sees every vault"
+    contract. Reads are not principal-gated, so no per-caller filtering applies.
+    """
+    if registry is not None and registry.namespaces():
+        names = registry.namespaces()
+    else:
+        names = list(settings.vault_endpoints.keys())
+
+    # Per-vault page counts from the UUID registry status, when available.
+    status_vaults = uuid_registry.status().get("vaults", {})
+
+    vaults: list[dict[str, Any]] = []
+    for name in names:
+        entry: dict[str, Any] = {
+            "namespace": name,
+            "default": name == settings.vault_default,
+        }
+        info = status_vaults.get(name)
+        if isinstance(info, dict) and "page_count" in info:
+            entry["page_count"] = info["page_count"]
+        vaults.append(entry)
+
+    # Default vault first, then alphabetical — stable, predictable ordering.
+    vaults.sort(key=lambda v: (not v["default"], v["namespace"]))
+
+    return {
+        "vaults": vaults,
+        "default_vault": settings.vault_default,
+        "total": len(vaults),
+    }
+
+
 # ── Fan-out helper ────────────────────────────────────────────────────────────
 
 def _parse_vault_filter(body: dict[str, Any]) -> Optional[list[str]]:
