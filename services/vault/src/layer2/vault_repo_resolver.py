@@ -44,11 +44,18 @@ class VaultRepoResolver:
         self,
         default_repo_path: str,
         vaults_base: str = VAULTS_BASE,
+        git_host: str = "",
     ):
         self._default_path = default_repo_path
         self._vaults_base = Path(vaults_base)
         self._lock = threading.Lock()
         self._resolved: dict[str, str] = {}
+        # Git host for per-vault clone remotes. Empty or "github.com" → public
+        # github.com; a GHE hostname (e.g. "github.intuit.com") clones from that
+        # host instead. Mirrors GitWriter's github_api_host convention so the API
+        # base and the clone remote agree on the host (bug e4904a31).
+        host = (git_host or "").strip()
+        self._git_host = host or "github.com"
 
     def repo_path(self, vault_namespace: str) -> str:
         """Return the local clone path for a vault namespace WITHOUT cloning.
@@ -125,9 +132,11 @@ class VaultRepoResolver:
 
     def _repo_url(self, git_repo: str) -> str:
         # Tokenless URL — auth comes from the global git credential helper
-        # configured in entrypoint.sh. Never bake the token into the URL
-        # (rotating it would silently break clones/pushes — bug 3a561b8b).
-        return f"https://github.com/{git_repo}.git"
+        # configured in entrypoint.sh (which writes a credential line for this
+        # same host). Never bake the token into the URL (rotating it would
+        # silently break clones/pushes — bug 3a561b8b). Host is configurable for
+        # GitHub Enterprise (bug e4904a31).
+        return f"https://{self._git_host}/{git_repo}.git"
 
     def _git_pull(self, repo_dir: Path) -> None:
         try:

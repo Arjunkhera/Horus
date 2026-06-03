@@ -165,6 +165,7 @@ async def lifespan(app: FastAPI):
     if mode == "writer":
         repo_resolver = VaultRepoResolver(
             default_repo_path=settings.knowledge_repo_path,
+            git_host=settings.github_api_host,
         )
         app.state.repo_resolver = repo_resolver
         logger.info("VaultRepoResolver ready (writer mode)")
