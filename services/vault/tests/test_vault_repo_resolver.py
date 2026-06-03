@@ -131,6 +131,39 @@ class TestResolveLazyClone:
         assert cmd[2] == "https://github.com/org/public-kb.git"
         assert "@" not in cmd[2]
 
+
+class TestEnterpriseGitHubHost:
+    """git_host (from GITHUB_API_HOST) controls the clone remote — bug e4904a31."""
+
+    @patch("src.layer2.vault_repo_resolver.subprocess.run")
+    def test_clones_from_ghe_host_when_git_host_set(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resolver = VaultRepoResolver(
+            default_repo_path="/data/knowledge-repo",
+            vaults_base=str(tmp_path / "vaults"),
+            git_host="github.intuit.com",
+        )
+
+        resolver.resolve("org/tenant-a", git_repo="org/tenant-a-kb")
+
+        cmd = mock_run.call_args_list[0][0][0]
+        # Clones from the GHE host, still tokenless (credential helper supplies auth).
+        assert cmd[2] == "https://github.intuit.com/org/tenant-a-kb.git"
+        assert "@" not in cmd[2]
+
+    @patch("src.layer2.vault_repo_resolver.subprocess.run")
+    def test_empty_git_host_defaults_to_public_github(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        for host in ("", "github.com"):
+            resolver = VaultRepoResolver(
+                default_repo_path="/data/knowledge-repo",
+                vaults_base=str(tmp_path / "vaults" / (host or "empty")),
+                git_host=host,
+            )
+            resolver.resolve("org/tenant-a", git_repo="org/tenant-a-kb")
+            cmd = mock_run.call_args_list[-1][0][0]
+            assert cmd[2] == "https://github.com/org/tenant-a-kb.git"
+
     @patch("src.layer2.vault_repo_resolver.subprocess.run")
     def test_slug_replaces_slashes(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")

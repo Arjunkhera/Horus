@@ -40,6 +40,11 @@ VAULT_SYNC_INTERVAL=${VAULT_SYNC_INTERVAL:-300}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 GITHUB_REPO=${GITHUB_REPO:-}
 GITHUB_BASE_BRANCH=${GITHUB_BASE_BRANCH:-master}
+# Git host for clone remotes + credential store. Empty → github.com; a GHE
+# hostname (e.g. github.intuit.com) clones/authenticates against that host
+# instead (bug e4904a31). Mirrors GITHUB_API_HOST used by the Python API layer.
+GITHUB_API_HOST=${GITHUB_API_HOST:-}
+GIT_HOST=${GITHUB_API_HOST:-github.com}
 VAULT_MODE=${VAULT_MODE:-}
 HORUS_RUNTIME=${HORUS_RUNTIME:-docker}
 PULL_PID=""
@@ -119,7 +124,7 @@ fi
 # pushes knowledge PRs; readers clone + pull content. Without a remote the writer
 # could not open PRs and readers would serve nothing.
 if [ -z "$VAULT_KNOWLEDGE_REPO_URL" ] && [ -n "$GITHUB_REPO" ]; then
-  VAULT_KNOWLEDGE_REPO_URL="https://github.com/${GITHUB_REPO}.git"
+  VAULT_KNOWLEDGE_REPO_URL="https://${GIT_HOST}/${GITHUB_REPO}.git"
   log "Derived VAULT_KNOWLEDGE_REPO_URL from GITHUB_REPO: $VAULT_KNOWLEDGE_REPO_URL"
 fi
 
@@ -139,13 +144,15 @@ fi
 # Configure auth via a global credential helper BEFORE any clone/fetch/push, so
 # the token is NEVER baked into a remote URL. Baking the PAT into the URL means
 # rotating/expiring it silently breaks fresh reader pods and all writes
-# (bug 3a561b8b). Remotes stay tokenless (https://github.com/owner/repo.git);
+# (bug 3a561b8b). Remotes stay tokenless (https://$GIT_HOST/owner/repo.git);
 # git reads the PAT from ~/.git-credentials via the store helper. The --global
 # helper also covers per-vault clones created at runtime by VaultRepoResolver.
+# The credential line is keyed to $GIT_HOST so GitHub Enterprise hosts
+# authenticate (git's store helper matches credentials by host — bug e4904a31).
 export GIT_TERMINAL_PROMPT=0
 if [ -n "$GITHUB_TOKEN" ]; then
   git config --global credential.helper "store"
-  printf 'https://oauth2:%s@github.com\n' "$GITHUB_TOKEN" > ~/.git-credentials
+  printf 'https://oauth2:%s@%s\n' "$GITHUB_TOKEN" "$GIT_HOST" > ~/.git-credentials
   chmod 600 ~/.git-credentials
 elif [ ! -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
   # No token and nothing cloned yet — fail fast with a clear message rather than
@@ -262,6 +269,7 @@ cd /app
 GITHUB_REPO="$GITHUB_REPO" \
 GITHUB_BASE_BRANCH="$GITHUB_BASE_BRANCH" \
 GITHUB_TOKEN="$GITHUB_TOKEN" \
+GITHUB_API_HOST="$GITHUB_API_HOST" \
 python -m uvicorn src.main:app \
   --host "$HOST" \
   --port "$PORT" \
