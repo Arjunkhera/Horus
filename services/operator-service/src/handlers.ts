@@ -65,11 +65,14 @@ export function onboardHandler(store: Store): KindHandler {
  *   5. ensure_registry_entry
  *
  * Optional payload fields (P2):
- *   - git_org   {string} — GitHub org/owner for the repo. Default: GITHUB_OWNER env.
- *   - repo_name {string} — repo name. Default: `vault-<namespaceSlug(namespace)>`.
+ *   - git_org      {string} — GitHub org/owner for the repo. Default: GITHUB_OWNER env.
+ *   - repo_name    {string} — repo name. Default: `vault-<namespaceSlug(namespace)>`.
+ *   - git_api_host {string} — GitHub API hostname for the backing repo. Empty or
+ *       "github.com" → public api.github.com; a GHE hostname (e.g. "github.intuit.com")
+ *       targets "https://<host>/api/v3". Overrides the operator-wide GITHUB_API_HOST.
  *
- * Both must match ^[A-Za-z0-9._-]+$ (GitHub-safe). An invalid value causes the
- * `ensure_git_backing_store` step to fail with a clear error message.
+ * git_org and repo_name must match ^[A-Za-z0-9._-]+$ (GitHub-safe). An invalid value
+ * causes the `ensure_git_backing_store` step to fail with a clear error message.
  */
 export function vaultCreateHandler(infra: VaultInfra): KindHandler {
   return {
@@ -78,14 +81,16 @@ export function vaultCreateHandler(infra: VaultInfra): KindHandler {
       const adapter = String(req.payload.backing_store_adapter ?? 'git-subdir');
       const endpoint = vaultEndpoint(req.payload, ns);
 
-      // Resolve optional git_org / repo_name from payload.
+      // Resolve optional git_org / repo_name / git_api_host from payload.
       const rawGitOrg = req.payload.git_org;
       const rawRepoName = req.payload.repo_name;
+      const rawGitApiHost = req.payload.git_api_host;
       const gitOrg = rawGitOrg != null ? String(rawGitOrg) : undefined;
       const repoName = rawRepoName != null ? String(rawRepoName) : undefined;
+      const gitApiHost = rawGitApiHost != null ? String(rawGitApiHost) : undefined;
 
-      const gitOpts = (gitOrg !== undefined || repoName !== undefined)
-        ? { gitOrg, repoName }
+      const gitOpts = (gitOrg !== undefined || repoName !== undefined || gitApiHost !== undefined)
+        ? { gitOrg, repoName, gitApiHost }
         : undefined;
 
       return [
