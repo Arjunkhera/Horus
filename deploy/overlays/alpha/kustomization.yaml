@@ -34,6 +34,9 @@ resources:
 # reindexes each provisioned vault clone on PR merge, so provisioned-vault pages
 # become searchable (write -> merge -> searchable). Reverts the #419 index-on-write
 # attempt, which search dropped because content wasn't on disk (PR #421).
+# operator-service re-pinned to sha-6e608ea: configurable GitHub API base
+# (GITHUB_API_HOST + per-request git_api_host) so the control plane can back
+# vaults on GitHub Enterprise hosts, not just api.github.com (bug e4904a31, PR #435).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
@@ -42,4 +45,4 @@ images:
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-5d1f953
   - name: ghcr.io/arjunkhera/horus/operator-service
-    newTag: sha-de7df7e
+    newTag: sha-6e608ea
