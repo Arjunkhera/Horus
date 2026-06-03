@@ -41,11 +41,15 @@ resources:
 # backed by the live VaultRegistry, so clients can enumerate every served vault at
 # call time (incl. vaults provisioned after their bundle was minted). Surfaced as
 # the knowledge_list_vaults MCP tool (bug 281e98ed, Vault V3, PR #436).
+# vault re-pinned to sha-47287c6: configurable git clone host — the reader/writer
+# derive the clone remote + credential-store host from GITHUB_API_HOST, so the
+# control plane can clone/serve vaults backed on GitHub Enterprise, completing the
+# operator-service GHE fix (bug e4904a31, PR #439).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-253778a
+    newTag: sha-47287c6
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-db78440
   - name: ghcr.io/arjunkhera/horus/operator-service
