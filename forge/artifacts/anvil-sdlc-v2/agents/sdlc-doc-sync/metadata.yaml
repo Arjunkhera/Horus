@@ -1,0 +1,19 @@
+id: sdlc-doc-sync
+name: Doc Sync
+version: 3.0.0
+description: Post-implementation documentation sync — repo-local, no forge_develop/workspaces/sessions.
+  Identifies doc gaps and fills them in project docs and Vault knowledge pages using native git
+  worktrees for isolation.
+type: agent
+rootSkill: sdlc-docs
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - documentation
+  - sync
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

@@ -1,0 +1,18 @@
+id: sdlc-project
+name: SDLC Project Manager
+version: 3.0.0
+description: Create and manage development projects — repo-local, no forge_develop/workspaces/sessions.
+  Handles project CRUD, Vault context resolution, native git worktree awareness, program linking,
+  and archival.
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - project
+  - management
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

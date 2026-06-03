@@ -1,0 +1,45 @@
+id: anvil-sdlc-v2
+name: Anvil SDLC v2
+version: 3.0.0
+description: >-
+  Full software-development-lifecycle pipeline for Horus, running entirely
+  repo-local on native git worktrees inside the user's own repo checkout — NO
+  Forge workspaces, sessions, or forge_develop. 11 skills (orchestrator,
+  project, story, planner, designer, discovery, developer, tester, reviewer,
+  docs, scratch) and 8 subagents for planning, designing, implementing,
+  testing, reviewing, documenting, and shipping software. Anvil holds work-item
+  state; Vault holds conventions; all code/Anvil/Vault reads are delegated to
+  Sonnet subagents for context discipline.
+type: plugin
+author: Horus
+license: MIT
+tags:
+  - sdlc
+  - development
+  - horus
+  - repo-local
+  - worktree
+  - anvil
+  - vault
+  - forge
+skills:
+  - sdlc-orchestrator
+  - sdlc-project
+  - sdlc-story
+  - sdlc-planner
+  - sdlc-designer
+  - sdlc-discovery
+  - sdlc-developer
+  - sdlc-tester
+  - sdlc-reviewer
+  - sdlc-docs
+  - sdlc-scratch
+agents:
+  - sdlc-gather-context
+  - sdlc-implement-story
+  - sdlc-plan-feature
+  - sdlc-design-proposal
+  - sdlc-route-evaluator
+  - sdlc-test-suite
+  - sdlc-doc-sync
+  - sdlc-release
