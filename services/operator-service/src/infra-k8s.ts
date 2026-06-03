@@ -38,6 +38,14 @@ export interface KubernetesVaultInfraConfig {
    * takes effect without a pod restart.
    */
   githubTokenPath?: string;
+  /**
+   * GitHub API hostname. Empty or "github.com" → public "https://api.github.com".
+   * For GitHub Enterprise, set the GHE hostname (e.g. "github.intuit.com") and the
+   * API base becomes "https://<host>/api/v3". Mirrors the local-compose
+   * GITHUB_API_HOST convention (see services/vault/src/layer2/git_writer.py) so the
+   * control plane can back vaults on enterprise hosts, not just github.com.
+   */
+  githubApiHost?: string;
   githubOwner: string;
   typesenseUrl: string;
   typesenseApiKey: string;
@@ -91,16 +99,33 @@ export class KubernetesVaultInfra implements VaultInfra {
   private readonly gitRepos = new Map<string, string>();
 
   /**
-   * Cached login of the authenticated GitHub token (lowercased).
-   * Resolved on first call to resolveTokenLogin(); null = not yet fetched,
-   * '' (empty) = fetch failed or returned non-200.
+   * Cached login of the authenticated GitHub token (lowercased), keyed by the
+   * API base URL the identity was resolved against. A single operator instance
+   * can back vaults on multiple hosts (per-vault gitApiHost), and the token's
+   * login differs per host, so the cache must not be shared across bases.
+   * Missing key = not yet fetched; '' (empty) = fetch failed or non-200.
    */
-  private _tokenLogin: string | null = null;
+  private readonly _tokenLogin = new Map<string, string>();
 
   constructor(
     private readonly config: KubernetesVaultInfraConfig,
     private readonly _fetch: HttpFetch = globalThis.fetch.bind(globalThis),
   ) {}
+
+  // ── GitHub API base resolution ────────────────────────────────────────────
+
+  /**
+   * Resolves the GitHub REST API base URL (no trailing slash) from the
+   * configured host. Empty or "github.com" → public "https://api.github.com";
+   * any other host is treated as a GitHub Enterprise instance whose API lives
+   * at "https://<host>/api/v3". Kept identical to the vault container's
+   * git_writer convention so both deployment paths agree on the base form.
+   */
+  private githubApiBase(hostOverride?: string): string {
+    const host = (hostOverride ?? this.config.githubApiHost ?? '').trim();
+    if (!host || host === 'github.com') return 'https://api.github.com';
+    return `https://${host}/api/v3`;
+  }
 
   // ── GitHub identity resolution ────────────────────────────────────────────
 
@@ -109,23 +134,24 @@ export class KubernetesVaultInfra implements VaultInfra {
    * if the identity lookup fails (non-200 or network error).  Cached after
    * the first successful fetch so repeated provisions do not re-query.
    */
-  private async resolveTokenLogin(): Promise<string> {
-    if (this._tokenLogin !== null) return this._tokenLogin;
+  private async resolveTokenLogin(apiBase: string): Promise<string> {
+    const cached = this._tokenLogin.get(apiBase);
+    if (cached !== undefined) return cached;
+    let login = '';
     try {
       const res = await this._fetch(
-        'https://api.github.com/user',
+        `${apiBase}/user`,
         { method: 'GET', headers: this.githubHeaders() },
       );
       if (res.status === 200) {
         const data = (await res.json()) as { login?: string };
-        this._tokenLogin = (data.login ?? '').toLowerCase();
-      } else {
-        this._tokenLogin = '';
+        login = (data.login ?? '').toLowerCase();
       }
     } catch {
-      this._tokenLogin = '';
+      login = '';
     }
-    return this._tokenLogin;
+    this._tokenLogin.set(apiBase, login);
+    return login;
   }
 
   // ── Registry pre-flight ───────────────────────────────────────────────────
@@ -191,8 +217,11 @@ export class KubernetesVaultInfra implements VaultInfra {
     }
 
     // ── GitHub existence check ────────────────────────────────────────────
+    // Resolve the API base once for this request: the per-vault gitApiHost
+    // override (if any) wins over the operator-wide GITHUB_API_HOST default.
+    const apiBase = this.githubApiBase(opts?.gitApiHost);
     const checkRes = await this._fetch(
-      `https://api.github.com/repos/${org}/${name}`,
+      `${apiBase}/repos/${org}/${name}`,
       { method: 'GET', headers: this.githubHeaders() },
     );
 
@@ -227,11 +256,11 @@ export class KubernetesVaultInfra implements VaultInfra {
     // Resolve whether `org` is the authenticated token's own user account.
     // If so, repos must be created via POST /user/repos (GitHub rejects
     // POST /orgs/{personal-login}/repos with 404).
-    const tokenLogin = await this.resolveTokenLogin();
+    const tokenLogin = await this.resolveTokenLogin(apiBase);
     const isTokenUser = tokenLogin !== '' && tokenLogin === org.toLowerCase();
     const createUrl = isTokenUser
-      ? 'https://api.github.com/user/repos'
-      : `https://api.github.com/orgs/${org}/repos`;
+      ? `${apiBase}/user/repos`
+      : `${apiBase}/orgs/${org}/repos`;
 
     const createRes = await this._fetch(
       createUrl,
@@ -487,6 +516,7 @@ export function createKubernetesVaultInfra(): KubernetesVaultInfra | null {
   return new KubernetesVaultInfra({
     githubToken: process.env.GITHUB_TOKEN ?? '',
     githubTokenPath: process.env.GITHUB_TOKEN_FILE,
+    githubApiHost: process.env.GITHUB_API_HOST ?? '',
     githubOwner: process.env.GITHUB_OWNER ?? '',
     typesenseUrl: process.env.TYPESENSE_URL ?? 'http://typesense:8108',
     typesenseApiKey: process.env.TYPESENSE_API_KEY ?? '',

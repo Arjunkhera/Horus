@@ -805,4 +805,57 @@ describe('KubernetesVaultInfra', () => {
       expect(githubAuthHeaders(calls)).toContain('Bearer ghp_only_env');
     });
   });
+
+  // ── Enterprise GitHub host (githubApiHost / per-request gitApiHost) ──────────
+  describe('enterprise GitHub host', () => {
+    const GHE = 'https://github.intuit.com/api/v3';
+
+    it('targets the GHE API base (https://<host>/api/v3) for every GitHub call when githubApiHost is set', async () => {
+      const config = { ...baseConfig(), githubApiHost: 'github.intuit.com' };
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        [`GET ${GHE}/repos/testorg/vault-acme_notes`]: { status: 404 },
+        [`GET ${GHE}/user`]: GH_USER_ORG_OWNER,
+        [`POST ${GHE}/orgs/testorg/repos`]: { status: 201, body: {} },
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(config, fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      // No call should touch the public api.github.com.
+      expect(calls.some((c) => c.url.includes('api.github.com'))).toBe(false);
+      expect(calls[1].url).toBe(`${GHE}/repos/testorg/vault-acme_notes`);
+      expect(calls[2].url).toBe(`${GHE}/user`);
+      expect(calls[3].url).toBe(`${GHE}/orgs/testorg/repos`);
+    });
+
+    it('honors a per-request gitApiHost override over the operator-wide default', async () => {
+      // Operator default is public github.com; the payload pins this vault to GHE.
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        [`GET ${GHE}/repos/testorg/vault-acme_notes`]: { status: 404 },
+        [`GET ${GHE}/user`]: GH_USER_IS_TESTORG,
+        [`POST ${GHE}/user/repos`]: { status: 201, body: {} },
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(baseConfig(), fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git', { gitApiHost: 'github.intuit.com' });
+      expect(calls.some((c) => c.url.includes('api.github.com'))).toBe(false);
+      expect(calls[3].url).toBe(`${GHE}/user/repos`);
+    });
+
+    it('treats githubApiHost "github.com" as the public api.github.com base', async () => {
+      const config = { ...baseConfig(), githubApiHost: 'github.com' };
+      const { fetch, calls } = createFake({
+        [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
+        'GET https://api.github.com/user': GH_USER_ORG_OWNER,
+        'POST https://api.github.com/orgs/testorg/repos': { status: 201, body: {} },
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
+      });
+      const infra = new KubernetesVaultInfra(config, fetch);
+      await infra.ensureGitBackingStore('acme/notes', 'git');
+      expect(calls[1].url).toBe('https://api.github.com/repos/testorg/vault-acme_notes');
+      expect(calls[3].url).toBe('https://api.github.com/orgs/testorg/repos');
+    });
+  });
 });

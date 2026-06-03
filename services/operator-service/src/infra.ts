@@ -18,6 +18,13 @@ export interface GitBackingStoreOpts {
   gitOrg?: string;
   /** Explicit repo name. Defaults to `vault-${namespaceSlug(namespace)}`. */
   repoName?: string;
+  /**
+   * GitHub API hostname for this vault's backing repo. Empty or "github.com" →
+   * public api.github.com; a GHE hostname (e.g. "github.intuit.com") targets
+   * "https://<host>/api/v3". Overrides the operator-wide GITHUB_API_HOST default,
+   * letting a single control plane back vaults on different hosts.
+   */
+  gitApiHost?: string;
 }
 
 export interface VaultInfra {
