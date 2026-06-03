@@ -130,6 +130,16 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "knowledge_list_vaults",
+    description:
+      "List every vault available on the control plane (namespace, whether it is the " +
+      "default, and page count where known). Use this to discover which vaults exist " +
+      "before scoping a read with the `vault` parameter — including vaults provisioned " +
+      "after your connection was set up. Reads are not vault-scoped per user, so every " +
+      "listed vault is readable.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "knowledge_search",
     description:
       "Search the knowledge base using hybrid search (keyword + semantic + reranking). " +
@@ -458,6 +468,9 @@ function buildServer(): Server {
             include_full: toolArgs.include_full ?? false,
             mode: toolArgs.mode ?? "search",
           }, toolArgs as Record<string, unknown>));
+          break;
+        case "knowledge_list_vaults":
+          result = await callKnowledgeAPIGet("/vaults");
           break;
         case "knowledge_search":
           result = await callKnowledgeAPI("/search", withVault({
