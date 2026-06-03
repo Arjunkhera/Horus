@@ -37,12 +37,16 @@ resources:
 # operator-service re-pinned to sha-6e608ea: configurable GitHub API base
 # (GITHUB_API_HOST + per-request git_api_host) so the control plane can back
 # vaults on GitHub Enterprise hosts, not just api.github.com (bug e4904a31, PR #435).
+# vault-router re-pinned to sha-db78440: add GET/POST /vaults discovery endpoint
+# backed by the live VaultRegistry, so clients can enumerate every served vault at
+# call time (incl. vaults provisioned after their bundle was minted). Surfaced as
+# the knowledge_list_vaults MCP tool (bug 281e98ed, Vault V3, PR #436).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
     newTag: sha-253778a
   - name: ghcr.io/arjunkhera/horus/vault-router
-    newTag: sha-5d1f953
+    newTag: sha-db78440
   - name: ghcr.io/arjunkhera/horus/operator-service
     newTag: sha-6e608ea
