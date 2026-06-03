@@ -377,21 +377,30 @@ export class WorkspaceCreator {
         console.warn(`[Forge] Warning: Could not write .cursor/mcp.json: ${err.message}`);
       }
 
-      // Step 8b: Emit PreToolUse hook to block edits to source repos.
-      // Uses a git-based heuristic — no hardcoded paths needed. The guard script
-      // blocks edits to any git repo that isn't inside a Horus workspace directory.
-      try {
-        await emitPreToolUseHook(workspacePath, hostWorkspacePath);
-      } catch (err: any) {
-        console.warn(`[Forge] Warning: Could not emit PreToolUse hook: ${err.message}`);
-      }
+      // Step 8b/8c: Source-repo guard hooks (Edit/Write/Bash and Read/Glob/Grep).
+      //
+      // TEMPORARILY DISABLED during the repo-local-worktree transition. While we
+      // move away from the managed-clone + forge_develop model toward running
+      // agents directly inside the user's own repo (native git worktrees), these
+      // guards get in the way. They are gated behind FORGE_SOURCE_REPO_GUARDS so
+      // they can be restored later without a code change — set the env var to
+      // "1"/"true" to re-enable. (Restore default: flip the guard below.)
+      const guardsEnabled = /^(1|true|yes)$/i.test(process.env.FORGE_SOURCE_REPO_GUARDS ?? '');
+      if (guardsEnabled) {
+        // Uses a git-based heuristic — no hardcoded paths needed. The guard script
+        // blocks edits to any git repo that isn't inside a Horus workspace directory.
+        try {
+          await emitPreToolUseHook(workspacePath, hostWorkspacePath);
+        } catch (err: any) {
+          console.warn(`[Forge] Warning: Could not emit PreToolUse hook: ${err.message}`);
+        }
 
-      // Step 8c: Emit PreToolUse hook to block Read/Glob/Grep on source repos.
-      // Allows reads inside workspaces, sessions, and the managed clone pool (repos).
-      try {
-        await emitReadGuardHook(workspacePath, hostWorkspacePath);
-      } catch (err: any) {
-        console.warn(`[Forge] Warning: Could not emit read guard hook: ${err.message}`);
+        // Allows reads inside workspaces, sessions, and the managed clone pool (repos).
+        try {
+          await emitReadGuardHook(workspacePath, hostWorkspacePath);
+        } catch (err: any) {
+          console.warn(`[Forge] Warning: Could not emit read guard hook: ${err.message}`);
+        }
       }
 
       // Step 9: Emit environment variables file

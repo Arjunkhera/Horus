@@ -49,7 +49,9 @@ export class GlobalClaudeCodeStrategy implements EmitStrategy {
         sourceRef: ref,
         operation: 'create',
       });
-    } else if (ref.type === 'agent') {
+    } else if (ref.type === 'agent' || ref.type === 'persona') {
+      // Agents and personas both land in ~/.claude/agents/ — a persona is a
+      // character profile that Claude Code can load as a subagent.
       const agentPath = path.join(this.claudeDir, 'agents', `${ref.id}.md`);
       operations.push({
         path: agentPath,
@@ -58,7 +60,6 @@ export class GlobalClaudeCodeStrategy implements EmitStrategy {
         operation: 'create',
       });
     }
-    // Personas: no-op for global strategy — personas are workspace-scoped
-    // Plugins: dependencies handle skill/agent emission
+    // Plugins / workspace-configs: their dependencies handle skill/agent emission
   }
 }
