@@ -45,7 +45,9 @@ function renderMarkdown(src, onWikiClick, resolveTitle) {
     // Handle wiki-links and basic formatting; return array of nodes
     const parts = [];
     let last = 0;
-    const re = /\[\[([^\]]+)\]\]|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*/g;
+    // Groups: 1=wiki-link, 2/3=markdown-link text/url, 4=code, 5=bold, 6=italic, 7=bare url.
+    // Wiki-link alternative must precede the markdown-link alternative so `[[x]]` wins over `[x]`.
+    const re = /\[\[([^\]]+)\]\]|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*|(https?:\/\/[^\s<)]+)/g;
     let m;
     while ((m = re.exec(text)) !== null) {
       if (m.index > last) parts.push(text.slice(last, m.index));
@@ -65,11 +67,23 @@ function renderMarkdown(src, onWikiClick, resolveTitle) {
           </span>
         );
       } else if (m[2] !== undefined) {
-        parts.push(<code key={k()}>{m[2]}</code>);
-      } else if (m[3] !== undefined) {
-        parts.push(<strong key={k()}>{m[3]}</strong>);
+        parts.push(
+          <a key={k()} href={m[3]} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+            {m[2]}
+          </a>
+        );
       } else if (m[4] !== undefined) {
-        parts.push(<em key={k()}>{m[4]}</em>);
+        parts.push(<code key={k()}>{m[4]}</code>);
+      } else if (m[5] !== undefined) {
+        parts.push(<strong key={k()}>{m[5]}</strong>);
+      } else if (m[6] !== undefined) {
+        parts.push(<em key={k()}>{m[6]}</em>);
+      } else if (m[7] !== undefined) {
+        parts.push(
+          <a key={k()} href={m[7]} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+            {m[7]}
+          </a>
+        );
       }
       last = m.index + m[0].length;
     }
