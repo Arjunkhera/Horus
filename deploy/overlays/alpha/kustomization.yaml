@@ -45,11 +45,15 @@ resources:
 # derive the clone remote + credential-store host from GITHUB_API_HOST, so the
 # control plane can clone/serve vaults backed on GitHub Enterprise, completing the
 # operator-service GHE fix (bug e4904a31, PR #439).
+# vault re-pinned to sha-1e563e0: principal-gate WRITE endpoints only, not reads —
+# fixes non-default-vault reads 401'ing at the writer pool (vault-router routes
+# their reads to the writer, which mounts the principal JWK), which surfaced as
+# empty search for provisioned vaults like vault-office (bug 281e98ed, PR #442).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-47287c6
+    newTag: sha-1e563e0
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-db78440
   - name: ghcr.io/arjunkhera/horus/operator-service
