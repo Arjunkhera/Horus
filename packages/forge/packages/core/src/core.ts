@@ -1033,8 +1033,12 @@ export class ForgeCore {
    */
   async installGlobal(ref: string): Promise<GlobalInstallReport> {
     const parsed = this.parseRef(ref);
-    if (parsed.type !== 'plugin') {
-      throw new ForgeError('INVALID_REF', `Global install only supports plugins, got '${parsed.type}'`, 'Use format: plugin:my-plugin@1.0.0');
+    // Global install accepts any artifact type. Plugins and workspace-configs
+    // emit their bundled skills/agents (via resolved deps); bare skills/agents/
+    // personas emit themselves. Only plugins carry global-rules.md.
+    const installableTypes = ['plugin', 'workspace-config', 'skill', 'agent', 'persona'];
+    if (!installableTypes.includes(parsed.type)) {
+      throw new ForgeError('INVALID_REF', `Global install does not support type '${parsed.type}'`, `Use one of: ${installableTypes.join(', ')}`);
     }
 
     const registry = await this.buildRegistry();
@@ -1055,9 +1059,9 @@ export class ForgeCore {
       filesWritten.push(op.path);
     }
 
-    // Read plugin's global-rules.md resource file
+    // Read plugin's global-rules.md resource file (plugins only)
     let claudeMdUpdated = false;
-    const adapter = await this.findAdapterWithResource(registry, parsed);
+    const adapter = parsed.type === 'plugin' ? await this.findAdapterWithResource(registry, parsed) : null;
     if (adapter) {
       const rulesContent = await adapter.readResourceFile!('plugin', parsed.id, 'resources/rules/global-rules.md');
       if (rulesContent) {

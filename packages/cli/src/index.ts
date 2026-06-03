@@ -17,6 +17,7 @@ import { helpCommand } from './commands/help.js';
 import { guideCommand } from './commands/guide.js';
 import { repoCommand } from './commands/repo.js';
 import { operatorCommand } from './commands/operator.js';
+import { globalCommand } from './commands/global.js';
 import { CLI_VERSION } from './lib/constants.js';
 
 const program = new Command();
@@ -42,6 +43,7 @@ program.addCommand(helpCommand);
 program.addCommand(guideCommand);
 program.addCommand(repoCommand);
 program.addCommand(operatorCommand);
+program.addCommand(globalCommand);
 
 // Global error handling
 program.exitOverride();

@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import { execa } from 'execa';
 import { loadConfig, type Config } from '../lib/config.js';
 import { detectRuntime } from '../lib/runtime.js';
+import { syncGlobalArtifacts, resolveGlobalRefs } from '../lib/global-artifacts.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -259,32 +260,32 @@ async function fetchLatestSkillBody(controlPlaneUrl: string, id: SkillId): Promi
 }
 
 async function syncSkillsFromRegistry(controlPlaneUrl: string): Promise<void> {
-  const home = homedir();
-  const skillsBase = join(home, '.claude', 'skills');
-  let synced = 0;
-  const failed: string[] = [];
+  // Install the default skill set ∪ the user's global manifest (skills, agents,
+  // and the expanded contents of any plugins / workspace-configs they added via
+  // `horus global install`).
+  const refs = resolveGlobalRefs();
+  const results = await syncGlobalArtifacts(controlPlaneUrl, refs);
 
-  for (const id of GLOBAL_SKILLS) {
-    try {
-      const body = await fetchLatestSkillBody(controlPlaneUrl, id);
-      if (!body) {
-        failed.push(id);
-        continue;
-      }
-      const destDir = join(skillsBase, id);
-      mkdirSync(destDir, { recursive: true });
-      writeFileSync(join(destDir, 'SKILL.md'), body, 'utf-8');
-      synced++;
-    } catch {
-      failed.push(id);
+  let skills = 0;
+  let agents = 0;
+  const failed: string[] = [];
+  for (const r of results) {
+    if (r.error || r.emitted.length === 0) {
+      failed.push(r.ref);
+      continue;
+    }
+    for (const e of r.emitted) {
+      if (e.type === 'skill') skills++;
+      else agents++; // agent + persona both land in ~/.claude/agents/
     }
   }
 
+  const summary = `✔ Synced ${skills} skills` + (agents > 0 ? ` and ${agents} agents` : '') +
+    ` from the control plane`;
   if (failed.length === 0) {
-    console.log(chalk.green(`✔ Synced ${synced} global skills from the control plane`));
+    console.log(chalk.green(summary));
   } else {
-    console.log(chalk.yellow(`✔ Synced ${synced} global skills from the control plane`) +
-      chalk.dim(` (failed: ${failed.join(', ')})`));
+    console.log(chalk.yellow(summary) + chalk.dim(` (failed: ${failed.join(', ')})`));
   }
 }
 
@@ -474,10 +475,10 @@ export async function runConnect(
   // Sync horus-core skills (only when claude-code is a target)
   if (targets.includes('claude-code')) {
     if (connectedMode) {
-      const skillsSpinner = ora('Syncing horus-core skills from the control plane...').start();
+      const skillsSpinner = ora('Syncing global skills & agents from the control plane...').start();
       try {
         await syncSkillsFromRegistry(config.control_plane_url!);
-        skillsSpinner.succeed('horus-core skills synced to ~/.claude/skills/');
+        skillsSpinner.succeed('Global skills & agents synced to ~/.claude/');
       } catch (error) {
         skillsSpinner.warn('Could not sync skills from the control plane');
         console.log(chalk.dim((error as Error).message));
