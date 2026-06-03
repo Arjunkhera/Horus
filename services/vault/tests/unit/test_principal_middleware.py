@@ -74,10 +74,16 @@ def test_verifier_allows_within_clock_skew(keypair):
 def _app_with_principal(pub_jwk):
     app = FastAPI()
 
-    @app.get("/protected")
-    async def protected(request: Request):
+    # /write-page is in WRITE_PATHS → principal-gated. /search and /health are
+    # reads → never gated (the design contract; see PrincipalMiddleware).
+    @app.get("/write-page")
+    async def write_page(request: Request):
         p = request.state.principal
         return {"user": p.user, "tenant": p.tenant, "role": p.role}
+
+    @app.get("/search")
+    async def search():
+        return {"results": []}
 
     @app.get("/health")
     async def health():
@@ -87,20 +93,29 @@ def _app_with_principal(pub_jwk):
     return app
 
 
-def test_middleware_rejects_missing_header(keypair):
+def test_middleware_rejects_missing_header_on_write(keypair):
     _, pub_jwk = keypair
     client = TestClient(_app_with_principal(pub_jwk))
-    res = client.get("/protected")
+    res = client.get("/write-page")
     assert res.status_code == 401
     assert res.json()["error"]["code"] == "UNAUTHORIZED"
 
 
-def test_middleware_allows_valid_token(keypair):
+def test_middleware_allows_valid_token_on_write(keypair):
     priv_pem, pub_jwk = keypair
     client = TestClient(_app_with_principal(pub_jwk))
-    res = client.get("/protected", headers={"X-Horus-Principal": _mint(priv_pem)})
+    res = client.get("/write-page", headers={"X-Horus-Principal": _mint(priv_pem)})
     assert res.status_code == 200
     assert res.json() == {"user": "alice", "tenant": "acme", "role": "admin"}
+
+
+def test_middleware_allows_read_path_without_token(keypair):
+    """Reads are not principal-gated — the multi-vault read fix (bug 281e98ed)."""
+    _, pub_jwk = keypair
+    client = TestClient(_app_with_principal(pub_jwk))
+    res = client.get("/search")  # no header
+    assert res.status_code == 200
+    assert res.json() == {"results": []}
 
 
 def test_middleware_skips_health(keypair):
