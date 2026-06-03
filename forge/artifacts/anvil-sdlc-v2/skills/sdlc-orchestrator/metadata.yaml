@@ -1,0 +1,18 @@
+id: sdlc-orchestrator
+name: SDLC Orchestrator
+version: 3.0.0
+description: Conductor of the repo-local SDLC suite. Routes plan→build→verify→doc→ship for one
+  unit of work inside a native git worktree. Provides cross-project dashboards, triage, search,
+  and release management. No forge_develop, no Forge workspaces or sessions.
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - orchestrator
+  - dashboard
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

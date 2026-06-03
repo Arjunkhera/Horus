@@ -1,0 +1,19 @@
+id: sdlc-test-suite
+name: Test Suite
+version: 3.0.0
+description: "Comprehensive testing pipeline — repo-local, no forge_develop, no Forge workspaces or
+  sessions. Runs unit, integration, refactor-verification, and product-level tests inside an existing
+  native git worktree. Delegates log triage to Sonnet subagents."
+type: agent
+rootSkill: sdlc-tester
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - testing
+  - regression
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

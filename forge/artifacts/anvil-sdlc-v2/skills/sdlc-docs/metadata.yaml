@@ -1,0 +1,19 @@
+id: sdlc-docs
+name: SDLC Documentation
+version: 3.0.0
+description: Documentation keeper — repo-local, no forge_develop/workspaces/sessions. ADRs, API
+  docs, guides, Vault ingestion via write-path pipeline, and documentation health audits using
+  native git worktrees.
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - docs
+  - documentation
+  - adr
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

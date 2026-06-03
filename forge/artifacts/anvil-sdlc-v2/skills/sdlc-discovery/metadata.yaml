@@ -1,0 +1,20 @@
+id: sdlc-discovery
+name: SDLC Discovery
+version: 3.0.0
+description: Facilitates unstructured requirements exploration before planning using
+  the repo-local model (native git worktrees, no forge_develop/workspaces/sessions).
+  Uses persona Agent Teams when personas are available in Anvil, or solo facilitation
+  otherwise. Conversation-state is scoped by repo name, not workspace.
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - discovery
+  - requirements
+  - personas
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

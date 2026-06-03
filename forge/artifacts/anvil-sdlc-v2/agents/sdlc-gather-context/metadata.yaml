@@ -1,0 +1,20 @@
+id: sdlc-gather-context
+name: Gather Context
+version: 3.0.0
+description: Deep research across Vault, Anvil, and code using the repo-local model
+  (native git worktrees, no forge_develop/workspaces/sessions). Multi-source search,
+  cross-referencing, and synthesized briefings. Standalone or as first step in other
+  subagents. Code inspection delegates to a Sonnet subagent briefed with the worktree path.
+type: agent
+rootSkill: sdlc-discovery
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - research
+  - context
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

@@ -1,0 +1,19 @@
+id: sdlc-developer
+name: SDLC Developer
+version: 3.0.0
+description: Implementation engine. Plan, approve, and implement work items with a
+  test-first + green-gate sdlc-tester bracket, Vault context, and native git
+  worktrees for isolation. Repo-local — no forge_develop, no Forge workspaces,
+  no Forge sessions.
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - developer
+  - implementation
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

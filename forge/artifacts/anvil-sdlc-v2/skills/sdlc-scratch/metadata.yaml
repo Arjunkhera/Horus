@@ -1,0 +1,19 @@
+id: sdlc-scratch
+name: SDLC Scratch / Journal
+version: 3.0.0
+description: Append-only journal system — repo-local, no forge_develop/workspaces/sessions. Three
+  levels (global, project, work-item). Captures thoughts, decisions, learnings with tagged entries
+  using native git worktrees for isolation. Supports promotion to work items.
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - scratch
+  - journal
+  - notes
+  - repo-local
+  - worktree
+dependencies: {}
+files: []

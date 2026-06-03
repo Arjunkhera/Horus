@@ -1,0 +1,20 @@
+id: sdlc-reviewer
+name: SDLC Reviewer
+version: 3.0.0
+description: Code reviewer and PR manager. Reviews implementations against specs,
+  plans, and conventions. Creates PRs via standard git/gh commands with full
+  context. Repo-local — no forge_develop, no Forge workspaces, no Forge
+  sessions; operates inside an existing native git worktree ($WT).
+type: skill
+author: Arjun Khera
+license: MIT
+tags:
+  - sdlc
+  - horus
+  - reviewer
+  - code-review
+  - pr
+  - repo-local
+  - worktree
+dependencies: {}
+files: []
