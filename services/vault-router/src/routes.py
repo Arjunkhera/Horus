@@ -108,7 +108,10 @@ async def registry_status(
 
 # ── Vault discovery ─────────────────────────────────────────────────────────
 
-@router.get("/vaults")
+# GET for direct/curl/ops use; POST so the in-process MCP adapters (vault-mcp,
+# horus-ui's vendored vault-local-mcp), which forward every tool call as a POST
+# to /api/v1/vault/<path>, can reach it too.
+@router.api_route("/vaults", methods=["GET", "POST"])
 async def list_vaults(
     settings: SettingsDepends,
     uuid_registry: UUIDRegistryDepends,
