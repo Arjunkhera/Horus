@@ -53,6 +53,11 @@ export GW_HOST="horus.example.com"           # public hostname for the horus-ser
 export KNOWLEDGE_REPO="your-org/horus-knowledge"     # git repo the Vault writer owns
 export FORGE_BUCKET="your-org-forge-registry"        # S3 bucket for Forge artifacts
 export AWS_REGION="us-east-1"                         # your region
+
+# ── GitHub host (leave UNSET for public github.com) ──────────────────────────
+# Set ONLY when your backing repos live on GitHub Enterprise. Bare hostname, no
+# scheme/path — e.g. github.acme.com. See §GitHub Enterprise below.
+export GH_API_HOST=""                                # e.g. github.acme.com (empty → github.com)
 ```
 
 | Variable | What it is | Where it shows up |
@@ -63,6 +68,7 @@ export AWS_REGION="us-east-1"                         # your region
 | `GW_HOST` | public Ingress hostname for `horus-service` | Ingress, DNS, smoke tests, `--cp-url` |
 | `KNOWLEDGE_REPO` | git repo the Vault writer pushes to / readers clone | `vault-secrets.GITHUB_REPO` |
 | `FORGE_BUCKET` | object-store bucket for Forge artifacts | `forge-registry-secrets` |
+| `GH_API_HOST` | GitHub host for backing repos — **empty for public github.com**; a GHE hostname for enterprise | §GitHub Enterprise (`operator-service-config` + `vault-config`) |
 
 > The maintainer's own reference cluster values (the live alpha instance) are kept in
 > private ops notes, **not** in this runbook — so this procedure is safe to run as-is
@@ -173,7 +179,7 @@ Secrets are committed **encrypted** as `*.sealed.yaml` under `deploy/secrets/`; 
 
 | SealedSecret | Holds |
 |--------------|-------|
-| `vault-secrets` | `NEO4J_AUTH`, `NEO4J_PASSWORD`, `TYPESENSE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_REPO=$KNOWLEDGE_REPO` |
+| `vault-secrets` | `NEO4J_AUTH`, `NEO4J_PASSWORD`, `TYPESENSE_API_KEY`, `GITHUB_TOKEN`, `GITHUB_REPO=$KNOWLEDGE_REPO` (for GHE, `GITHUB_TOKEN` must be a token on that enterprise host — see §GitHub Enterprise) |
 | `forge-registry-secrets` | object-store access key id/secret for `$FORGE_BUCKET` |
 | `backup-credentials` | cloud creds + `BACKUP_BUCKET` |
 | `grafana-admin` | Grafana admin password |
@@ -189,6 +195,36 @@ deployment; do not copy another environment's secrets.
 
 **Gate 2:** `deploy/secrets/kustomization.yaml` references the four non-principal
 sealed secrets; principal secrets added in §4.
+
+### GitHub Enterprise (skip for public github.com)
+
+By default the control plane uses public GitHub (`github.com` / `api.github.com`).
+To back vaults on a **GitHub Enterprise** host (`$GH_API_HOST`, e.g. `github.acme.com`),
+set **`GITHUB_API_HOST=$GH_API_HOST`** (the bare hostname — the operator appends
+`/api/v3` for the API; the vault uses it directly as the git clone host). It must be
+set on **both** services or provisioning succeeds but cloning fails:
+
+| Service | Set `GITHUB_API_HOST` in | Why |
+|---------|--------------------------|-----|
+| `operator-service` | `operator-service-config` ConfigMap (it `envFrom`s this; it does **not** read `vault-secrets`) | repo create/lookup hits `https://$GH_API_HOST/api/v3` |
+| `vault` (reader + writer) | `vault-config` ConfigMap **or** `vault-secrets` (it `envFrom`s both) | clone remote + git credential-store entry are keyed to `$GH_API_HOST` |
+
+Set these in **your overlay** (don't edit `deploy/base`) — patch the two ConfigMaps,
+e.g. add `GITHUB_API_HOST: github.acme.com` to each. Also ensure:
+
+- **`GITHUB_TOKEN`** in `vault-secrets` (and the operator's mounted token) is a PAT on
+  **that** enterprise host — a github.com token will not authenticate against GHE.
+- `GITHUB_REPO` / per-vault `git_org` accounts exist on the enterprise host.
+
+Leaving `GITHUB_API_HOST` unset (or `github.com`) preserves public-GitHub behavior.
+Background: bug `e4904a31`, PRs #435 (operator API base) and #439 (vault clone host).
+A single instance uses one token + one host, so per-vault *different* hosts are not
+supported.
+
+> **Gate 2b (GHE only):** after sync, `kubectl -n horus-system exec vault-writer-0 --
+> cat /home/appuser/.git-credentials` shows `oauth2:***@$GH_API_HOST` (not github.com),
+> and `kubectl -n horus-system exec operator-service-0 -- env | grep GITHUB_API_HOST`
+> returns your host.
 
 ---
 
