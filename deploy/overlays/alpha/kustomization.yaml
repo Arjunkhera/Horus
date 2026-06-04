@@ -49,6 +49,11 @@ resources:
 # fixes non-default-vault reads 401'ing at the writer pool (vault-router routes
 # their reads to the writer, which mounts the principal JWK), which surfaced as
 # empty search for provisioned vaults like vault-office (bug 281e98ed, PR #442).
+# operator-service re-pinned to sha-8ea815b: adopt an existing backing store —
+# vault_attach now derives git_repo deterministically and writes a COMPLETE,
+# idempotent registry entry (new `horus operator vault adopt` CLI alias), so
+# half-provisioned vaults like vault-office are recoverable without manual
+# ConfigMap surgery (story 94099e71, bug 281e98ed, PR #446).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
@@ -57,4 +62,4 @@ images:
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-db78440
   - name: ghcr.io/arjunkhera/horus/operator-service
-    newTag: sha-6e608ea
+    newTag: sha-8ea815b
