@@ -22,6 +22,7 @@ import {
   type RegistryFileEntry,
   type GitBackingStoreOpts,
 } from './infra.js';
+import { type RegistryEntryOpts } from './model.js';
 import { collectionCreateBody } from '@horus/search';
 
 export interface KubernetesVaultInfraConfig {
@@ -94,7 +95,9 @@ export class ConfigError extends Error {
 export class KubernetesVaultInfra implements VaultInfra {
   /**
    * Per-instance record of namespace → resolved "org/repoName" path.
-   * Populated in ensureGitBackingStore; consumed in ensureRegistryEntry.
+   * Populated in ensureGitBackingStore; used as an override cache in
+   * ensureRegistryEntry (but ensureRegistryEntry no longer depends on it —
+   * it derives the path directly via resolveRepoPath).
    */
   private readonly gitRepos = new Map<string, string>();
 
@@ -154,6 +157,49 @@ export class KubernetesVaultInfra implements VaultInfra {
     return login;
   }
 
+  // ── Repo path resolution ──────────────────────────────────────────────────
+
+  /**
+   * Derives the canonical "org/name" repo path from opts and config.
+   *
+   *   org  = opts?.gitOrg ?? config.githubOwner  (throws ConfigError if empty)
+   *   name = opts?.repoName ?? `vault-${namespaceSlug(namespace)}`
+   *
+   * This is the single source of truth used by both ensureGitBackingStore
+   * (create-time) and ensureRegistryEntry (adopt/attach path). Keeping the
+   * derivation identical in both call sites guarantees idempotent round-trips.
+   */
+  private resolveRepoPath(namespace: string, opts?: RegistryEntryOpts): string {
+    // If explicit opts are given, use them (overrides everything).
+    if (opts?.gitOrg !== undefined || opts?.repoName !== undefined) {
+      const org = opts.gitOrg ?? this.config.githubOwner;
+      if (!org || org.trim() === '') {
+        throw new ConfigError(
+          'GITHUB_OWNER is not configured and no git_org was provided in the payload. ' +
+            'Set the GITHUB_OWNER env var or pass git_org in the vault_create payload.',
+        );
+      }
+      const slug = namespaceSlug(namespace);
+      const name = opts.repoName ?? `vault-${slug}`;
+      return `${org}/${name}`;
+    }
+
+    // If ensureGitBackingStore already ran for this namespace (vault_create path),
+    // reuse its cached result so the registry entry is consistent.
+    const cached = this.gitRepos.get(namespace);
+    if (cached) return cached;
+
+    // vault_attach path or direct call: derive from config.githubOwner.
+    const org = this.config.githubOwner;
+    if (!org || org.trim() === '') {
+      throw new ConfigError(
+        'GITHUB_OWNER is not configured and no git_org was provided in the payload. ' +
+          'Set the GITHUB_OWNER env var or pass git_org in the vault_create payload.',
+      );
+    }
+    const slug = namespaceSlug(namespace);
+    return `${org}/vault-${slug}`;
+  }
   // ── Registry pre-flight ───────────────────────────────────────────────────
 
   /** Returns true if the namespace key already exists in the vault-registry ConfigMap. */
@@ -187,18 +233,11 @@ export class KubernetesVaultInfra implements VaultInfra {
     _adapter: string,
     opts?: GitBackingStoreOpts,
   ): Promise<void> {
-    const slug = namespaceSlug(namespace);
-
-    // Resolve org and name — fail fast on empty owner.
-    const org = opts?.gitOrg ?? this.config.githubOwner;
-    if (!org || org.trim() === '') {
-      throw new ConfigError(
-        'GITHUB_OWNER is not configured and no git_org was provided in the payload. ' +
-          'Set the GITHUB_OWNER env var or pass git_org in the vault_create payload.',
-      );
-    }
-    const name = opts?.repoName ?? `vault-${slug}`;
-    const repoPath = `${org}/${name}`;
+    // Resolve org, name, repoPath — fail fast on empty owner.
+    const repoPath = this.resolveRepoPath(namespace, opts);
+    const parts = repoPath.split('/');
+    const org = parts[0];
+    const name = parts.slice(1).join('/');
 
     // ── Registry-level collision check ────────────────────────────────────
     // Read the current registry and verify the resolved path is not already
@@ -357,19 +396,48 @@ export class KubernetesVaultInfra implements VaultInfra {
    * step in vaultCreateHandler (via isNamespaceRegistered) before this step
    * runs. This method simply writes the entry, relying on the Provisioner's
    * steps ledger to ensure it runs at most once per request.
+   *
+   * git_repo is derived via resolveRepoPath(namespace, opts) when possible.
+   * If the owner cannot be resolved (no opts.gitOrg and no config.githubOwner),
+   * git_repo is OMITTED from the entry rather than throwing — graceful degradation
+   * for bare vault_attach with no git fields and an empty GITHUB_OWNER env var.
+   * Non-ConfigError failures are still re-thrown.
+   *
+   * NOTE: resolveRepoPath still throws ConfigError in ensureGitBackingStore
+   * (the create path), where a missing owner is a hard error. Only this
+   * registry-write call site degrades gracefully.
    */
-  async ensureRegistryEntry(namespace: string, _endpoint: string): Promise<void> {
+  async ensureRegistryEntry(
+    namespace: string,
+    _endpoint: string,
+    opts?: RegistryEntryOpts,
+  ): Promise<void> {
     const slug = namespaceSlug(namespace);
     const doc = await this.readConfigMap();
+
+    // Attempt to derive git_repo deterministically. If the owner is
+    // unresolvable (ConfigError), omit git_repo rather than failing the
+    // entire registry write — this preserves the pre-change behavior for
+    // bare vault_attach with no git fields and empty GITHUB_OWNER.
+    let gitRepo: string | undefined;
+    try {
+      gitRepo = this.resolveRepoPath(namespace, opts);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        // Owner unresolvable — degrade gracefully: omit git_repo field.
+        gitRepo = undefined;
+      } else {
+        throw err;
+      }
+    }
 
     const entry: RegistryFileEntry = {
       reader_endpoint: this.config.readerEndpoint,
       writer_endpoint: this.config.writerEndpoint,
       typesense_collection: slug,
       neo4j_db: slug,
+      ...(gitRepo !== undefined ? { git_repo: gitRepo } : {}),
     };
-    const gitRepo = this.gitRepos.get(namespace);
-    if (gitRepo) entry.git_repo = gitRepo;
 
     doc.vaults[namespace] = entry;
     await this.patchConfigMap(doc);

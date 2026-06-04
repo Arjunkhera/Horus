@@ -68,3 +68,16 @@ export class InvalidTransitionError extends Error {
 export function terminalSuccess(kind: RequestKind): RequestStatus {
   return kind === 'vault_delete' || kind === 'teardown' ? 'torn_down' : 'provisioned';
 }
+
+/**
+ * Options for deriving a registry entry's git backing store reference.
+ * Used by ensureRegistryEntry (and extracted from ensureGitBackingStore opts).
+ */
+export interface RegistryEntryOpts {
+  /** GitHub org/owner for the backing repo. Defaults to config.githubOwner. */
+  gitOrg?: string;
+  /** Explicit repo name. Defaults to `vault-${namespaceSlug(namespace)}`. */
+  repoName?: string;
+  /** GitHub API hostname for this vault's backing repo. */
+  gitApiHost?: string;
+}

@@ -135,21 +135,46 @@ export function vaultCreateHandler(infra: VaultInfra): KindHandler {
         },
         { name: 'ensure_typesense_collection', ensure: () => infra.ensureTypesenseCollection(ns) },
         { name: 'ensure_neo4j_database', ensure: () => infra.ensureNeo4jDatabase(ns) },
-        { name: 'ensure_registry_entry', ensure: () => infra.ensureRegistryEntry(ns, endpoint) },
+        { name: 'ensure_registry_entry', ensure: () => infra.ensureRegistryEntry(ns, endpoint, gitOpts) },
       ];
     },
   };
 }
 
-/** C2 vault attach: an existing vault — only the registry mapping is (re)ensured. */
+/**
+ * C2 vault attach: an existing vault — only the registry mapping is (re)ensured.
+ *
+ * Optional payload fields:
+ *   - git_org      {string} — GitHub org/owner for the backing repo.
+ *   - repo_name    {string} — explicit repo name.
+ *   - git_api_host {string} — GitHub API hostname override.
+ *
+ * These are passed as opts to ensureRegistryEntry so the registry entry includes
+ * the correct git_repo even when ensureGitBackingStore was not called (this is
+ * the vault_attach case — the repo already exists).
+ */
 export function vaultAttachHandler(infra: VaultInfra): KindHandler {
   return {
     steps: (req) => {
       const ns = String(req.payload.namespace);
+      const endpoint = vaultEndpoint(req.payload, ns);
+
+      // Resolve optional git_org / repo_name / git_api_host from payload.
+      const rawGitOrg = req.payload.git_org;
+      const rawRepoName = req.payload.repo_name;
+      const rawGitApiHost = req.payload.git_api_host;
+      const gitOrg = rawGitOrg != null ? String(rawGitOrg) : undefined;
+      const repoName = rawRepoName != null ? String(rawRepoName) : undefined;
+      const gitApiHost = rawGitApiHost != null ? String(rawGitApiHost) : undefined;
+
+      const opts = (gitOrg !== undefined || repoName !== undefined || gitApiHost !== undefined)
+        ? { gitOrg, repoName, gitApiHost }
+        : undefined;
+
       return [
         {
           name: 'ensure_registry_entry',
-          ensure: () => infra.ensureRegistryEntry(ns, vaultEndpoint(req.payload, ns)),
+          ensure: () => infra.ensureRegistryEntry(ns, endpoint, opts),
         },
       ];
     },
