@@ -146,7 +146,7 @@ function PageActions({ actions }) {
 }
 
 // ── Type ordering ────────────────────────────────────────────────
-const TYPE_ORDER = ['task', 'story', 'note', 'journal', 'project', 'area', 'bookmark', 'conversation-state', 'person', 'service', 'meeting'];
+const TYPE_ORDER = ['task', 'story', 'note', 'journal', 'project', 'area', 'bookmark', 'conversation-state', 'person', 'service', 'meeting', 'repo-profile', 'guide', 'concept', 'procedure', 'keystone', 'learning'];
 // Returns all types that have ≥1 note: known types first (TYPE_ORDER), then extras by count
 function activeTypes(counts) {
   const known = TYPE_ORDER.filter(t => counts[t] > 0);
@@ -157,7 +157,7 @@ function activeTypes(counts) {
 
 // ── Sidebar ──────────────────────────────────────────────────────
 const SIDE_LIMIT = 8; // static cap for Phase 1
-function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pinned, togglePin, lastSyncedAt, onRefresh }) {
+function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pinned, togglePin, lastSyncedAt, onRefresh, scope }) {
   const data = window.HORUS_DATA;
   const [ctxMenu, setCtxMenu] = uSp(null); // { id, x, y }
   const [deleteTarget, setDeleteTarget] = uSp(null);
@@ -197,6 +197,10 @@ function Sidebar({ recents, currentRoute, onNavigate, typeCounts, collapsed, pin
         setDeleteError('Delete failed. Please try again.');
       }
     }
+  }
+
+  if (scope === 'vault') {
+    return <VaultSidebar currentRoute={currentRoute} onNavigate={onNavigate} collapsed={collapsed} />;
   }
 
   if (collapsed) {
@@ -1154,7 +1158,7 @@ function TypePage({ type, onNavigate }) {
 }
 
 // ── Search palette ──────────────────────────────────────────────
-function SearchPalette({ onClose, onNavigate }) {
+function SearchPalette({ onClose, onNavigate, scope }) {
   const [q, setQ] = uSp('');
   const [debouncedQ, setDebouncedQ] = uSp('');
   const [filter, setFilter] = uSp(null);
@@ -1163,14 +1167,33 @@ function SearchPalette({ onClose, onNavigate }) {
   const data = window.HORUS_DATA;
   const HOOKS = window.HOOKS;
 
+  // Vault-scoped search state (used when scope === 'vault')
+  const [vaultSearchResults, setVaultSearchResults] = uSp([]);
+  const [vaultSearchLoading, setVaultSearchLoading] = uSp(false);
+
   // Debounce search query by 150ms
   uEp(() => {
     const t = setTimeout(() => setDebouncedQ(q), 150);
     return () => clearTimeout(t);
   }, [q]);
 
-  // Live search via Anvil using debounced query
-  const liveSearch = HOOKS ? HOOKS.useSearch(debouncedQ.trim(), filter, 12) : { data: null, loading: false };
+  // Live search via Anvil using debounced query (skip while in vault scope)
+  const anvilQuery = scope === 'vault' ? '' : debouncedQ.trim();
+  const liveSearch = HOOKS ? HOOKS.useSearch(anvilQuery, filter, 12) : { data: null, loading: false };
+
+  // Vault-scoped search: query the active vault via VaultClient when in vault scope
+  uEp(() => {
+    if (scope !== 'vault') { setVaultSearchResults([]); setVaultSearchLoading(false); return; }
+    const query = debouncedQ.trim();
+    if (!query) { setVaultSearchResults([]); setVaultSearchLoading(false); return; }
+    let cancelled = false;
+    setVaultSearchLoading(true);
+    const vault = (window.VAULT_STATE && window.VAULT_STATE.selectedVault) || '';
+    window.VaultClient.search({ query, vault, limit: 12 })
+      .then(res => { if (!cancelled) { setVaultSearchResults((res && res.results) || []); setVaultSearchLoading(false); } })
+      .catch(() => { if (!cancelled) { setVaultSearchResults([]); setVaultSearchLoading(false); } });
+    return () => { cancelled = true; };
+  }, [scope, debouncedQ]);
 
   uEp(() => {
     inputRef.current?.focus();
@@ -1180,6 +1203,15 @@ function SearchPalette({ onClose, onNavigate }) {
   }, []);
 
   const results = uMp(() => {
+    if (scope === 'vault') {
+      if (!q.trim()) return [];
+      return vaultSearchResults.map(r => ({
+        note: { id: r.id, type: r.type, title: r.title, tags: r.tags || [], modified: '', body: '' },
+        score: r.score || 0,
+        snippet: r.description || r.snippet || '',
+        isVault: true,
+      }));
+    }
     if (!q.trim()) {
       const r = JSON.parse(localStorage.getItem('horus:recents') || '[]')
         .map(id => data.byId[id]).filter(Boolean)
@@ -1196,11 +1228,11 @@ function SearchPalette({ onClose, onNavigate }) {
       }));
     }
     return data.search(q, filter).slice(0, 12);
-  }, [q, debouncedQ, filter, liveSearch.data]);
+  }, [q, debouncedQ, filter, liveSearch.data, scope, vaultSearchResults]);
 
   uEp(() => { setActive(0); }, [q, filter]);
 
-  function open(idx) { const r = results[idx]; if (!r) return; onNavigate({ kind: 'note', id: r.note.id }); onClose(); }
+  function open(idx) { const r = results[idx]; if (!r) return; if (r.isVault) { onNavigate({ kind: 'vault-page', id: r.note.id }); } else { onNavigate({ kind: 'note', id: r.note.id }); } onClose(); }
   function onKeyDown(e) {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(a + 1, results.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(0, a - 1)); }
@@ -1229,14 +1261,20 @@ function SearchPalette({ onClose, onNavigate }) {
           <span className="kbd">esc</span>
         </div>
         <div className="palette-filters">
-          <span className="filter-label">FILTER:</span>
-          <button className={`chip${filter === null ? ' active' : ''}`} onClick={() => setFilter(null)}>all</button>
-          {activeTypes(data.typeCounts()).map(t => (
-            <button key={t} className={`chip${filter === t ? ' active' : ''}`} onClick={() => setFilter(t)}>
-              <span className={`type-dot ${t}`} style={{ width: 6, height: 6, display: 'inline-block', borderRadius: '50%' }}></span>
-              {t}
-            </button>
-          ))}
+          {scope === 'vault' ? (
+            <span className="filter-label" style={{ color: 'var(--fg-3)' }}>Vault search{vaultSearchLoading ? ' …' : ''}</span>
+          ) : (
+            <>
+              <span className="filter-label">FILTER:</span>
+              <button className={`chip${filter === null ? ' active' : ''}`} onClick={() => setFilter(null)}>all</button>
+              {activeTypes(data.typeCounts()).map(t => (
+                <button key={t} className={`chip${filter === t ? ' active' : ''}`} onClick={() => setFilter(t)}>
+                  <span className={`type-dot ${t}`} style={{ width: 6, height: 6, display: 'inline-block', borderRadius: '50%' }}></span>
+                  {t}
+                </button>
+              ))}
+            </>
+          )}
         </div>
         <div className="palette-results">
           {results.length === 0 ? (
@@ -1267,4 +1305,384 @@ function SearchPalette({ onClose, onNavigate }) {
   );
 }
 
-Object.assign(window, { Sidebar, HomePage, NotePage, TagPage, TypePage, SearchPalette });
+Object.assign(window, { Sidebar, HomePage, NotePage, TagPage, TypePage, SearchPalette, VaultContentArea });
+
+
+// ── Vault types ───────────────────────────────────────────────────────────────
+// These map to the canonical page types in the Vault knowledge base.
+const VAULT_TYPES = ['repo-profile', 'guide', 'concept', 'procedure', 'keystone', 'learning'];
+const VAULT_MODES = ['reference', 'operational', 'keystone'];
+
+// ── Shared VAULT_STATE window object ─────────────────────────────────────────
+// Shared between VaultSidebar and VaultContentArea to avoid duplicate fetches.
+// Shape: { selectedVault, vaults, defaultVault, pages, loading, error }
+if (!window.VAULT_STATE) {
+  window.VAULT_STATE = {
+    selectedVault: '',
+    vaults: [],
+    defaultVault: '',
+    pages: [],
+    loading: false,
+    error: null,
+    listeners: [],
+    notify() { this.listeners.forEach(fn => fn()); },
+    subscribe(fn) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter(l => l !== fn); }; },
+  };
+}
+
+// ── VaultSidebar ─────────────────────────────────────────────────────────────
+function VaultSidebar({ currentRoute, onNavigate, collapsed }) {
+  const vs = window.VAULT_STATE;
+  const [, forceUpdate] = uSp(0);
+
+  // Subscribe to VAULT_STATE changes
+  uEp(() => vs.subscribe(() => forceUpdate(v => v + 1)), []);
+
+  // Load vaults once
+  uEp(() => {
+    if (vs.vaults.length > 0 || vs.loading) return;
+    vs.loading = true;
+    vs.notify();
+    window.VaultClient.listVaults()
+      .then(data => {
+        vs.vaults = data.vaults || [];
+        vs.defaultVault = data.default_vault || '';
+        if (!vs.selectedVault) vs.selectedVault = data.default_vault || (vs.vaults[0] && vs.vaults[0].namespace) || '';
+        vs.error = null;
+      })
+      .catch(err => { vs.error = err.message; })
+      .finally(() => { vs.loading = false; vs.notify(); });
+  }, []);
+
+  // Load pages when selectedVault changes (guarded against rapid-switch races)
+  uEp(() => {
+    if (!vs.selectedVault) return;
+    let cancelled = false;
+    const forVault = vs.selectedVault;
+    vs.pages = [];
+    vs.loading = true;
+    vs.notify();
+    window.VaultClient.listPages({ vault: forVault, limit: 200 })
+      .then(data => { if (cancelled || vs.selectedVault !== forVault) return; vs.pages = data.pages || []; vs.error = null; })
+      .catch(err => { if (cancelled || vs.selectedVault !== forVault) return; vs.error = err.message; })
+      .finally(() => { if (cancelled || vs.selectedVault !== forVault) return; vs.loading = false; vs.notify(); });
+    return () => { cancelled = true; };
+  }, [vs.selectedVault]);
+
+  function selectVault(namespace) {
+    vs.selectedVault = namespace;
+    vs.pages = [];
+    vs.notify();
+    onNavigate({ kind: 'vault-home', vault: namespace });
+  }
+
+  if (collapsed) {
+    return (
+      <aside className="side collapsed">
+        <div className="side-rail">
+          <button className="side-rail-btn" title="Vault home" onClick={() => onNavigate({ kind: 'vault-home', vault: vs.selectedVault })}>⬡</button>
+          {VAULT_TYPES.map(t => (
+            <button key={t} className="side-rail-btn" title={t} onClick={() => onNavigate({ kind: 'vault-type', vault: vs.selectedVault, type: t })}>
+              <span className={`type-dot ${t}`}></span>
+            </button>
+          ))}
+        </div>
+      </aside>
+    );
+  }
+
+  // Derive type counts and tag counts from pages
+  const typeCounts = {};
+  vs.pages.forEach(p => { if (p.type) typeCounts[p.type] = (typeCounts[p.type] || 0) + 1; });
+  const tagCounts = {};
+  vs.pages.forEach(p => (p.tags || []).forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+  const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  const activeVaultTypes = VAULT_TYPES.filter(t => typeCounts[t] > 0)
+    .concat(Object.keys(typeCounts).filter(t => typeCounts[t] > 0 && !VAULT_TYPES.includes(t)));
+
+  return (
+    <aside className="side">
+      {/* Vault selector */}
+      <div className="vault-selector-sidebar">
+        {vs.vaults.length > 1 && (
+          <select
+            className="vault-select-inline"
+            value={vs.selectedVault}
+            onChange={e => selectVault(e.target.value)}
+            title="Select vault"
+          >
+            {vs.vaults.map(v => (
+              <option key={v.namespace} value={v.namespace}>
+                {v.namespace}{v.namespace === vs.defaultVault ? ' ✓' : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        {vs.vaults.length <= 1 && vs.selectedVault && (
+          <div className="vault-selector-name" onClick={() => onNavigate({ kind: 'vault-home', vault: vs.selectedVault })}>
+            <span className="vault-selector-icon">⬡</span>
+            <span className="label">{vs.selectedVault}</span>
+          </div>
+        )}
+        {vs.loading && !vs.selectedVault && <div className="side-empty">Loading vaults…</div>}
+        {vs.error && <div className="side-empty" style={{ color: 'var(--red)' }}>Error loading vaults</div>}
+      </div>
+
+      {/* Browse by type */}
+      <SideSection id="vault-types" title="Browse by type">
+        {vs.loading && vs.pages.length === 0
+          ? <div className="side-empty">Loading…</div>
+          : activeVaultTypes.length === 0
+            ? <div className="side-empty">No pages yet</div>
+            : activeVaultTypes.map(t => {
+                const isActive = currentRoute.kind === 'vault-type' && currentRoute.type === t;
+                return (
+                  <button key={t} className={`side-link${isActive ? ' active' : ''}`} onClick={() => onNavigate({ kind: 'vault-type', vault: vs.selectedVault, type: t })}>
+                    <span className={`type-dot ${t}`} />
+                    <span className="label">{t}</span>
+                    <span className="meta">{typeCounts[t] || 0}</span>
+                  </button>
+                );
+              })}
+      </SideSection>
+
+      {/* Top tags */}
+      <SideSection id="vault-tags" title="Top tags" defaultOpen={false}>
+        {topTags.length === 0
+          ? <div className="side-empty">No tags</div>
+          : topTags.map(([t, c]) => {
+              const isActive = currentRoute.kind === 'vault-type' && currentRoute.tag === t;
+              return (
+                <button key={t} className={`side-link${isActive ? ' active' : ''}`} onClick={() => onNavigate({ kind: 'vault-type', vault: vs.selectedVault, tag: t })}>
+                  <span style={{ color: 'var(--fg-3)', width: 10, fontFamily: 'var(--font-mono)' }}>#</span>
+                  <span className="label">{t}</span>
+                  <span className="meta">{c}</span>
+                </button>
+              );
+            })}
+      </SideSection>
+
+      <SystemStatus />
+    </aside>
+  );
+}
+
+// ── VaultContentArea — routes vault-home / vault-type / vault-page ────────────
+function VaultContentArea({ route, onNavigate }) {
+  if (route.kind === 'vault-home') return <VaultHomePage vault={route.vault} onNavigate={onNavigate} />;
+  if (route.kind === 'vault-type') return <VaultTypeListPage vault={route.vault} type={route.type} tag={route.tag} onNavigate={onNavigate} />;
+  if (route.kind === 'vault-page') return <VaultDetailPage pageId={route.id} onNavigate={onNavigate} />;
+  return <VaultHomePage vault={''} onNavigate={onNavigate} />;
+}
+
+// ── VaultHomePage — browse-by-type grid for the selected vault ────────────────
+function VaultHomePage({ vault, onNavigate }) {
+  const vs = window.VAULT_STATE;
+  const [, forceUpdate] = uSp(0);
+  uEp(() => vs.subscribe(() => forceUpdate(v => v + 1)), []);
+
+  // Sync vault selector to route-supplied vault
+  uEp(() => {
+    if (vault && vault !== vs.selectedVault) {
+      vs.selectedVault = vault;
+      vs.notify();
+    }
+  }, [vault]);
+
+  const pages = vs.pages;
+  const typeCounts = {};
+  pages.forEach(p => { if (p.type) typeCounts[p.type] = (typeCounts[p.type] || 0) + 1; });
+
+  const orderedTypes = VAULT_TYPES.filter(t => typeCounts[t] > 0)
+    .concat(Object.keys(typeCounts).filter(t => !VAULT_TYPES.includes(t) && typeCounts[t] > 0));
+
+  const vaultName = vs.selectedVault || vault || 'Vault';
+
+  return (
+    <div className="main-inner">
+      <div className="greeting">
+        <h2>⬡ {vaultName}</h2>
+        <div className="sub">{pages.length} page{pages.length !== 1 ? 's' : ''} · read-only knowledge base</div>
+      </div>
+
+      {vs.loading && pages.length === 0 && (
+        <div className="empty loading">Loading pages…</div>
+      )}
+      {vs.error && (
+        <div className="empty" style={{ color: 'var(--red)' }}>Error: {vs.error}</div>
+      )}
+
+      {orderedTypes.length > 0 && (
+        <div className="home-section">
+          <div className="home-section-head static">
+            <span className="t">Browse by type</span>
+            <span className="c">{pages.length}</span>
+          </div>
+          <div className="type-strip">
+            {orderedTypes.map(t => (
+              <button key={t} className="type-tile" onClick={() => onNavigate({ kind: 'vault-type', vault: vs.selectedVault, type: t })}>
+                <div className="row">
+                  <span className={`type-dot ${t}`} />
+                  <span className="label">{t}</span>
+                </div>
+                <span className="count">{typeCounts[t] || 0}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {orderedTypes.length === 0 && !vs.loading && (
+        <div className="empty">No pages in this vault.</div>
+      )}
+    </div>
+  );
+}
+
+// ── VaultTypeListPage — list pages of a type (or tag) ──────────────────────────
+function VaultTypeListPage({ vault, type, tag, onNavigate }) {
+  const vs = window.VAULT_STATE;
+  const [, forceUpdate] = uSp(0);
+  const [filterMode, setFilterMode] = uSp('');
+  const [filterText, setFilterText] = uSp('');
+
+  uEp(() => vs.subscribe(() => forceUpdate(v => v + 1)), []);
+
+  // Sync vault selector to route-supplied vault (multi-vault deep-link / history)
+  uEp(() => {
+    if (vault && vault !== vs.selectedVault) {
+      vs.selectedVault = vault;
+      vs.notify();
+    }
+  }, [vault]);
+
+  const pages = vs.pages;
+  const filtered = uMp(() => {
+    let arr = pages;
+    if (type) arr = arr.filter(p => p.type === type);
+    if (tag) arr = arr.filter(p => (p.tags || []).includes(tag));
+    if (filterMode) arr = arr.filter(p => p.mode === filterMode);
+    if (filterText) {
+      const q = filterText.toLowerCase();
+      arr = arr.filter(p => ((p.title || '') + ' ' + (p.description || '')).toLowerCase().includes(q));
+    }
+    return arr;
+  }, [pages, type, tag, filterMode, filterText]);
+
+  const headLabel = tag ? `#${tag}` : (type || 'All pages');
+
+  return (
+    <div className="main-inner wide">
+      <div className="list-head">
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {type && <span className={`type-dot ${type}`} style={{ width: 12, height: 12 }}></span>}
+          {headLabel}
+          <span style={{ color: 'var(--fg-3)', fontSize: 18, fontFamily: 'var(--font-mono)' }}>· {filtered.length}</span>
+        </h2>
+      </div>
+
+      <div className="sort-bar">
+        <span className="filter-label">MODE:</span>
+        <button className={`chip${filterMode === '' ? ' active' : ''}`} onClick={() => setFilterMode('')}>all</button>
+        {VAULT_MODES.map(m => (
+          <button key={m} className={`chip${filterMode === m ? ' active' : ''}`} onClick={() => setFilterMode(m)}>{m}</button>
+        ))}
+        <input
+          className="vault-text-filter"
+          type="text"
+          placeholder="Filter…"
+          value={filterText}
+          onChange={e => setFilterText(e.target.value)}
+        />
+      </div>
+
+      {vs.loading && pages.length === 0 && <div className="empty">Loading…</div>}
+      {filtered.length === 0 && !vs.loading && <div className="empty">No pages match.</div>}
+
+      <div className="ref-list">
+        {filtered.map(p => (
+          <div key={p.id} className="ref-row" onClick={() => onNavigate({ kind: 'vault-page', id: p.id })}>
+            <window.MD.TypePill type={p.type} />
+            <div>
+              <div className="title">{p.title}</div>
+              <div className="snippet">
+                {p.description || ''}
+                {(p.tags || []).length > 0 && (
+                  <span> {(p.tags || []).map(t => <span key={t} className="chip tag" style={{ fontSize: 10, padding: '1px 6px' }}>{t}</span>)}</span>
+                )}
+              </div>
+            </div>
+            <span className="meta">{p.mode || ''}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── VaultDetailPage — single vault page ──────────────────────────────────────
+function VaultDetailPage({ pageId, onNavigate }) {
+  const [page, setPage] = uSp(null);
+  const [loading, setLoading] = uSp(true);
+  const [error, setError] = uSp(null);
+
+  uEp(() => {
+    setLoading(true);
+    setError(null);
+    setPage(null);
+    window.VaultClient.getPage(pageId)
+      .then(data => setPage(data))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [pageId]);
+
+  if (loading) return <div className="main-inner"><div className="empty loading">Loading page…</div></div>;
+  if (error) return <div className="main-inner"><div className="empty" style={{ color: 'var(--red)' }}>Error: {error}</div></div>;
+  if (!page) return <div className="main-inner"><div className="empty">Page not found.</div></div>;
+
+  return (
+    <div className="main-inner">
+      <header className={`note-header type-${page.type}`}>
+        <div className="note-meta-row">
+          <window.MD.TypePill type={page.type} />
+          {page.mode && <span className="chip">{page.mode}</span>}
+        </div>
+        <h1 className="note-title">{page.title}</h1>
+        {(page.tags || []).length > 0 && (
+          <div className="note-tags">
+            {(page.tags || []).map(t => (
+              <button key={t} className="chip tag" onClick={() => onNavigate({ kind: 'vault-type', vault: window.VAULT_STATE.selectedVault || '', tag: t })}>{t}</button>
+            ))}
+          </div>
+        )}
+        {page.description && (
+          <p style={{ color: 'var(--fg-2)', fontSize: 14, margin: '10px 0 0 0', lineHeight: 1.5 }}>{page.description}</p>
+        )}
+      </header>
+
+      {/* Scope rail block */}
+      {page.scope && (page.scope.program || page.scope.repo) && (
+        <div className="note-layout" style={{ padding: '0', marginBottom: 0 }}>
+          <div></div>
+          <aside className="note-rail" style={{ marginTop: 0 }}>
+            <div className="rail-inner">
+              <div className="rail-block">
+                <div className="rail-block-title">Scope</div>
+                {page.scope.program && <div className="kv"><span className="k">program</span><span className="v">{page.scope.program}</span></div>}
+                {page.scope.repo && <div className="kv"><span className="k">repo</span><span className="v">{page.scope.repo}</span></div>}
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      <article className="md">
+        {page.body
+          ? <window.MD.MarkdownBody body={page.body} onNavigate={() => {}} />
+          : <div className="empty" style={{ padding: '16px 0' }}>No content.</div>
+        }
+      </article>
+    </div>
+  );
+}

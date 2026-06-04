@@ -40,6 +40,14 @@
   --type-bookmark:           oklch(0.72 0.10 250);   /* indigo */
   --type-conversation-state: oklch(0.72 0.10 330);   /* rose */
 
+  /* Vault knowledge page types */
+  --type-repo-profile: oklch(0.74 0.12 200);   /* cyan */
+  --type-guide:        oklch(0.74 0.11 250);   /* indigo-blue */
+  --type-concept:      oklch(0.72 0.10 290);   /* purple */
+  --type-procedure:    oklch(0.74 0.12 150);   /* green */
+  --type-keystone:     oklch(0.74 0.14 60);    /* amber */
+  --type-learning:     oklch(0.74 0.12 30);    /* terracotta */
+
   /* NLP Agent Search colors */
   --nlp: #2a6e4c;
   --nlp-soft: oklch(0.22 0.04 145);
@@ -105,6 +113,14 @@
   --type-area:     oklch(0.48 0.06 180);
   --type-bookmark:           oklch(0.45 0.10 250);
   --type-conversation-state: oklch(0.45 0.10 330);   /* rose */
+
+  /* Vault knowledge page types */
+  --type-repo-profile: oklch(0.48 0.12 200);
+  --type-guide:        oklch(0.48 0.11 250);
+  --type-concept:      oklch(0.45 0.10 290);
+  --type-procedure:    oklch(0.48 0.12 150);
+  --type-keystone:     oklch(0.50 0.14 60);
+  --type-learning:     oklch(0.48 0.12 30);
 
   --nlp: #1e5236;
   --nlp-soft: oklch(0.90 0.04 145);
@@ -345,6 +361,12 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .type-dot.area { background: var(--type-area); }
 .type-dot.bookmark             { background: var(--type-bookmark); }
 .type-dot.conversation-state   { background: var(--type-conversation-state); }
+.type-dot.repo-profile         { background: var(--type-repo-profile); }
+.type-dot.guide                { background: var(--type-guide); }
+.type-dot.concept              { background: var(--type-concept); }
+.type-dot.procedure            { background: var(--type-procedure); }
+.type-dot.keystone             { background: var(--type-keystone); }
+.type-dot.learning             { background: var(--type-learning); }
 
 .type-pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -458,6 +480,12 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .note-header.type-project { border-left: 3px solid var(--type-project); padding-left: 14px; }
 .note-header.type-bookmark{ border-left: 3px solid var(--type-bookmark); padding-left: 14px; }
 .note-header.type-area    { border-left: 3px solid var(--type-area); padding-left: 14px; }
+.note-header.type-repo-profile { border-left: 3px solid var(--type-repo-profile); padding-left: 14px; }
+.note-header.type-guide     { border-left: 3px solid var(--type-guide); padding-left: 14px; }
+.note-header.type-concept   { border-left: 3px solid var(--type-concept); padding-left: 14px; }
+.note-header.type-procedure { border-left: 3px solid var(--type-procedure); padding-left: 14px; }
+.note-header.type-keystone  { border-left: 3px solid var(--type-keystone); padding-left: 14px; }
+.note-header.type-learning  { border-left: 3px solid var(--type-learning); padding-left: 14px; }
 
 .note-meta-row {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
@@ -1887,3 +1915,80 @@ article.md.editable { cursor: text; }
 .status-dot.warn  { background: oklch(0.78 0.15 75); }
 .status-dot.err   { background: var(--red); }
 .status-dot.muted { background: var(--fg-3); opacity: 0.5; }
+
+/* ── Scope switcher ────────────────────────────────── */
+.scope-switcher {
+  display: flex;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+}
+.scope-seg {
+  padding: 4px 11px;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+  border-right: 1px solid var(--line-2);
+}
+.scope-seg:last-child { border-right: none; }
+.scope-seg:hover:not(.disabled) { background: var(--bg-2); color: var(--fg); }
+.scope-seg.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.scope-seg.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ── Vault sidebar — inline vault selector ─────────── */
+.vault-selector-sidebar {
+  padding: 8px 8px 4px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.vault-select-inline {
+  font: inherit;
+  font-size: 12.5px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  padding: 3px 8px;
+  width: 100%;
+  cursor: pointer;
+  outline: none;
+}
+.vault-select-inline:focus { border-color: var(--accent); }
+.vault-selector-name {
+  display: flex; align-items: center; gap: 7px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: var(--radius-2);
+  color: var(--fg-2);
+  font-size: 13px;
+  transition: background .1s ease;
+}
+.vault-selector-name:hover { background: var(--bg-2); color: var(--fg); }
+.vault-selector-icon { font-size: 14px; color: var(--fg-3); }
+
+/* ── Vault type list — text filter ────────────────── */
+.vault-text-filter {
+  font: inherit;
+  font-size: 12.5px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  padding: 3px 8px;
+  outline: none;
+  margin-left: auto;
+}
+.vault-text-filter::placeholder { color: var(--fg-3); }
+.vault-text-filter:focus { border-color: var(--accent); }
