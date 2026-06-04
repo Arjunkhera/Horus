@@ -166,6 +166,50 @@ for (const [sub, kind] of [
     .action(vaultRequest(kind));
 }
 
+/**
+ * `horus operator vault adopt` — thin alias for vault_attach that surfaces
+ * git backing-store fields (--git-org, --repo-name, --git-api-host).
+ *
+ * Calls vault_attach with the git_org/repo_name/git_api_host fields included
+ * in the payload so ensureRegistryEntry can derive git_repo deterministically
+ * (fixing the missing git_repo bug in vault_attach).
+ */
+vaultCmd
+  .command('adopt')
+  .description(
+    'Register an existing vault in the registry (vault_attach with git backing-store fields)',
+  )
+  .requiredOption('--namespace <owner/ns>', 'vault namespace')
+  .requiredOption('--tenant <tenant>', 'tenant')
+  .option('--git-org <org>', 'GitHub org/owner for the backing repo')
+  .option('--repo-name <name>', 'backing repo name (default: vault-<slug>)')
+  .option('--git-api-host <host>', 'GitHub API hostname override (for GitHub Enterprise)')
+  .option('--router <name>', 'target router', 'vault-router')
+  .option('--endpoint <url>', 'explicit upstream endpoint')
+  .option('--adapter <adapter>', 'backing-store adapter', 'git-subdir')
+  .option('--operator-url <url>', 'operator-service base URL')
+  .action(async (opts: Record<string, unknown>) => {
+    const client = await connect(opts as GlobalOpts);
+    try {
+      const out = await api(client.baseUrl, 'POST', '/requests', {
+        kind: 'vault_attach',
+        tenant: opts.tenant,
+        payload: {
+          namespace: opts.namespace,
+          target_router: opts.router,
+          backing_store_adapter: opts.adapter,
+          endpoint: opts.endpoint,
+          git_org: opts.gitOrg,
+          repo_name: opts.repoName,
+          git_api_host: opts.gitApiHost,
+        },
+      });
+      console.log(JSON.stringify(out, null, 2));
+    } finally {
+      await client.close();
+    }
+  });
+
 // ── request ─────────────────────────────────────────────────────────────────
 const reqCmd = operatorCommand.command('request').description('Provisioning requests');
 

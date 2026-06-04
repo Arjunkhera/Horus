@@ -126,7 +126,7 @@ describe('KubernetesVaultInfra', () => {
       const createCall = calls[3];
       expect(createCall.method).toBe('POST');
       expect(createCall.url).toBe('https://api.github.com/user/repos');
-      const body = JSON.parse(createCall.body\!);
+      const body = JSON.parse(createCall.body!);
       expect(body.name).toBe('vault-acme_notes');
       expect(body.private).toBe(true);
       expect(body.auto_init).toBe(true);
@@ -167,7 +167,7 @@ describe('KubernetesVaultInfra', () => {
       const createCall = calls[3];
       expect(createCall.method).toBe('POST');
       expect(createCall.url).toBe('https://api.github.com/orgs/testorg/repos');
-      const body = JSON.parse(createCall.body\!);
+      const body = JSON.parse(createCall.body!);
       expect(body.name).toBe('vault-acme_notes');
       expect(body.private).toBe(true);
       expect(body.auto_init).toBe(true);
@@ -253,7 +253,7 @@ describe('KubernetesVaultInfra', () => {
       const createCall = calls[3];
       expect(createCall.method).toBe('POST');
       expect(createCall.url).toBe('https://api.github.com/orgs/testorg/repos');
-      const body = JSON.parse(createCall.body\!);
+      const body = JSON.parse(createCall.body!);
       expect(body.name).toBe('vault-acme_notes');
       expect(body.private).toBe(true);
       expect(body.auto_init).toBe(true);
@@ -278,12 +278,12 @@ describe('KubernetesVaultInfra', () => {
       expect(calls).toHaveLength(4);
       expect(calls[1].url).toBe('https://api.github.com/repos/custom-org/my-vault');
       expect(calls[3].url).toBe('https://api.github.com/orgs/custom-org/repos');
-      const body = JSON.parse(calls[3].body\!);
+      const body = JSON.parse(calls[3].body!);
       expect(body.name).toBe('my-vault');
     });
 
     it('throws on non-OK create including the endpoint used in the error message', async () => {
-      // owner \!== token login → org endpoint; org endpoint returns 403.
+      // owner !== token login → org endpoint; org endpoint returns 403.
       const { fetch } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
         'GET https://api.github.com/repos/testorg/vault-acme_notes': { status: 404 },
@@ -394,7 +394,7 @@ describe('KubernetesVaultInfra', () => {
       const infra = new KubernetesVaultInfra(baseConfig(), fetch);
       await infra.ensureTypesenseCollection('acme/notes');
       expect(calls).toHaveLength(3);
-      const body = JSON.parse(calls[2].body\!);
+      const body = JSON.parse(calls[2].body!);
       expect(body.name).toBe('acme_notes');
       expect(body.fields).toBeDefined();
       expect(body.fields.length).toBeGreaterThan(10);
@@ -460,7 +460,7 @@ describe('KubernetesVaultInfra', () => {
       await infra.ensureRegistryEntry('acme/notes', 'ignored');
 
       expect(calls).toHaveLength(2);
-      const patch = JSON.parse(calls[1].body\!);
+      const patch = JSON.parse(calls[1].body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes']).toEqual({
         reader_endpoint: 'http://vault-reader:8000',
@@ -488,7 +488,7 @@ describe('KubernetesVaultInfra', () => {
       await infra3.ensureGitBackingStore('acme/notes', 'git');
       await infra3.ensureRegistryEntry('acme/notes', 'ignored');
 
-      const patch = JSON.parse(calls3[calls3.length - 1].body\!);
+      const patch = JSON.parse(calls3[calls3.length - 1].body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes'].git_repo).toBe('testorg/vault-acme_notes');
     });
@@ -523,7 +523,7 @@ describe('KubernetesVaultInfra', () => {
       await infra.ensureRegistryEntry('acme/notes', 'ignored');
 
       expect(calls).toHaveLength(2);
-      const patchBody = JSON.parse(calls[1].body\!);
+      const patchBody = JSON.parse(calls[1].body!);
       const registry = JSON.parse(patchBody.data['registry.yaml']);
       const entry = registry.vaults['acme/notes'];
       // git_repo must be set deterministically even without ensureGitBackingStore.
@@ -547,8 +547,8 @@ describe('KubernetesVaultInfra', () => {
       // Two GET + two PATCH calls.
       expect(calls).toHaveLength(4);
 
-      const patch1 = JSON.parse(calls[1].body\!);
-      const patch2 = JSON.parse(calls[3].body\!);
+      const patch1 = JSON.parse(calls[1].body!);
+      const patch2 = JSON.parse(calls[3].body!);
       const reg1 = JSON.parse(patch1.data['registry.yaml']);
       const reg2 = JSON.parse(patch2.data['registry.yaml']);
 
@@ -587,7 +587,7 @@ describe('KubernetesVaultInfra', () => {
         repoName: 'custom-vault',
       });
 
-      const patchBody = JSON.parse(calls[1].body\!);
+      const patchBody = JSON.parse(calls[1].body!);
       const registry = JSON.parse(patchBody.data['registry.yaml']);
       expect(registry.vaults['acme/notes'].git_repo).toBe('custom-org/custom-vault');
     });
@@ -616,7 +616,7 @@ describe('KubernetesVaultInfra', () => {
       const infra = new KubernetesVaultInfra(baseConfig(), fetch);
       await infra.removeRegistryEntry('acme/notes');
 
-      const patch = JSON.parse(calls[1].body\!);
+      const patch = JSON.parse(calls[1].body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes']).toBeUndefined();
       expect(registry.vaults['default']).toBeDefined();
@@ -642,7 +642,7 @@ describe('KubernetesVaultInfra', () => {
       await infra.ensureRegistryEntry('acme/notes', 'ignored');
 
       expect(calls).toHaveLength(2);
-      const patch = JSON.parse(calls[1].body\!);
+      const patch = JSON.parse(calls[1].body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       // The seeded `default` entry must survive into the patched ConfigMap.
       expect(registry.vaults['default']).toBeDefined();
@@ -664,7 +664,7 @@ describe('KubernetesVaultInfra', () => {
       const infra = new KubernetesVaultInfra(baseConfig(), fetch);
       await infra.ensureRegistryEntry('acme/notes', 'ignored');
 
-      const patch = JSON.parse(calls[1].body\!);
+      const patch = JSON.parse(calls[1].body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['default']).toBeDefined();
       expect(registry.vaults['acme/notes']).toBeDefined();
@@ -681,7 +681,7 @@ describe('KubernetesVaultInfra', () => {
       const infra = new KubernetesVaultInfra(baseConfig(), fetch);
       await infra.ensureRegistryEntry('acme/notes', 'ignored');
 
-      const patch = JSON.parse(calls[1].body\!);
+      const patch = JSON.parse(calls[1].body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes']).toBeDefined();
     });
@@ -746,7 +746,7 @@ describe('KubernetesVaultInfra', () => {
       expect(calls.length).toBeGreaterThanOrEqual(7);
       const patchCall = calls[calls.length - 1];
       expect(patchCall.method).toBe('PATCH');
-      const patch = JSON.parse(patchCall.body\!);
+      const patch = JSON.parse(patchCall.body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes'].typesense_collection).toBe('acme_notes');
       expect(registry.vaults['acme/notes'].git_repo).toBe('testorg/vault-acme_notes');
@@ -773,7 +773,7 @@ describe('KubernetesVaultInfra', () => {
       await infra.ensureRegistryEntry('acme/notes', 'ignored');
 
       const patchCall = calls[calls.length - 1];
-      const patch = JSON.parse(patchCall.body\!);
+      const patch = JSON.parse(patchCall.body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes'].git_repo).toBe('myorg/myvault');
     });
@@ -802,7 +802,7 @@ describe('KubernetesVaultInfra', () => {
       expect(createCall?.url).toBe('https://api.github.com/user/repos');
 
       const patchCall = calls[calls.length - 1];
-      const patch = JSON.parse(patchCall.body\!);
+      const patch = JSON.parse(patchCall.body!);
       const registry = JSON.parse(patch.data['registry.yaml']);
       expect(registry.vaults['acme/notes'].git_repo).toBe('Arjunkhera/vault-acme_notes');
     });
