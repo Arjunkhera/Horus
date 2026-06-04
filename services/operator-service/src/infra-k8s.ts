@@ -397,9 +397,15 @@ export class KubernetesVaultInfra implements VaultInfra {
    * runs. This method simply writes the entry, relying on the Provisioner's
    * steps ledger to ensure it runs at most once per request.
    *
-   * git_repo is derived ALWAYS via resolveRepoPath(namespace, opts), regardless
-   * of whether ensureGitBackingStore was called. This fixes the vault_attach bug
-   * where git_repo was missing because the gitRepos map was unpopulated.
+   * git_repo is derived via resolveRepoPath(namespace, opts) when possible.
+   * If the owner cannot be resolved (no opts.gitOrg and no config.githubOwner),
+   * git_repo is OMITTED from the entry rather than throwing — graceful degradation
+   * for bare vault_attach with no git fields and an empty GITHUB_OWNER env var.
+   * Non-ConfigError failures are still re-thrown.
+   *
+   * NOTE: resolveRepoPath still throws ConfigError in ensureGitBackingStore
+   * (the create path), where a missing owner is a hard error. Only this
+   * registry-write call site degrades gracefully.
    */
   async ensureRegistryEntry(
     namespace: string,
@@ -409,16 +415,28 @@ export class KubernetesVaultInfra implements VaultInfra {
     const slug = namespaceSlug(namespace);
     const doc = await this.readConfigMap();
 
-    // Always derive git_repo deterministically — never rely on the gitRepos
-    // in-process cache as the source of truth for the registry.
-    const gitRepo = this.resolveRepoPath(namespace, opts);
+    // Attempt to derive git_repo deterministically. If the owner is
+    // unresolvable (ConfigError), omit git_repo rather than failing the
+    // entire registry write — this preserves the pre-change behavior for
+    // bare vault_attach with no git fields and empty GITHUB_OWNER.
+    let gitRepo: string | undefined;
+    try {
+      gitRepo = this.resolveRepoPath(namespace, opts);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        // Owner unresolvable — degrade gracefully: omit git_repo field.
+        gitRepo = undefined;
+      } else {
+        throw err;
+      }
+    }
 
     const entry: RegistryFileEntry = {
       reader_endpoint: this.config.readerEndpoint,
       writer_endpoint: this.config.writerEndpoint,
       typesense_collection: slug,
       neo4j_db: slug,
-      git_repo: gitRepo,
+      ...(gitRepo !== undefined ? { git_repo: gitRepo } : {}),
     };
 
     doc.vaults[namespace] = entry;

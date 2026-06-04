@@ -63,35 +63,16 @@ describe('vault_attach — complete registry entry', () => {
     // Check the in-memory registry has the namespace.
     expect(infra.registry.has('acme/notes')).toBe(true);
 
-    // The full entry shape is validated via the infra's registryEntry map.
-    // InMemoryVaultInfra.ensureRegistryEntry must now produce git_repo too.
-    // Access via the infra's internal state.
-    const entry = (infra as unknown as {
-      _registryEntries?: Map<string, Record<string, string>>
-    })._registryEntries?.get('acme/notes');
-
-    // If the infra doesn't expose _registryEntries, assert via the registry map
-    // and the fact that git_repo is derived.
-    // The primary assertion: registry entry is complete (git_repo is set by InMemory
-    // using opts or default-org pattern).
-    // For InMemory, ensureRegistryEntry(ns, endpoint, opts) should set git_repo
-    // from opts?.gitOrg ?? 'default-org' and opts?.repoName ?? 'vault-<slug>'.
-    // Since no opts passed, it should be 'default-org/vault-acme_notes'.
+    // FIX 2: explicit git_repo assertion — must fail if derivation is broken.
+    // InMemoryVaultInfra default githubOwner is 'default-org', namespace slug is
+    // 'acme_notes', so git_repo must be 'default-org/vault-acme_notes'.
     const gitRepo = infra.gitRepos.get('acme/notes');
-    // With the new implementation, even without calling ensureGitBackingStore,
-    // the registry entry should have git_repo set.
-    // We check this by verifying the infra.git map OR by checking the registry
-    // entry directly via a stored map.
-    // For InMemoryVaultInfra, the registry stores the endpoint. But we need
-    // git_repo in the full entry shape.
-    // The test passes if InMemoryVaultInfra.ensureRegistryEntry sets git_repo.
-    // We validate this indirectly: if git_repo is NOT set on InMemory,
-    // the test should still capture the real behavior.
+    expect(gitRepo).toBe('default-org/vault-acme_notes');
 
-    // Direct assertion: the registry entry must be complete.
-    // We'll store the full entry in a side-channel map on InMemoryVaultInfra.
-    // This is done by adding a fullEntries map to InMemoryVaultInfra in infra.ts.
-    // For now, check infra.gitRepos is set (it should be set by ensureRegistryEntry now).
+    // Also verify via the fullEntries map.
+    const fullEntry = infra.fullEntries.get('acme/notes');
+    expect(fullEntry).toBeDefined();
+    expect(fullEntry?.git_repo).toBe('default-org/vault-acme_notes');
 
     await app.close();
   });
@@ -127,23 +108,54 @@ describe('vault_attach — complete entry shape via InMemory fullEntries', () =>
     expect(res.statusCode).toBe(201);
     expect(res.json().status).toBe('provisioned');
 
-    // Check via infra.fullEntries (new map added by this feature).
-    const fullEntries = (infra as unknown as {
-      fullEntries?: Map<string, Record<string, string>>
-    }).fullEntries;
+    // FIX 2: unconditional assertion on fullEntries — must fail if git_repo derivation is broken.
+    const entry = infra.fullEntries.get('acme/notes');
+    expect(entry).toBeDefined();
+    expect(entry?.reader_endpoint).toBeTruthy();
+    expect(entry?.writer_endpoint).toBeTruthy();
+    expect(entry?.typesense_collection).toBeTruthy();
+    expect(entry?.neo4j_db).toBeTruthy();
+    // git_repo must be present and equal the expected deterministic value.
+    expect(entry?.git_repo).toBe('default-org/vault-acme_notes');
 
-    if (fullEntries) {
-      const entry = fullEntries.get('acme/notes');
-      expect(entry).toBeDefined();
-      expect(entry?.reader_endpoint).toBeTruthy();
-      expect(entry?.writer_endpoint).toBeTruthy();
-      expect(entry?.typesense_collection).toBeTruthy();
-      expect(entry?.neo4j_db).toBeTruthy();
-      expect(entry?.git_repo).toBeTruthy();
-    } else {
-      // If fullEntries not added, just check gitRepos was set.
-      expect(infra.gitRepos.has('acme/notes')).toBe(true);
-    }
+    await app.close();
+  });
+
+  it('degraded path: vault_attach with no resolvable owner omits git_repo and does NOT throw', async () => {
+    // FIX 1 coverage: InMemoryVaultInfra with empty githubOwner should omit git_repo
+    // rather than throw. This matches the K8s adapter's graceful degradation.
+    // We use the same setup() helper but override the infra with an empty githubOwner.
+    const store = new Store(':memory:');
+    const keys = new KeyManager(store);
+    await keys.firstBootEnsure();
+    ensureBootstrapAdmin(store, 'admin', 'acme');
+    // Empty githubOwner → no owner resolvable.
+    const infra = new InMemoryVaultInfra({ githubOwner: '' });
+    const handlers: HandlerMap = {
+      vault_create: vaultCreateHandler(infra),
+      vault_attach: vaultAttachHandler(infra),
+    };
+    const service = new RequestService(store, handlers);
+    const app = buildApp({ service, keys, store, mintClientToken: createClientTokenMinter(keys) });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/requests',
+      headers: { 'x-operator-role': 'admin', 'x-operator-user': 'admin' },
+      payload: { kind: 'vault_attach', tenant: 'acme', payload: { namespace: 'acme/notes' } },
+    });
+
+    // Must succeed — graceful degradation, not a throw.
+    expect(res.statusCode).toBe(201);
+    expect(res.json().status).toBe('provisioned');
+
+    // git_repo must be absent (owner was unresolvable).
+    const entry = infra.fullEntries.get('acme/notes');
+    expect(entry).toBeDefined();
+    expect(entry?.git_repo).toBeUndefined();
+    // Other fields must still be present.
+    expect(entry?.typesense_collection).toBeTruthy();
+    expect(entry?.neo4j_db).toBeTruthy();
 
     await app.close();
   });

@@ -592,15 +592,29 @@ describe('KubernetesVaultInfra', () => {
       expect(registry.vaults['acme/notes'].git_repo).toBe('custom-org/custom-vault');
     });
 
-    it('(adopt) throws ConfigError when GITHUB_OWNER is empty and no opts.gitOrg provided', async () => {
+    it('(adopt) omits git_repo (does NOT throw) when GITHUB_OWNER is empty and no opts.gitOrg provided', async () => {
+      // FIX 1: graceful degradation — bare vault_attach with no git fields and empty owner
+      // must succeed and write a complete-minus-git_repo entry.
       const config = { ...baseConfig(), githubOwner: '' };
-      const { fetch } = createFake({
+      const { fetch, calls } = createFake({
         [`GET ${CM_GET_URL}`]: cmGetResponse({}),
+        [`PATCH ${CM_PATCH_URL}`]: { status: 200, body: {} },
       });
       const infra = new KubernetesVaultInfra(config, fetch);
-      await expect(infra.ensureRegistryEntry('acme/notes', 'ignored')).rejects.toMatchObject({
-        name: 'ConfigError',
-      });
+      // Must NOT throw — graceful degradation.
+      await expect(infra.ensureRegistryEntry('acme/notes', 'ignored')).resolves.not.toThrow();
+
+      expect(calls).toHaveLength(2);
+      const patchBody = JSON.parse(calls[1].body!);
+      const registry = JSON.parse(patchBody.data['registry.yaml']);
+      const entry = registry.vaults['acme/notes'];
+      // git_repo must be ABSENT — owner was unresolvable.
+      expect(entry.git_repo).toBeUndefined();
+      // The rest of the entry must still be present.
+      expect(entry.reader_endpoint).toBe('http://vault-reader:8000');
+      expect(entry.writer_endpoint).toBe('http://vault-writer:8000');
+      expect(entry.typesense_collection).toBe('acme_notes');
+      expect(entry.neo4j_db).toBe('acme_notes');
     });
   });
 

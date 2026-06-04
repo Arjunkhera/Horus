@@ -63,12 +63,19 @@ export function namespaceSlug(namespace: string): string {
  *   - registry:     namespace → endpoint (the "ConfigMap" in memory)
  *   - registryGitRepo: namespace → git_repo (parallel to registry for collision comparison)
  *
- * ensureRegistryEntry now accepts opts?: RegistryEntryOpts and derives git_repo
- * directly (org from opts?.gitOrg ?? 'default-org'; name from opts?.repoName ??
+ * ensureRegistryEntry accepts opts?: RegistryEntryOpts and derives git_repo
+ * directly (org from opts?.gitOrg ?? githubOwner; name from opts?.repoName ??
  * 'vault-<slug>'). This mirrors KubernetesVaultInfra's resolveRepoPath so the
  * vault_attach path (no prior ensureGitBackingStore) produces a complete entry.
+ * If no owner is resolvable, git_repo is omitted (graceful degradation, FIX 1 parity).
  */
 export class InMemoryVaultInfra implements VaultInfra {
+  /** The GitHub org/owner to use when no opts are provided. Defaults to 'default-org'. */
+  protected readonly githubOwner: string;
+
+  constructor(opts?: { githubOwner?: string }) {
+    this.githubOwner = opts?.githubOwner ?? 'default-org';
+  }
   /** namespace → "org/repoName" (set by ensureGitBackingStore or ensureRegistryEntry). */
   readonly gitRepos = new Map<string, string>();
   /**
@@ -105,7 +112,7 @@ export class InMemoryVaultInfra implements VaultInfra {
     opts?: GitBackingStoreOpts,
   ): Promise<void> {
     const slug = namespaceSlug(namespace);
-    const org = opts?.gitOrg ?? 'default-org';
+    const org = opts?.gitOrg ?? this.githubOwner;
     const name = opts?.repoName ?? `vault-${slug}`;
     const repoPath = `${org}/${name}`;
 
@@ -158,24 +165,30 @@ export class InMemoryVaultInfra implements VaultInfra {
     // Derive git_repo with priority:
     //   1. opts (explicit from payload) — always wins
     //   2. gitRepos cache (set by a prior ensureGitBackingStore call)
-    //   3. derive from default-org + slug (vault_attach with no opts and no prior create)
+    //   3. derive from this.githubOwner + slug (vault_attach with no opts and no prior create)
+    //   4. if githubOwner is empty — omit git_repo (graceful degradation, FIX 1 parity)
     const slug = namespaceSlug(namespace);
-    let gitRepo: string;
+    let gitRepo: string | undefined;
     if (opts?.gitOrg !== undefined || opts?.repoName !== undefined) {
       // Explicit opts provided — use them (same derivation as resolveRepoPath).
-      const org = opts.gitOrg ?? 'default-org';
+      const org = opts.gitOrg ?? this.githubOwner;
       const name = opts.repoName ?? `vault-${slug}`;
       gitRepo = `${org}/${name}`;
     } else if (this.gitRepos.has(namespace)) {
       // ensureGitBackingStore was called first (vault_create path) — reuse its result.
       gitRepo = this.gitRepos.get(namespace)!;
+    } else if (this.githubOwner) {
+      // vault_attach with no opts and no prior create — derive from configured owner.
+      gitRepo = `${this.githubOwner}/vault-${slug}`;
     } else {
-      // vault_attach with no opts and no prior create — derive default.
-      gitRepo = `default-org/vault-${slug}`;
+      // No owner resolvable — omit git_repo (graceful degradation).
+      gitRepo = undefined;
     }
 
     // Update gitRepos map so existing collision checks and the git alias still work.
-    this.gitRepos.set(namespace, gitRepo);
+    if (gitRepo !== undefined) {
+      this.gitRepos.set(namespace, gitRepo);
+    }
     this.registryGitRepo.set(namespace, gitRepo);
 
     // Store full entry shape for test assertions.
@@ -184,7 +197,7 @@ export class InMemoryVaultInfra implements VaultInfra {
       writer_endpoint: 'http://vault-writer:8000',
       typesense_collection: slug,
       neo4j_db: slug,
-      git_repo: gitRepo,
+      ...(gitRepo !== undefined ? { git_repo: gitRepo } : {}),
     });
   }
 
@@ -275,18 +288,20 @@ export class FileVaultInfra extends InMemoryVaultInfra {
     opts?: RegistryEntryOpts,
   ): Promise<void> {
     // super.ensureRegistryEntry derives and caches git_repo in this.gitRepos
-    // (honoring opts > gitRepos cache > default derivation).
+    // (honoring opts > gitRepos cache > githubOwner derivation > omit if unresolvable).
     await super.ensureRegistryEntry(namespace, _endpoint, opts);
     const doc = this.read();
     const slug = namespaceSlug(namespace);
     // Reuse the git_repo already resolved and cached by super.
-    const gitRepo = this.gitRepos.get(namespace) ?? 'default-org/vault-' + slug;
+    // If super omitted git_repo (no resolvable owner), we omit it here too —
+    // do NOT invent a hardcoded 'default-org/...' fallback.
+    const gitRepo = this.gitRepos.get(namespace);
     const entry: RegistryFileEntry = {
       reader_endpoint: this.readerEndpoint,
       writer_endpoint: this.writerEndpoint,
       typesense_collection: slug,
       neo4j_db: slug,
-      git_repo: gitRepo,
+      ...(gitRepo !== undefined ? { git_repo: gitRepo } : {}),
     };
     doc.vaults[namespace] = entry;
     this.write(doc);
