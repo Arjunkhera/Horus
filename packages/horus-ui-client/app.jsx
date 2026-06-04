@@ -52,6 +52,12 @@ function App() {
   }, []);
   const vaultAvailable = sysStatus && sysStatus.tabs && sysStatus.tabs.vault === 'available';
 
+  // A stale localStorage scope can boot us into vault while the CP is unavailable;
+  // once status resolves, fall back to anvil rather than show failing vault fetches.
+  uE(() => {
+    if (sysStatus && !vaultAvailable && scope === 'vault') switchScope('anvil');
+  }, [sysStatus, vaultAvailable, scope]);
+
   const data = window.HORUS_DATA;
 
   // Initialize mermaid once on mount

@@ -1177,8 +1177,9 @@ function SearchPalette({ onClose, onNavigate, scope }) {
     return () => clearTimeout(t);
   }, [q]);
 
-  // Live search via Anvil using debounced query
-  const liveSearch = HOOKS ? HOOKS.useSearch(debouncedQ.trim(), filter, 12) : { data: null, loading: false };
+  // Live search via Anvil using debounced query (skip while in vault scope)
+  const anvilQuery = scope === 'vault' ? '' : debouncedQ.trim();
+  const liveSearch = HOOKS ? HOOKS.useSearch(anvilQuery, filter, 12) : { data: null, loading: false };
 
   // Vault-scoped search: query the active vault via VaultClient when in vault scope
   uEp(() => {
@@ -1353,16 +1354,19 @@ function VaultSidebar({ currentRoute, onNavigate, collapsed }) {
       .finally(() => { vs.loading = false; vs.notify(); });
   }, []);
 
-  // Load pages when selectedVault changes
+  // Load pages when selectedVault changes (guarded against rapid-switch races)
   uEp(() => {
     if (!vs.selectedVault) return;
+    let cancelled = false;
+    const forVault = vs.selectedVault;
     vs.pages = [];
     vs.loading = true;
     vs.notify();
-    window.VaultClient.listPages({ vault: vs.selectedVault, limit: 200 })
-      .then(data => { vs.pages = data.pages || []; vs.error = null; })
-      .catch(err => { vs.error = err.message; })
-      .finally(() => { vs.loading = false; vs.notify(); });
+    window.VaultClient.listPages({ vault: forVault, limit: 200 })
+      .then(data => { if (cancelled || vs.selectedVault !== forVault) return; vs.pages = data.pages || []; vs.error = null; })
+      .catch(err => { if (cancelled || vs.selectedVault !== forVault) return; vs.error = err.message; })
+      .finally(() => { if (cancelled || vs.selectedVault !== forVault) return; vs.loading = false; vs.notify(); });
+    return () => { cancelled = true; };
   }, [vs.selectedVault]);
 
   function selectVault(namespace) {
@@ -1517,7 +1521,7 @@ function VaultHomePage({ vault, onNavigate }) {
           </div>
           <div className="type-strip">
             {orderedTypes.map(t => (
-              <button key={t} className="type-tile" onClick={() => onNavigate({ kind: 'vault-type', vault: vaultName, type: t })}>
+              <button key={t} className="type-tile" onClick={() => onNavigate({ kind: 'vault-type', vault: vs.selectedVault, type: t })}>
                 <div className="row">
                   <span className={`type-dot ${t}`} />
                   <span className="label">{t}</span>
@@ -1544,6 +1548,14 @@ function VaultTypeListPage({ vault, type, tag, onNavigate }) {
   const [filterText, setFilterText] = uSp('');
 
   uEp(() => vs.subscribe(() => forceUpdate(v => v + 1)), []);
+
+  // Sync vault selector to route-supplied vault (multi-vault deep-link / history)
+  uEp(() => {
+    if (vault && vault !== vs.selectedVault) {
+      vs.selectedVault = vault;
+      vs.notify();
+    }
+  }, [vault]);
 
   const pages = vs.pages;
   const filtered = uMp(() => {
