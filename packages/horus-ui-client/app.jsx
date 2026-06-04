@@ -16,6 +16,7 @@ const ACCENTS = {
 };
 
 const TWEAKS_KEY = 'horus:tweaks';
+const SCOPE_KEY = 'horus.scope';
 
 function routeKey(r) {
   if (!r) return '';
@@ -24,6 +25,9 @@ function routeKey(r) {
   if (r.kind === 'tag') return `t:${r.tag}`;
   if (r.kind === 'type') return `y:${r.type}`;
   if (r.kind === 'ask') return 'ask';
+  if (r.kind === 'vault-home') return `vh:${r.vault || ''}`;
+  if (r.kind === 'vault-type') return `vt:${r.vault || ''}:${r.type || ''}:${r.tag || ''}`;
+  if (r.kind === 'vault-page') return `vp:${r.id}`;
   return JSON.stringify(r);
 }
 
@@ -32,6 +36,21 @@ function App() {
   const [history, setHistory] = uS([{ kind: 'home' }]);
   const [cursor, setCursor] = uS(0);
   const route = history[cursor];
+
+  // Scope: 'anvil' | 'vault'
+  const [scope, setScope] = uS(() => {
+    try { return localStorage.getItem(SCOPE_KEY) || 'anvil'; } catch { return 'anvil'; }
+  });
+
+  // System status cache for vault availability gate
+  const [sysStatus, setSysStatus] = uS(null);
+  uE(() => {
+    fetch('/api/system/status')
+      .then(r => r.json())
+      .then(s => setSysStatus(s))
+      .catch(() => setSysStatus(null));
+  }, []);
+  const vaultAvailable = sysStatus && sysStatus.tabs && sysStatus.tabs.vault === 'available';
 
   const data = window.HORUS_DATA;
 
@@ -128,7 +147,15 @@ function App() {
     document.documentElement.style.setProperty('--link', val);
   }, [tweaks]);
 
-
+  function switchScope(newScope) {
+    if (newScope === scope) return;
+    try { localStorage.setItem(SCOPE_KEY, newScope); } catch {}
+    setScope(newScope);
+    // Reset route to the scope's home
+    const homeRoute = newScope === 'vault' ? { kind: 'vault-home', vault: '' } : { kind: 'home' };
+    setHistory([homeRoute]);
+    setCursor(0);
+  }
 
   function navigate(r) {
     // Don't push duplicate of current
@@ -147,7 +174,7 @@ function App() {
     }
     // Track last editor path for mode toggle
     if (r.kind !== 'ask') {
-      const editorPath = r.kind === 'home' ? '/' : r.kind === 'note' ? `/n/${r.id}` : r.kind === 'tag' ? `/t/${r.tag}` : r.kind === 'type' ? `/type/${r.type}` : '/';
+      const editorPath = r.kind === 'home' ? '/' : r.kind === 'note' ? `/n/${r.id}` : r.kind === 'tag' ? `/t/${r.tag}` : r.kind === 'type' ? `/type/${r.type}` : r.kind === 'vault-home' ? '/vault' : r.kind === 'vault-type' ? '/vault/type' : r.kind === 'vault-page' ? `/vault/p/${r.id}` : '/';
       window.ChatSessionStore?.setLastEditorPath(editorPath);
     }
     document.querySelector('.main')?.scrollTo({ top: 0 });
@@ -201,18 +228,30 @@ function App() {
   const TweakRadio = window.TweakRadio;
   const TweakToggle = window.TweakToggle;
 
+  // Route → page element
   let pageEl = null;
-  if (route.kind === 'home') pageEl = <HomePage onNavigate={navigate} />;
-  else if (route.kind === 'note') pageEl = <NotePage noteId={route.id} onNavigate={navigate} refsCollapsed={refsCollapsed} setRefsCollapsed={setRefsCollapsed} pinned={pinned} togglePin={togglePin} />;
-  else if (route.kind === 'tag') pageEl = <TagPage tag={route.tag} onNavigate={navigate} />;
-  else if (route.kind === 'type') pageEl = <TypePage type={route.type} onNavigate={navigate} />;
-  else if (route.kind === 'ask') pageEl = <window.AskPage onNavigate={navigate} sideCollapsed={sideCollapsed} toggleSide={toggleSide} />;
+  if (scope === 'vault') {
+    if (route.kind === 'vault-home' || route.kind === 'vault-type' || route.kind === 'vault-page') {
+      pageEl = <VaultContentArea route={route} onNavigate={navigate} />;
+    } else {
+      // Fallback if user somehow has an anvil route while scope=vault
+      pageEl = <VaultContentArea route={{ kind: 'vault-home', vault: '' }} onNavigate={navigate} />;
+    }
+  } else {
+    if (route.kind === 'home') pageEl = <HomePage onNavigate={navigate} />;
+    else if (route.kind === 'note') pageEl = <NotePage noteId={route.id} onNavigate={navigate} refsCollapsed={refsCollapsed} setRefsCollapsed={setRefsCollapsed} pinned={pinned} togglePin={togglePin} />;
+    else if (route.kind === 'tag') pageEl = <TagPage tag={route.tag} onNavigate={navigate} />;
+    else if (route.kind === 'type') pageEl = <TypePage type={route.type} onNavigate={navigate} />;
+    else if (route.kind === 'ask') pageEl = <window.AskPage onNavigate={navigate} sideCollapsed={sideCollapsed} toggleSide={toggleSide} />;
+  }
 
-  const crumb = route.kind === 'home' ? '/' :
-    route.kind === 'ask' ? '/ask' :
-    route.kind === 'note' ? `/n/${route.id}` :
-    route.kind === 'tag' ? `/t/${route.tag}` :
-    route.kind === 'type' ? `/type/${route.type}` : '/';
+  const crumb = scope === 'vault'
+    ? (route.kind === 'vault-page' ? `/vault/p/${route.id}` : route.kind === 'vault-type' ? `/vault/${route.type || 'all'}` : '/vault')
+    : (route.kind === 'home' ? '/' :
+       route.kind === 'ask' ? '/ask' :
+       route.kind === 'note' ? `/n/${route.id}` :
+       route.kind === 'tag' ? `/t/${route.tag}` :
+       route.kind === 'type' ? `/type/${route.type}` : '/');
 
   return (
     <div className={`app${sideCollapsed ? ' side-collapsed' : ''}${route.kind === 'ask' ? ' ask-mode' : ''}`}>
@@ -226,13 +265,33 @@ function App() {
           <button className="icon-btn" title="Forward (])" onClick={goForward} disabled={!canFwd}><window.Icon.ArrowRight /></button>
         </div>
 
-        <div className="brand" onClick={() => navigate({ kind: 'home' })}>
+        <div className="brand" onClick={() => scope === 'vault' ? navigate({ kind: 'vault-home', vault: '' }) : navigate({ kind: 'home' })}>
           <span className="logo"></span>
           <h1>Horus Reader</h1>
           <span className="crumb">{crumb}</span>
         </div>
 
-        {window.ModeToggle && <window.ModeToggle route={route} onNavigate={navigate} />}
+        {/* Scope switcher — replaces the old "⬡ Vault" tab button */}
+        <div className="scope-switcher">
+          <button
+            className={`scope-seg${scope === 'anvil' ? ' active' : ''}`}
+            onClick={() => switchScope('anvil')}
+            title="Browse Anvil notes"
+          >Anvil</button>
+          <button
+            className={`scope-seg${scope === 'vault' ? ' active' : ''}${!vaultAvailable ? ' disabled' : ''}`}
+            onClick={() => { if (vaultAvailable) switchScope('vault'); }}
+            title={vaultAvailable ? 'Browse Vault knowledge pages' : 'Connect to a control plane'}
+            aria-disabled={!vaultAvailable}
+          >Vault</button>
+          <button
+            className="scope-seg disabled"
+            title="Forge scope — coming soon"
+            aria-disabled="true"
+          >Forge</button>
+        </div>
+
+        {window.ModeToggle && scope === 'anvil' && <window.ModeToggle route={route} onNavigate={navigate} />}
 
         <div className="head-search">
           <button className="head-search-btn" onClick={() => setPaletteOpen(true)}>
@@ -253,10 +312,10 @@ function App() {
         </div>
       </header>
 
-      {route.kind !== 'ask' && <Sidebar recents={recents} currentRoute={route} onNavigate={navigate} typeCounts={typeCounts} collapsed={sideCollapsed} pinned={pinned} togglePin={togglePin} lastSyncedAt={lastSyncedAt} onRefresh={() => data.manualRefresh()} />}
+      {route.kind !== 'ask' && <Sidebar recents={recents} currentRoute={route} onNavigate={navigate} typeCounts={typeCounts} collapsed={sideCollapsed} pinned={pinned} togglePin={togglePin} lastSyncedAt={lastSyncedAt} onRefresh={() => data.manualRefresh()} scope={scope} />}
 
       <main className="main">
-        {bootstrapError && (
+        {bootstrapError && scope === 'anvil' && (
           <div style={{ padding: '10px 16px', background: 'oklch(0.22 0.04 60)', borderBottom: '1px solid oklch(0.35 0.08 60)', color: 'oklch(0.85 0.10 60)', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', lineHeight: '1.4' }}>
             <span>⚠ Could not load notes from Anvil. Showing cached/demo data.</span>
             <button onClick={handleRetry} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: '4px', border: '1px solid oklch(0.45 0.10 60)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: '12px' }}>Retry</button>
@@ -273,7 +332,7 @@ function App() {
       </main>
 
       {paletteOpen && (
-        <SearchPalette onClose={() => setPaletteOpen(false)} onNavigate={navigate} />
+        <SearchPalette onClose={() => setPaletteOpen(false)} onNavigate={navigate} scope={scope} />
       )}
 
       {TweaksPanel && (
