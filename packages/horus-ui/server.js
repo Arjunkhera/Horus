@@ -67,19 +67,23 @@ if (CONTROL_PLANE_URL) {
       target: CONTROL_PLANE_URL,
       changeOrigin: true,
       pathRewrite: { '^/vault': '/api/v1/vault' },
-      on: {
-        proxyReq: (proxyReq) => {
-          const token = getToken();
-          if (token) {
-            proxyReq.setHeader('Authorization', `Bearer ${token}`);
-          }
-        },
-        error: (err, _req, res) => {
-          console.error('[horus-ui] Vault proxy error:', err.message);
-          if (!res.headersSent) {
-            res.status(502).json({ error: 'Vault proxy error', detail: err.message });
-          }
-        },
+      // http-proxy-middleware v2 (the installed major) takes top-level
+      // onProxyReq/onError callbacks. The v3-style `on: { proxyReq }` nesting is
+      // silently ignored under v2, which dropped the Authorization header and
+      // made every REST-passthrough /vault/* request hit the CP unauthenticated
+      // (401 "Missing Authorization header"). Keep these top-level until the dep
+      // is bumped to v3.
+      onProxyReq: (proxyReq) => {
+        const token = getToken();
+        if (token) {
+          proxyReq.setHeader('Authorization', `Bearer ${token}`);
+        }
+      },
+      onError: (err, _req, res) => {
+        console.error('[horus-ui] Vault proxy error:', err.message);
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'Vault proxy error', detail: err.message });
+        }
       },
     }),
   );
