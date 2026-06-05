@@ -408,9 +408,17 @@ async def list_by_scope(
 
     seen_uuids: set[str] = set()
     all_pages: list[dict[str, Any]] = []
+    errors: dict[str, Any] = {}
 
     for vault_name, data in results.items():
-        if "error" in data:
+        if isinstance(data, dict) and "error" in data:
+            # Do NOT silently drop a failed sub-request: a writer 422/5xx used to
+            # be swallowed here, turning a failure into an empty 200. Record it so
+            # callers can distinguish "empty" from "failed".
+            errors[vault_name] = {
+                "error": data.get("error"),
+                "status": data.get("status", "failed"),
+            }
             continue
         # Vault returns {"pages": [...]}, not {"results": [...]}
         for page in data.get("pages", data.get("results", [])):
@@ -422,10 +430,22 @@ async def list_by_scope(
             if page_id:
                 seen_uuids.add(page_id)
 
+    # If every targeted vault failed, surface a clear non-2xx instead of a
+    # misleading empty 200. Partial failures still return 200 with an `errors`
+    # map alongside the pages that did come back.
+    if results and errors and len(errors) == len(results):
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "All vault sub-requests failed", "errors": errors},
+        )
+
     limit = body.get("limit", 20)
     offset = body.get("offset", 0)
     paginated = all_pages[offset: offset + limit]
-    return {"pages": paginated, "total": len(all_pages)}
+    response: dict[str, Any] = {"pages": paginated, "total": len(all_pages)}
+    if errors:
+        response["errors"] = errors
+    return response
 
 
 @router.post("/check-duplicates")

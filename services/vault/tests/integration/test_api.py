@@ -295,6 +295,33 @@ class TestListByScope:
         assert response.status_code == 200
         data = response.json()
 
+    def test_list_with_oversized_limit_is_clamped_not_rejected(self, client):
+        """Regression: limit > 100 must clamp to the max and return pages,
+        never 422. A 422 here was silently swallowed by the vault-router into
+        an empty 200, so a non-empty scope appeared as "0 pages" to clients.
+        """
+        # Baseline: the same scope at the max limit returns pages.
+        baseline = client.post("/list-by-scope", json={
+            "scope": {"program": "anvil-forge-vault"},
+            "limit": 100,
+        })
+        assert baseline.status_code == 200
+        assert baseline.json()["total"] > 0
+
+        # Oversized limit must NOT 422 and must return the same non-empty set.
+        response = client.post("/list-by-scope", json={
+            "scope": {"program": "anvil-forge-vault"},
+            "limit": 200,
+        })
+        assert response.status_code == 200, (
+            f"limit:200 should clamp, got {response.status_code}: {response.text}"
+        )
+        data = response.json()
+        assert data["total"] > 0
+        assert data["total"] == baseline.json()["total"]
+        # Clamped: never returns more than the server-side max.
+        assert len(data["pages"]) <= 100
+
 
 class TestWritePage:
     """Tests for the /write-page endpoint (write-path pipeline completion)."""
