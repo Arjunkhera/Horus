@@ -211,3 +211,56 @@ def test_list_by_scope_partial_failure_surfaces_errors_with_pages():
     assert body["pages"][0]["id"] == "u1"
     assert "errors" in body
     assert "other" in body["errors"]
+
+
+# ── /vaults page_count (bug c14f92d7) ────────────────────────────────────────
+
+REGISTRY_YAML_MULTI = """
+vaults:
+  default:
+    reader_endpoint: http://reader:8000
+    writer_endpoint: http://writer:8000
+  vault-office:
+    reader_endpoint: http://office-reader:8000
+    writer_endpoint: http://office-writer:8000
+"""
+
+
+class CountingUUIDRegistry:
+    """UUID registry stub reporting per-vault page counts, like a built registry."""
+
+    def __init__(self, counts: dict[str, int]) -> None:
+        self._counts = counts
+
+    def resolve(self, page_id: str) -> Optional[str]:
+        return None
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "vaults": {
+                name: {"page_count": n, "last_refreshed_at": 0.0}
+                for name, n in self._counts.items()
+            }
+        }
+
+
+def test_list_vaults_reports_page_count_for_every_provisioned_vault():
+    app = FastAPI()
+    app.include_router(router)
+    app.state.settings = VaultRouterSettings(
+        vault_endpoints={"default": "http://name-based:8000"}, vault_default="default"
+    )
+    app.state.vault_client = RecordingClient()
+    app.state.uuid_registry = CountingUUIDRegistry({"default": 1, "vault-office": 38})
+    reg = VaultRegistry("/does/not/exist")
+    reg._entries = parse_registry(REGISTRY_YAML_MULTI)
+    app.state.vault_registry = reg
+
+    resp = TestClient(app).get("/vaults")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_ns = {v["namespace"]: v for v in body["vaults"]}
+    # The bug: vault-office had no page_count key at all. It must now be numeric.
+    assert by_ns["vault-office"].get("page_count") == 38
+    assert by_ns["default"].get("page_count") == 1
+    assert body["total"] == 2

@@ -13,7 +13,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -61,19 +61,32 @@ class CrossVaultUUIDRegistry:
             },
         }
 
-    async def build(self, vault_endpoints: dict[str, str], client) -> None:
+    async def build(
+        self,
+        vault_endpoints: dict[str, str],
+        client,
+        per_vault_headers: Optional[dict[str, dict[str, str]]] = None,
+    ) -> None:
         """
         Build/rebuild the registry by querying all vaults.
 
         Args:
-            vault_endpoints: mapping of name → base URL
+            vault_endpoints: mapping of name → base URL. For the k8s control plane
+                this is the count-source endpoint per namespace (default → reader,
+                non-default → writer, where the per-vault git clone lives), so every
+                provisioned vault is iterated — not just the static VAULT_ENDPOINTS.
             client: VaultClient instance
+            per_vault_headers: name → X-Vault-* context headers (namespace /
+                collection / git-repo). The writer needs these to select the right
+                per-vault Typesense collection and clone; without them it would
+                count against the default collection.
 
         Fetches all pages from each vault via POST /list-by-scope with no filters.
         Handles failures per-vault (logs warning, keeps stale data for that vault).
         """
+        per_vault_headers = per_vault_headers or {}
         tasks = [
-            self._fetch_vault(name, url, client)
+            self._fetch_vault(name, url, client, per_vault_headers.get(name))
             for name, url in vault_endpoints.items()
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -120,13 +133,18 @@ class CrossVaultUUIDRegistry:
         )
 
     async def _fetch_vault(
-        self, name: str, base_url: str, client
+        self, name: str, base_url: str, client, headers: Optional[dict[str, str]] = None
     ) -> tuple[list[str], int]:
         """
         Fetch all page UUIDs from a single vault via POST /list-by-scope.
 
         Returns (list_of_uuids, total_count).
         Uses pagination to handle large vaults: fetches pages in batches of 100.
+
+        ``headers`` carries the X-Vault-* context so a per-vault writer endpoint
+        serves from the correct clone/collection. ``limit`` is held at 100 — the
+        writer's /list-by-scope rejects limit>100 with 422 (bug 90b09eb8), so this
+        stays at the cap and never trips it.
         """
         uuids: list[str] = []
         offset = 0
@@ -134,7 +152,9 @@ class CrossVaultUUIDRegistry:
 
         while True:
             url = f"{base_url.rstrip('/')}/list-by-scope"
-            response = await client.post(url, json={"scope": {}, "limit": limit, "offset": offset})
+            response = await client.post(
+                url, json={"scope": {}, "limit": limit, "offset": offset}, headers=headers or None
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -153,14 +173,24 @@ class CrossVaultUUIDRegistry:
         return uuids, len(uuids)
 
 
+EndpointsProvider = Callable[
+    [], Tuple[dict[str, str], dict[str, dict[str, str]]]
+]
+
+
 async def start_registry_refresh_loop(
     registry: CrossVaultUUIDRegistry,
-    vault_endpoints: dict[str, str],
+    endpoints_provider: EndpointsProvider,
     client,
     interval_seconds: int = REGISTRY_REFRESH_INTERVAL,
 ) -> asyncio.Task:
     """
     Start a background asyncio task that periodically rebuilds the UUID registry.
+
+    ``endpoints_provider`` is re-invoked every cycle and returns the current
+    (count-source endpoints, per-vault X-Vault-* headers) derived from the live
+    VaultRegistry — so vaults provisioned after startup are picked up without a
+    restart, and each is counted from the endpoint that actually holds its pages.
 
     Returns the task so the caller can cancel it on shutdown.
     """
@@ -169,7 +199,8 @@ async def start_registry_refresh_loop(
             await asyncio.sleep(interval_seconds)
             try:
                 logger.debug("UUID registry refresh triggered (interval=%ds)", interval_seconds)
-                await registry.build(vault_endpoints, client)
+                endpoints, per_vault_headers = endpoints_provider()
+                await registry.build(endpoints, client, per_vault_headers=per_vault_headers)
             except Exception as e:
                 logger.warning("UUID registry refresh failed: %s", e)
 
