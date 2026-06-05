@@ -28,6 +28,7 @@ from .client import VaultClient
 from .settings import VaultRouterSettings, load_settings
 from .uuid_registry import CrossVaultUUIDRegistry, start_registry_refresh_loop
 from .registry import VaultRegistry, start_registry_watch
+from .routes import _read_endpoints, _build_per_vault_headers
 
 logger = logging.getLogger(__name__)
 
@@ -75,19 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("Vault Router ready")
 
-    # Build cross-vault UUID registry
-    uuid_registry = CrossVaultUUIDRegistry()
-    await uuid_registry.build(settings.vault_endpoints, vault_client)
-    app.state.uuid_registry = uuid_registry
-
-    # Start background refresh loop
-    refresh_task = await start_registry_refresh_loop(
-        uuid_registry, settings.vault_endpoints, vault_client
-    )
-    app.state.registry_refresh_task = refresh_task
-
     # vault-registry live-reload (58aef4ad): watch the mounted ConfigMap file and
-    # reload the namespace→endpoint routing table on change, no restart.
+    # reload the namespace→endpoint routing table on change, no restart. Started
+    # BEFORE the UUID-registry build so that build sees every provisioned vault,
+    # not just the static VAULT_ENDPOINTS (which holds only the default vault).
+    app.state.vault_registry = None
     vault_registry_task = None
     registry_path = os.getenv("VAULT_REGISTRY_PATH")
     if registry_path:
@@ -95,6 +88,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.vault_registry = vault_registry
         vault_registry_task = await start_registry_watch(vault_registry)
         logger.info("vault-registry live-reload enabled: %s", registry_path)
+
+    def _count_sources() -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+        """Current count-source endpoints + X-Vault-* headers for every vault.
+
+        Reuses the read-routing helpers so per-vault counts come from the exact
+        endpoint a client read would hit: default → reader, non-default → writer
+        (the pod holding the per-vault clone). Re-derived each call so the refresh
+        loop tracks vaults provisioned after startup. Falls back to the static
+        VAULT_ENDPOINTS map when no live registry is configured (self-host compose).
+        """
+        reg = app.state.vault_registry
+        endpoints = _read_endpoints(settings, reg)
+        return endpoints, _build_per_vault_headers(reg, endpoints)
+
+    # Build cross-vault UUID registry across all provisioned vaults
+    uuid_registry = CrossVaultUUIDRegistry()
+    initial_endpoints, initial_headers = _count_sources()
+    await uuid_registry.build(initial_endpoints, vault_client, per_vault_headers=initial_headers)
+    app.state.uuid_registry = uuid_registry
+
+    # Start background refresh loop (re-derives endpoints from the live registry)
+    refresh_task = await start_registry_refresh_loop(
+        uuid_registry, _count_sources, vault_client
+    )
+    app.state.registry_refresh_task = refresh_task
 
     yield
 
