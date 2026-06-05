@@ -73,10 +73,13 @@
     /**
      * Fetch a full page by UUID.
      * @param {string} id
+     * @param {string} [vault] owning vault hint — lets the router skip UUID
+     *   resolution and go straight to the owning vault. When omitted, the
+     *   router resolves the owning vault (falling back to a cross-vault fan-out).
      * Returns PageFull: PageSummary + { body } (markdown)
      */
-    getPage(id) {
-      return apiFetch('/vault/get-page', { id: id });
+    getPage(id, vault) {
+      return apiFetch('/vault/get-page', vault ? { id: id, vault: vault } : { id: id });
     },
 
     /**
