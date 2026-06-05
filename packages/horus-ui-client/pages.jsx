@@ -1633,7 +1633,9 @@ function VaultDetailPage({ pageId, onNavigate }) {
     setLoading(true);
     setError(null);
     setPage(null);
-    window.VaultClient.getPage(pageId)
+    // Pass the active vault as a hint so the router goes straight to the owning
+    // vault; when browsing "all" (empty), the router resolves / fans out.
+    window.VaultClient.getPage(pageId, (window.VAULT_STATE && window.VAULT_STATE.selectedVault) || undefined)
       .then(data => setPage(data))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));

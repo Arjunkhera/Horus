@@ -28,11 +28,13 @@ vaults:
 
 
 class FakeResponse:
-    def __init__(self, payload: dict[str, Any]):
+    def __init__(self, payload: dict[str, Any], status_code: int = 200):
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self) -> None:
-        return None
+        if self.status_code >= 400:
+            raise Exception(f"HTTP {self.status_code}")
 
     def json(self) -> dict[str, Any]:
         return dict(self._payload)
@@ -264,3 +266,66 @@ def test_list_vaults_reports_page_count_for_every_provisioned_vault():
     assert by_ns["vault-office"].get("page_count") == 38
     assert by_ns["default"].get("page_count") == 1
     assert body["total"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Regression: get-page must not 404 a non-default page just because the UUID
+# registry hasn't indexed its owning vault. When the owning vault is unknown
+# (no explicit vault + UUID unresolved) and the default vault 404s, the router
+# fans out to the remaining vaults and returns the one that has the page.
+# ---------------------------------------------------------------------------
+
+class RoutingClient:
+    """Returns a configured (payload, status) per upstream URL; records calls."""
+
+    def __init__(self, by_url: dict[str, tuple[dict[str, Any], int]]) -> None:
+        self.by_url = by_url
+        self.calls: list[dict[str, Any]] = []
+
+    async def post(self, url: str, json: Any, headers: Optional[dict] = None) -> FakeResponse:
+        self.calls.append({"url": url, "json": json, "headers": headers or {}})
+        payload, status = self.by_url.get(url, ({"detail": "not found"}, 404))
+        return FakeResponse(payload, status)
+
+
+def _build_two_vault(client: Any) -> TestClient:
+    app = FastAPI()
+    app.include_router(router)
+    app.state.settings = VaultRouterSettings(
+        vault_endpoints={"default": "http://name-based:8000"}, vault_default="default"
+    )
+    app.state.vault_client = client
+    app.state.uuid_registry = FakeUUIDRegistry()  # resolve() -> None
+    reg = VaultRegistry("/does/not/exist")
+    reg._entries = parse_registry(TWO_VAULT_REGISTRY_YAML)
+    app.state.vault_registry = reg
+    return TestClient(app)
+
+
+def test_get_page_fans_out_when_owning_vault_unknown():
+    client = RoutingClient({
+        "http://reader:8000/get-page": ({"detail": "not found"}, 404),        # default: miss
+        "http://writer2:8000/get-page": ({"id": "p1", "title": "Found"}, 200),  # other: hit
+    })
+    resp = _build_two_vault(client).post("/get-page", json={"page_id": "p1"}, headers=_hdr())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == "p1"
+    assert body["source_vault"] == "other"
+    urls = [c["url"] for c in client.calls]
+    assert "http://reader:8000/get-page" in urls    # tried the default vault first
+    assert "http://writer2:8000/get-page" in urls   # then fanned out to the other vault
+
+
+def test_get_page_explicit_vault_does_not_fan_out():
+    client = RoutingClient({
+        "http://reader:8000/get-page": ({"detail": "not found"}, 404),
+        "http://writer2:8000/get-page": ({"id": "p1", "title": "Found"}, 200),
+    })
+    # Caller pinned vault=default; a 404 there is authoritative — no fan-out.
+    resp = _build_two_vault(client).post(
+        "/get-page", json={"id": "p1", "vault": "default"}, headers=_hdr()
+    )
+    assert resp.status_code == 404
+    urls = [c["url"] for c in client.calls]
+    assert "http://writer2:8000/get-page" not in urls

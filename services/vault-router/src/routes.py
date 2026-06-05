@@ -548,17 +548,49 @@ async def get_page(
     if not base_url:
         raise HTTPException(status_code=404, detail=f"Vault '{vault_name}' not configured")
 
+    # Did we actually resolve the owning vault, or just fall back to the default?
+    # The fallback happens when the caller pinned no vault AND the UUID registry
+    # could not map the page id (e.g. a non-default page whose UUID the registry
+    # hasn't indexed). In that case a 404 from the default vault is inconclusive,
+    # so we fan out to the remaining vaults rather than reporting "not found".
+    _page_id = body.get("page_id") or body.get("id")
+    _resolved = uuid_registry.resolve(str(_page_id)) if _page_id else None
+    uncertain = not body.get("vault") and _resolved is None
+
+    base_fwd = _forward_headers(request)
+    fwd = {**base_fwd, **_vault_context_headers(vault_name, registry)}
     url = f"{base_url.rstrip('/')}/get-page"
-    fwd = _forward_headers(request)
-    fwd.update(_vault_context_headers(vault_name, registry))
     try:
         response = await vault_client.post(url, json=body, headers=fwd)
-        response.raise_for_status()
-        data = response.json()
-        data["source_vault"] = vault_name
-        return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Upstream vault '{vault_name}' error: {e}")
+
+    if response.status_code == 404 and uncertain:
+        # Owning vault unknown and default doesn't have it — search the rest.
+        read_eps = _read_endpoints(settings, registry)
+        others = {n: u for n, u in read_eps.items() if n != vault_name}
+        if others:
+            results = await fan_out(
+                vault_client, others, "/get-page", body,
+                headers=base_fwd,
+                per_vault_headers=_build_per_vault_headers(registry, others),
+            )
+            for cand_name, data in results.items():
+                if isinstance(data, dict) and "error" not in data and data.get("id"):
+                    data["source_vault"] = cand_name
+                    return data
+
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"Page '{_page_id}' not found")
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Upstream vault '{vault_name}' error: HTTP {response.status_code}",
+        )
+
+    data = response.json()
+    data["source_vault"] = vault_name
+    return data
 
 
 @router.post("/get-related")
