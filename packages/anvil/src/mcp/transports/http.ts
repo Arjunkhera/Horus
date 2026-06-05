@@ -11,6 +11,8 @@ import { handleGetNote } from '../../tools/get-note.js';
 import { handleGetEdges } from '../../tools/get-edges.js';
 import { handleSearchV2 } from '../../tools/search-v2.js';
 import { handleUpdateNote } from '../../tools/update-note.js';
+import { handleDeleteNote } from '../../tools/delete-note.js';
+import { handleDeleteEntity } from '../../tools/delete-entity.js';
 import type { ToolContext } from '../../tools/create-note.js';
 import { addSseClient, removeSseClient } from '../../core/events.js';
 
@@ -143,6 +145,28 @@ export async function startHttp(serverFactory: () => Server, opts: HttpOptions):
           return;
         }
         const result = await handleUpdateNote({ noteId, content: parsed.body as string }, opts.ctx);
+        const status = isAnvilError(result) ? errorStatus(result.code) : 200;
+        res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+        res.end(JSON.stringify(isAnvilError(result) ? result : { ok: true }));
+        return;
+      }
+
+      // DELETE /api/notes/:id
+      if (req.method === 'DELETE' && noteMatch) {
+        const noteId = decodeURIComponent(noteMatch[1]);
+        let result;
+        if (opts.ctx.storageBackend) {
+          result = await handleDeleteEntity(
+            { noteId },
+            {
+              storageBackend: opts.ctx.storageBackend,
+              edgeStore: opts.ctx.edgeStore,
+              fileStore: opts.ctx.fileStore,
+            },
+          );
+        } else {
+          result = await handleDeleteNote({ noteId }, opts.ctx);
+        }
         const status = isAnvilError(result) ? errorStatus(result.code) : 200;
         res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
         res.end(JSON.stringify(isAnvilError(result) ? result : { ok: true }));
