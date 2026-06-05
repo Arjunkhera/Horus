@@ -54,12 +54,16 @@ resources:
 # idempotent registry entry (new `horus operator vault adopt` CLI alias), so
 # half-provisioned vaults like vault-office are recoverable without manual
 # ConfigMap surgery (story 94099e71, bug 281e98ed, PR #446).
+# vault + vault-router re-pinned to sha-ef7ae13: list-by-scope no longer 422s on
+# limit>100 (writer clamps to 100) and the router no longer swallows a non-2xx
+# fan-out response into an empty 200 — it surfaces per-vault errors (and 502s when
+# all vaults fail), so callers can tell "empty" from "failed" (bug 90b09eb8, PR #449).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-1e563e0
+    newTag: sha-ef7ae13
   - name: ghcr.io/arjunkhera/horus/vault-router
-    newTag: sha-db78440
+    newTag: sha-ef7ae13
   - name: ghcr.io/arjunkhera/horus/operator-service
     newTag: sha-8ea815b
