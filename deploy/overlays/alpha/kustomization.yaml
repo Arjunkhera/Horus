@@ -58,12 +58,16 @@ resources:
 # limit>100 (writer clamps to 100) and the router no longer swallows a non-2xx
 # fan-out response into an empty 200 — it surfaces per-vault errors (and 502s when
 # all vaults fail), so callers can tell "empty" from "failed" (bug 90b09eb8, PR #449).
+# vault-router re-pinned to sha-2e1c251: the UUID-registry refresh now iterates every
+# provisioned vault (VaultRegistry.namespaces(), counting non-default vaults from their
+# writer with X-Vault-* headers) instead of only VAULT_ENDPOINTS, so GET /vaults reports
+# a numeric page_count for every vault, not just default (bug c14f92d7, PR #450).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
     newTag: sha-ef7ae13
   - name: ghcr.io/arjunkhera/horus/vault-router
-    newTag: sha-ef7ae13
+    newTag: sha-2e1c251
   - name: ghcr.io/arjunkhera/horus/operator-service
     newTag: sha-8ea815b
