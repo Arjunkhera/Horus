@@ -1362,7 +1362,9 @@ function VaultSidebar({ currentRoute, onNavigate, collapsed }) {
     vs.pages = [];
     vs.loading = true;
     vs.notify();
-    window.VaultClient.listPages({ vault: forVault, limit: 200 })
+    // The vault writer caps /list-by-scope at limit<=100; a higher value 422s,
+    // which the router swallows into an empty 200 → the vault renders "0 pages".
+    window.VaultClient.listPages({ vault: forVault, limit: 100 })
       .then(data => { if (cancelled || vs.selectedVault !== forVault) return; vs.pages = data.pages || []; vs.error = null; })
       .catch(err => { if (cancelled || vs.selectedVault !== forVault) return; vs.error = err.message; })
       .finally(() => { if (cancelled || vs.selectedVault !== forVault) return; vs.loading = false; vs.notify(); });
