@@ -172,7 +172,11 @@ class ListByScopeRequest(BaseModel):
     mode: Optional[str] = Field(None, description="Filter by mode: reference, operational, or keystone")
     type: Optional[str] = Field(None, description="Filter by page type")
     tags: Optional[list[str]] = Field(None, description="Filter by tags — page must have ALL specified tags")
-    limit: int = Field(50, description="Maximum number of results to return", ge=1, le=100)
+    # No hard upper bound here: values above MAX_LIST_BY_SCOPE_LIMIT are clamped
+    # server-side (see routes._list_by_scope_sync) rather than rejected with 422.
+    # A 422 here was being swallowed by the vault-router into an empty 200,
+    # producing silent "0 pages" results for any caller requesting limit > 100.
+    limit: int = Field(50, description="Maximum number of results to return (clamped to 100)", ge=1)
 
 
 class ListByScopeResponse(BaseModel):

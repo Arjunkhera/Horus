@@ -582,6 +582,11 @@ async def get_related(
     return await asyncio.to_thread(_get_related_sync, request, store, graph, registry, vault_ns)
 
 
+#: Maximum number of pages list-by-scope will return per request. Requests
+#: above this are clamped (not rejected) to avoid the 422-into-empty-200 trap.
+MAX_LIST_BY_SCOPE_LIMIT = 100
+
+
 def _list_by_scope_sync(request: ListByScopeRequest, store: SearchStore) -> ListByScopeResponse:
     """Synchronous implementation of list-by-scope."""
     doc_cache = store.get_all_documents()
@@ -606,7 +611,8 @@ def _list_by_scope_sync(request: ListByScopeRequest, store: SearchStore) -> List
     if request.tags:
         filtered = filter_by_tags(filtered, request.tags)
 
-    filtered = filtered[:request.limit]
+    effective_limit = min(request.limit, MAX_LIST_BY_SCOPE_LIMIT)
+    filtered = filtered[:effective_limit]
     summaries = to_summaries(filtered)
 
     return ListByScopeResponse(
