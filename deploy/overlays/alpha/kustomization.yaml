@@ -62,11 +62,15 @@ resources:
 # provisioned vault (VaultRegistry.namespaces(), counting non-default vaults from their
 # writer with X-Vault-* headers) instead of only VAULT_ENDPOINTS, so GET /vaults reports
 # a numeric page_count for every vault, not just default (bug c14f92d7, PR #450).
+# vault re-pinned to sha-365c414: safe.directory='*' so per-vault repos cloned at
+# runtime by VaultRepoResolver are trusted by git (ownership mismatch root→appuser
+# blocked every write-page checkout/push); fail fast on empty credentials file so a
+# 0-byte ~/.git-credentials surfaces at pod start, not as a silent 500 (PR #454).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-ef7ae13
+    newTag: sha-365c414
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-2e1c251
   - name: ghcr.io/arjunkhera/horus/operator-service
