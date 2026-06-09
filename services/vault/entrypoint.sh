@@ -56,8 +56,14 @@ PYTHON_PID=""
 # container under restart: unless-stopped.
 git config --global --unset-all safe.directory 2>/dev/null || true
 
-# Mark bind-mounted path as safe for git (CVE-2022-24765: ownership differs in container)
-git config --global --add safe.directory "$KNOWLEDGE_REPO_PATH"
+# Trust all directories under /data — covers both the default knowledge-repo
+# and per-vault repos cloned at runtime by VaultRepoResolver into
+# /data/vaults/<name>/knowledge-repo. Those repos are owned by root from the
+# Dockerfile chown while the process runs as appuser, so git's CVE-2022-24765
+# ownership check blocks git operations on them without this. Using '*' mirrors
+# what the Podman runtime path already does and is safe in a single-tenant
+# container where /data is always Horus-owned.
+git config --global --add safe.directory '*'
 
 # JSON logging functions (matching Anvil style)
 log() {
@@ -154,6 +160,13 @@ if [ -n "$GITHUB_TOKEN" ]; then
   git config --global credential.helper "store"
   printf 'https://oauth2:%s@%s\n' "$GITHUB_TOKEN" "$GIT_HOST" > ~/.git-credentials
   chmod 600 ~/.git-credentials
+  # Fail fast if the file ended up empty — catches the case where the k8s secret
+  # was present but empty at pod start (printf succeeds but writes nothing useful,
+  # leaving a 0-byte file that silently breaks every git push/clone at runtime).
+  if [ ! -s ~/.git-credentials ]; then
+    log_err "Credentials file is empty after write — GITHUB_TOKEN may be an empty string. Write-path operations will fail."
+    exit 1
+  fi
 elif [ ! -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
   # No token and nothing cloned yet — fail fast with a clear message rather than
   # a cryptic auth error deep inside the clone of a private repo.
