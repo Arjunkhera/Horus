@@ -66,11 +66,18 @@ resources:
 # runtime by VaultRepoResolver are trusted by git (ownership mismatch root→appuser
 # blocked every write-page checkout/push); fail fast on empty credentials file so a
 # 0-byte ~/.git-credentials surfaces at pod start, not as a silent 500 (PR #454).
+# vault re-pinned to sha-7d01ec1: replace the erasable `store` credential helper
+# with an env-reading helper (via GIT_CONFIG_*). git's store helper ERASES
+# ~/.git-credentials on any auth rejection (transient 401/5xx, rate-limit, token
+# rotation) → 0-byte file → every push/pull fails until pod restart. That was the
+# recurring vault write-path outage (writer pushes hit it; readers stayed up). The
+# env helper has no file to erase, is immune to ~/.gitconfig rewrites, and /health
+# now surfaces in-process git_pull_loop + per-vault auth failures (PR #456).
 images:
   - name: ghcr.io/arjunkhera/horus/horus-service
     newTag: sha-d132db0
   - name: ghcr.io/arjunkhera/horus/vault
-    newTag: sha-365c414
+    newTag: sha-7d01ec1
   - name: ghcr.io/arjunkhera/horus/vault-router
     newTag: sha-2e1c251
   - name: ghcr.io/arjunkhera/horus/operator-service
