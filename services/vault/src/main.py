@@ -27,7 +27,7 @@ from .layer1.typesense_engine import TypesenseSearchEngine
 from .layer1.filesystem_store import FilesystemStore
 from .layer2.schema import SchemaLoader
 from .api.routes import router, get_store, get_schema_loader, get_settings, get_graph, get_uuid_registry, get_vault_repo_resolver
-from .sync.daemon import start_sync_daemon, stop_sync_daemon
+from .sync.daemon import start_sync_daemon, stop_sync_daemon, get_git_sync_health
 from .errors import VaultError, VaultErrorResponse, VaultErrorDetail, ErrorCode
 from .graph import GraphClient, GraphConnectionError
 from .layer2.graph_export import import_graph
@@ -375,13 +375,23 @@ async def health_check():
         and sync_status["consecutive_failures"] >= 3
     )
 
+    # In-process git-sync health (default git_pull_loop + per-vault loop). The
+    # bash daemon's /tmp/sync-status.json only covers the default repo's pull;
+    # the Python loops surface here so write-path / per-vault credential failures
+    # are visible to monitoring instead of silently leaving the pod "healthy".
+    # Auth failures degrade immediately — they do not self-heal.
+    git_sync = get_git_sync_health()
+    git_degraded = git_sync["auth_failure"] or not git_sync["ok"]
+
+    degraded = sync_degraded or git_degraded
     body = {
-        "status": "degraded" if sync_degraded else "ok",
+        "status": "degraded" if degraded else "ok",
         "service": "knowledge-service",
         "version": "0.1.0",
         "sync": sync_status,
+        "git_sync": git_sync,
     }
-    return JSONResponse(status_code=503 if sync_degraded else 200, content=body)
+    return JSONResponse(status_code=503 if degraded else 200, content=body)
 
 
 @app.get("/status")

@@ -25,6 +25,60 @@ from ..layer2.vault_repo_resolver import VAULT_NAMESPACE_MARKER
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# In-process git-sync health (surfaced via /health)
+# ---------------------------------------------------------------------------
+# The bash pull daemon (entrypoint.sh) writes /tmp/sync-status.json for the
+# DEFAULT repo only. The Python loops below (default git_pull_loop + the
+# per-vault sync loop) previously logged pull/auth failures but fed nothing into
+# /health, so a credential failure on the write-path / provisioned vaults left
+# the pod reporting "healthy" — the outage was invisible to monitoring. This
+# tracker records the last pull outcome per repo; /health degrades when any repo
+# is currently failing (auth failures degrade immediately — they do not self-heal
+# without intervention).
+_git_sync_status: dict[str, dict[str, Any]] = {}
+
+_AUTH_ERROR_MARKERS = (
+    "could not read username",
+    "authentication failed",
+    "invalid username or password",
+    "terminal prompts disabled",
+    "no such device or address",
+    "403 forbidden",
+)
+
+
+def _is_auth_error(stderr: str) -> bool:
+    """True if a git stderr looks like a credential/auth failure."""
+    s = (stderr or "").lower()
+    return any(marker in s for marker in _AUTH_ERROR_MARKERS)
+
+
+def record_git_pull_result(repo_path: str, ok: bool, stderr: str = "") -> None:
+    """Record the outcome of a git pull for /health to surface."""
+    prev = _git_sync_status.get(repo_path, {})
+    fails = 0 if ok else int(prev.get("consecutive_failures", 0)) + 1
+    _git_sync_status[repo_path] = {
+        "ok": ok,
+        "auth_failure": (not ok) and _is_auth_error(stderr),
+        "consecutive_failures": fails,
+        "last_error": None if ok else (stderr or "")[:200],
+    }
+
+
+def get_git_sync_health() -> dict[str, Any]:
+    """Aggregate per-repo pull outcomes into a health summary."""
+    repos = dict(_git_sync_status)
+    failing = [r for r, s in repos.items() if not s.get("ok", True)]
+    auth_failing = [r for r, s in repos.items() if s.get("auth_failure")]
+    return {
+        "ok": not failing,
+        "auth_failure": bool(auth_failing),
+        "failing_repos": failing,
+        "repos": repos,
+    }
+
+
 class ReindexLock:
     """
     Shared lock and state for coordinating re-index operations.
@@ -138,8 +192,11 @@ async def git_pull_loop(
             
             if process.returncode != 0:
                 logger.error(f"Git pull failed (exit {process.returncode}): {stderr_text}")
+                record_git_pull_result(repo_path, ok=False, stderr=stderr_text)
                 continue
-            
+
+            record_git_pull_result(repo_path, ok=True)
+
             # Check if new commits were pulled
             if "Already up to date" in stdout_text or "Already up-to-date" in stdout_text:
                 logger.debug(f"Git pull #{pull_count}: already up to date")
@@ -437,17 +494,21 @@ async def _git_pull_ff(repo_path: str) -> str:
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
+            stderr_text = stderr.decode().strip()
             logger.error(
                 "Per-vault git pull failed for %s: %s",
-                repo_path, stderr.decode().strip(),
+                repo_path, stderr_text,
             )
+            record_git_pull_result(repo_path, ok=False, stderr=stderr_text)
             return "error"
+        record_git_pull_result(repo_path, ok=True)
         out = stdout.decode().strip()
         if "Already up to date" in out or "Already up-to-date" in out:
             return "uptodate"
         return "changed"
     except Exception as e:
         logger.error("Per-vault git pull error for %s: %s", repo_path, e)
+        record_git_pull_result(repo_path, ok=False, stderr=str(e))
         return "error"
 
 
