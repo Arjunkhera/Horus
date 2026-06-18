@@ -146,32 +146,47 @@ if echo "$VAULT_KNOWLEDGE_REPO_URL" | grep -qE '^(git@|ssh://)'; then
   exit 1
 fi
 
-# ── Git credentials (token-less remotes + credential helper) ─────────────────
-# Configure auth via a global credential helper BEFORE any clone/fetch/push, so
-# the token is NEVER baked into a remote URL. Baking the PAT into the URL means
-# rotating/expiring it silently breaks fresh reader pods and all writes
-# (bug 3a561b8b). Remotes stay tokenless (https://$GIT_HOST/owner/repo.git);
-# git reads the PAT from ~/.git-credentials via the store helper. The --global
-# helper also covers per-vault clones created at runtime by VaultRepoResolver.
-# The credential line is keyed to $GIT_HOST so GitHub Enterprise hosts
-# authenticate (git's store helper matches credentials by host — bug e4904a31).
+# ── Git credentials (token-less remotes + ENV credential helper) ─────────────
+# Auth is provided by an inline credential helper that reads the LIVE $GITHUB_TOKEN
+# from the environment on every git call. This DELIBERATELY replaces the old
+# `store` helper, which persisted the PAT in ~/.git-credentials. git's store
+# helper ERASES that file on ANY auth rejection — a transient GitHub 401/5xx, a
+# rate-limit, or a token-rotation window makes git call `git credential-store
+# erase`, which rewrites ~/.git-credentials WITHOUT the entry, leaving a 0-byte
+# file. From then on every push/pull fails (`could not read Username`) until the
+# pod restarts. That was the root cause of the recurring vault write-path outage
+# (the writer, which pushes, was hit; readers stayed up). An env-reading helper
+# has NO file to erase and always uses the current token, so a transient
+# rejection can no longer permanently destroy credentials.
+#
+# Configured via GIT_CONFIG_* env rather than ~/.gitconfig so it is ALSO immune
+# to any runtime rewrite of the global git config, and is inherited by the
+# uvicorn process and every git subprocess it spawns (default repo, the bash
+# pull daemon, and per-vault clones created at runtime by VaultRepoResolver).
+# Remotes stay tokenless (https://$GIT_HOST/owner/repo.git) — the token is never
+# baked into a URL (bug 3a561b8b). The helper is host-agnostic (one token per
+# container, covers github.com and GHE alike — bug e4904a31) and a strict no-op
+# for the store/erase actions ($1 != get), so nothing is ever persisted.
 export GIT_TERMINAL_PROMPT=0
+export GITHUB_TOKEN
 if [ -n "$GITHUB_TOKEN" ]; then
-  git config --global credential.helper "store"
-  printf 'https://oauth2:%s@%s\n' "$GITHUB_TOKEN" "$GIT_HOST" > ~/.git-credentials
-  chmod 600 ~/.git-credentials
-  # Fail fast if the file ended up empty — catches the case where the k8s secret
-  # was present but empty at pod start (printf succeeds but writes nothing useful,
-  # leaving a 0-byte file that silently breaks every git push/clone at runtime).
-  if [ ! -s ~/.git-credentials ]; then
-    log_err "Credentials file is empty after write — GITHUB_TOKEN may be an empty string. Write-path operations will fail."
+  export GIT_CONFIG_COUNT=2
+  export GIT_CONFIG_KEY_0="credential.helper"
+  export GIT_CONFIG_VALUE_0='!f() { if test "$1" = get; then printf "username=oauth2\npassword=%s\n" "$GITHUB_TOKEN"; fi; }; f'
+  export GIT_CONFIG_KEY_1="safe.directory"
+  export GIT_CONFIG_VALUE_1="*"
+  # Purge any erasable artifacts left by older `store`-helper images so the two
+  # helpers can never both fire and the 0-byte file can never be consulted again.
+  git config --global --unset-all credential.helper 2>/dev/null || true
+  rm -f ~/.git-credentials 2>/dev/null || true
+else
+  # Token set-but-empty or unset. Fail fast when there is nothing cloned yet —
+  # better a visible startup error than a cryptic auth failure deep in a clone.
+  if [ ! -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
+    log_err "GITHUB_TOKEN is empty/unset and $KNOWLEDGE_REPO_PATH has no clone yet. A valid token is required to clone/push the knowledge repo."
     exit 1
   fi
-elif [ ! -d "$KNOWLEDGE_REPO_PATH/.git" ]; then
-  # No token and nothing cloned yet — fail fast with a clear message rather than
-  # a cryptic auth error deep inside the clone of a private repo.
-  log_err "GITHUB_TOKEN is not set and $KNOWLEDGE_REPO_PATH has no clone yet. A valid token is required to clone/push the knowledge repo."
-  exit 1
+  log_warn "GITHUB_TOKEN is empty/unset — git pull/push will fail until a valid token is provided. Serving existing clone read-only."
 fi
 
 # Clone if not already present (auth via the credential helper above — no token in URL)
