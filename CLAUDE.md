@@ -33,6 +33,20 @@ This repo ships three thin-pointer skills under `.claude/skills/<name>/SKILL.md`
 | User asks to deploy, redeploy, troubleshoot, or operate the Forge Remote Registry; mentions terraform, EC2, CloudFront, registry infrastructure | **forge-registry-ops** | Architecture quick ref, script inventory, critical gotchas, Vault page links for full procedures. |
 | User asks to onboard/add a user to a Horus control plane, mint a connection bundle, provision a vault for someone, or set up their own client from a bundle | **horus-onboard-user** | Routes operator-mint vs user-setup, tenant/role/vault decisions (incl. optional vault provisioning), and the existing-anvil-repo / existing-install variables to the right `horus operator …` / `horus setup` commands. References `docs/runbooks/`. |
 
+## Migration to Intuit — local-vs-remote artefacts (read FIRST when touching migration)
+
+Horus is being unpacked from this monorepo into independent **`fdp-docmgmt` DevPortal assets** on github.intuit.com (epic **FDP-14363**). When working on anything migration-related — or whenever you are unsure whether a service runs **locally** (on the end-user machine) or **remotely** (in the `doc-search-batch` QAL cluster) — load these living artefacts first. They are the authoritative source and exist to stop agents confusing local vs remote.
+
+| Artefact | Where | What it covers |
+|---|---|---|
+| **Master migration tracker** (living status) | Anvil note `50b2d10d` | Asset↔repo↔feature matrix, per-asset checklist, critical path, full code-reconciliation audit (§7), and the local-vs-remote rule card (§8). Load with `anvil_get_note`. |
+| **Shape A/B deployment contract** | vault-office concept `b4abf1af-220e-4705-a0e5-76ceb635a8cd` | The authoritative rubric: which assets are LOCAL (image-only: anvil, horus-ui) vs REMOTE (Argo Rollout in doc-search-batch: vault, vault-router, vault-mcp, forge, forge-registry, horus-service). Forge local-exec is deprecated; registry is always remote S3. |
+| **Per-asset repo profiles** | vault-office, scope `repo:<asset>` `program:horus` | One `repo-profile` page per GHES asset (identity, shape, IDs, deploy model, gotchas). Each asset repo's own CLAUDE.md links its profile by UUID. Find via `knowledge_list_by_scope({ scope: { program: "horus" }, type: "repo-profile", vault: "vault-office" })`. |
+| **Module-Split Paved-Path Playbook** | vault-office `3abb79be-deb6-48c3-8aae-26f2ba8988c3` | How an asset is created/scaffolded on the Intuit paved path. |
+| **kubectl access to the QAL cluster** | vault-office `4922ca8a-884f-49ed-ab27-366503d15fe9` | Authenticate + verify Argo Rollout / pod health in `fdp-docsearchbatch-usw2-qal`. |
+
+> Load a vault-office page with `knowledge_get_page({ id: "<uuid>", vault: "vault-office" })`. The per-asset GHES repos each carry their own thin-pointer CLAUDE.md citing these same artefacts. **vault-code is being retired** — new migration docs go to vault-office.
+
 ## Always Load (Vault Pages)
 
 Before working on this repo, load context from the **`vault-code`** remote vault. These pages are the authoritative documentation.
