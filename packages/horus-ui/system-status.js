@@ -52,11 +52,23 @@ export function buildSystemStatus({ anvilProbe, controlPlaneConfigured, controlP
   const neo4j = dep('neo4j');
 
   // ── Control plane ────────────────────────────────────────────────────────────
+  // When unreachable, distinguish a connectivity/VPN problem (probe.reason ===
+  // 'network', e.g. EAI_AGAIN / ENOTFOUND / ETIMEDOUT) from the control plane
+  // answering with an HTTP error, so the UI can say "check your VPN" instead of
+  // a generic failure.
   let control_plane;
   if (!controlPlaneConfigured) {
     control_plane = { status: 'not_configured' };
   } else if (controlPlaneProbe?.reachable && controlPlaneProbe.httpStatus >= 200 && controlPlaneProbe.httpStatus < 300) {
     control_plane = { status: 'connected' };
+  } else if (controlPlaneProbe && !controlPlaneProbe.reachable && controlPlaneProbe.reason === 'network') {
+    control_plane = {
+      status: 'unreachable',
+      reason: 'network',
+      detail: 'Cannot reach the control plane — check your VPN / network connection.',
+    };
+  } else if (controlPlaneProbe?.reachable) {
+    control_plane = { status: 'unreachable', detail: `HTTP ${controlPlaneProbe.httpStatus}` };
   } else {
     control_plane = { status: 'unreachable' };
   }
