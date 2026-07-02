@@ -45,6 +45,30 @@ test('connected but control plane unreachable', () => {
   assert.equal(s.services.control_plane.status, 'unreachable');
 });
 
+test('control plane unreachable due to network (off-VPN / DNS) surfaces reason + detail', () => {
+  const s = buildSystemStatus({
+    anvilProbe: { reachable: true, httpStatus: 200, body: {} },
+    controlPlaneConfigured: true,
+    controlPlaneProbe: { reachable: false, reason: 'network', code: 'EAI_AGAIN' },
+    agentEnabled: true,
+  });
+  assert.equal(s.services.control_plane.status, 'unreachable');
+  assert.equal(s.services.control_plane.reason, 'network');
+  assert.match(s.services.control_plane.detail, /VPN|network/i);
+});
+
+test('control plane reachable but answering with HTTP error is unreachable with HTTP detail (not a network reason)', () => {
+  const s = buildSystemStatus({
+    anvilProbe: { reachable: true, httpStatus: 200, body: {} },
+    controlPlaneConfigured: true,
+    controlPlaneProbe: { reachable: true, httpStatus: 500 },
+    agentEnabled: true,
+  });
+  assert.equal(s.services.control_plane.status, 'unreachable');
+  assert.equal(s.services.control_plane.reason, undefined);
+  assert.equal(s.services.control_plane.detail, 'HTTP 500');
+});
+
 test('anvil degraded (503 GitSyncEngine conflict) surfaces detail', () => {
   const s = buildSystemStatus({
     anvilProbe: { reachable: true, httpStatus: 503, body: { detail: 'git sync conflict' } },
