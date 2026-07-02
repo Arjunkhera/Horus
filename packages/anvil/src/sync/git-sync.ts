@@ -23,13 +23,40 @@ export type SyncPushResult =
   | { status: 'push_failed'; message: string };
 
 /**
- * Check if a directory is a git repository by checking for .git directory
+ * Check if a directory is a git repository by checking for .git directory.
+ *
+ * NOTE: this is a shallow existence check only. A `.git` directory left behind
+ * by a clone that failed mid-transfer will pass this check even though the repo
+ * has no HEAD commit and cannot be pushed. Use {@link repoHasCommit} to check
+ * whether the repo is actually usable for sync.
  */
 export async function isGitRepo(vaultPath: string): Promise<boolean> {
   try {
     const gitDir = `${vaultPath}/.git`;
     const stats = await fs.stat(gitDir);
     return stats.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check whether a git repository has at least one commit (a real HEAD).
+ *
+ * A repo with an unborn branch (freshly `git init`ed, or a clone that failed
+ * before fetching any objects) has a `.git` directory but no HEAD. The push
+ * engine cannot push such a repo, and — because the failure happens before any
+ * health field is written — sync silently stays stuck with `lastPushAttempt`
+ * null forever. Callers use this to decide whether to bootstrap an initial
+ * commit before attempting a push.
+ */
+export async function repoHasCommit(vaultPath: string): Promise<boolean> {
+  if (!(await isGitRepo(vaultPath))) return false;
+  try {
+    const git: SimpleGit = simpleGit(vaultPath);
+    // rev-parse --verify HEAD exits non-zero (throws) on an unborn branch.
+    await git.raw(['rev-parse', '--verify', 'HEAD']);
+    return true;
   } catch {
     return false;
   }

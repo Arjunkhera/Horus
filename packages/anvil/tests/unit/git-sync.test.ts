@@ -7,7 +7,7 @@ import { mkdtemp } from 'fs';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { execSync } from 'child_process';
-import { isGitRepo, syncPull, syncPush } from '../../src/sync/git-sync.js';
+import { isGitRepo, repoHasCommit, syncPull, syncPush } from '../../src/sync/git-sync.js';
 import { isAnvilError } from '../../src/types/error.js';
 
 const mkdtempAsync = promisify(mkdtemp);
@@ -39,6 +39,38 @@ describe('Git Sync Operations', () => {
       execSync('git init', { cwd: tmpDir });
       const result = await isGitRepo(tmpDir);
       expect(result).toBe(true);
+    });
+
+    it('should return true even for a HEAD-less repo (dir check only)', async () => {
+      // A freshly-init'd repo (or a clone that failed mid-transfer) has a .git
+      // directory but no commit. isGitRepo is intentionally shallow and still
+      // reports true — repoHasCommit is the check that distinguishes these.
+      execSync('git init', { cwd: tmpDir });
+      expect(await isGitRepo(tmpDir)).toBe(true);
+    });
+  });
+
+  describe('repoHasCommit', () => {
+    it('should return false for a non-git directory', async () => {
+      expect(await repoHasCommit(tmpDir)).toBe(false);
+    });
+
+    it('should return false for a freshly-init repo with no commits (unborn branch)', async () => {
+      // This is the "daemon alive but never pushes" root state: .git exists,
+      // isGitRepo() is true, but there is no HEAD to push.
+      execSync('git init', { cwd: tmpDir });
+      expect(await isGitRepo(tmpDir)).toBe(true);
+      expect(await repoHasCommit(tmpDir)).toBe(false);
+    });
+
+    it('should return true once the repo has at least one commit', async () => {
+      execSync('git init', { cwd: tmpDir });
+      execSync('git config user.email "test@test.com"', { cwd: tmpDir });
+      execSync('git config user.name "Test User"', { cwd: tmpDir });
+      execSync('touch .gitkeep', { cwd: tmpDir });
+      execSync('git add .gitkeep', { cwd: tmpDir });
+      execSync('git commit -m "Initial commit"', { cwd: tmpDir });
+      expect(await repoHasCommit(tmpDir)).toBe(true);
     });
   });
 

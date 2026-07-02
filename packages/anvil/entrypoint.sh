@@ -63,8 +63,29 @@ shutdown() {
 }
 trap shutdown SIGTERM SIGINT
 
-# Step 1: Clone repo if ANVIL_REPO_URL is set and .git directory doesn't exist
-if [ -n "$REPO_URL" ] && [ ! -d "$NOTES_PATH/.git" ]; then
+# Returns 0 if $NOTES_PATH holds a healthy git repo with at least one commit
+# (a real HEAD), non-zero otherwise. A bare `.git` directory left behind by a
+# clone that failed mid-transfer (502 / GnuTLS / "HTTP/2 stream not closed
+# cleanly") has no HEAD — treating it as "already cloned" is what permanently
+# stranded sync. This lets us distinguish "no repo" from "corrupt/partial repo".
+repo_has_commit() {
+  [ -d "$NOTES_PATH/.git" ] && \
+    git -C "$NOTES_PATH" rev-parse --verify -q HEAD >/dev/null 2>&1
+}
+
+# Step 1: Clone repo if ANVIL_REPO_URL is set and we don't already have a
+# healthy repo (real HEAD). Retries with bounded backoff so a transient network
+# blip (502 / DNS flap / GnuTLS recv error) doesn't permanently strand sync.
+if [ -n "$REPO_URL" ] && ! repo_has_commit; then
+  # A partial/incomplete .git from a previously-failed clone would make
+  # `git clone` refuse ("destination path already exists and is not empty").
+  # Clear only a HEAD-less .git so the retry can start clean; never touch a
+  # repo that already has commits.
+  if [ -d "$NOTES_PATH/.git" ]; then
+    log_warn "Found a .git directory with no commits at $NOTES_PATH — removing partial clone before retrying."
+    rm -rf "$NOTES_PATH/.git"
+  fi
+
   log "Cloning notes repository from $REPO_URL..."
 
   # Inject GitHub token into URL if provided
@@ -74,25 +95,73 @@ if [ -n "$REPO_URL" ] && [ ! -d "$NOTES_PATH/.git" ]; then
     CLONE_URL="$REPO_URL"
   fi
 
-  git clone "$CLONE_URL" "$NOTES_PATH" || {
-    log_err "Failed to clone repository"
-    exit 1
-  }
-  log "Repository cloned successfully"
+  CLONE_MAX_ATTEMPTS="${ANVIL_CLONE_MAX_ATTEMPTS:-5}"
+  clone_ok=""
+  attempt=1
+  backoff=5
+  while [ "$attempt" -le "$CLONE_MAX_ATTEMPTS" ]; do
+    if git clone "$CLONE_URL" "$NOTES_PATH"; then
+      clone_ok="yes"
+      break
+    fi
+    # Clean up whatever the failed attempt left behind so the next attempt
+    # (and the local-first fallback below) start from a clean slate.
+    rm -rf "$NOTES_PATH/.git"
+    if [ "$attempt" -lt "$CLONE_MAX_ATTEMPTS" ]; then
+      log_warn "Clone attempt $attempt/$CLONE_MAX_ATTEMPTS failed — retrying in ${backoff}s..."
+      sleep "$backoff"
+      backoff=$((backoff * 2))
+      [ "$backoff" -gt 60 ] && backoff=60
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  if [ -n "$clone_ok" ]; then
+    log "Repository cloned successfully"
+  else
+    # Do NOT exit 1 and crash-loop the container. Fall through to the
+    # local-first init below so Anvil still starts; the in-process sync engine
+    # will (re)establish the remote once the network recovers.
+    log_err "Failed to clone repository after $CLONE_MAX_ATTEMPTS attempts — starting local-first; sync will retry once the remote is reachable."
+  fi
 fi
 
-# Local-first fallback: if no remote repo is configured and there's no existing
-# repo, initialize a local-only notes repo so the client works out-of-the-box.
-# (Connected/operator onboarding may not provision a remote notes repo; a
-# local-first Anvil should still start. Notes stay local until a remote is set.)
-if [ -z "$REPO_URL" ] && [ ! -d "$NOTES_PATH/.git" ]; then
-  log "No ANVIL_REPO_URL and no existing repo at $NOTES_PATH — initializing a local-only notes repo."
+# Local-first fallback: if we still don't have a healthy repo, initialize a
+# local-only notes repo so the client works out-of-the-box.
+# This covers both the no-remote-configured case AND a configured remote whose
+# clone could not complete (network down). An initial commit is created so the
+# repo has a real HEAD — a HEAD-less repo makes the push engine unable to push
+# and leaves sync silently stuck (the reported bug).
+if ! repo_has_commit; then
+  if [ -z "$REPO_URL" ]; then
+    log "No ANVIL_REPO_URL and no existing repo at $NOTES_PATH — initializing a local-only notes repo."
+  fi
   mkdir -p "$NOTES_PATH"
   git config --global --add safe.directory "$NOTES_PATH" 2>/dev/null || true
-  git -C "$NOTES_PATH" init -q || {
-    log_err "Failed to initialize local notes repository at $NOTES_PATH"
-    exit 1
-  }
+  if [ ! -d "$NOTES_PATH/.git" ]; then
+    git -C "$NOTES_PATH" init -q || {
+      log_err "Failed to initialize local notes repository at $NOTES_PATH"
+      exit 1
+    }
+  fi
+  # Set identity before the initial commit so it doesn't fail with
+  # "Please tell me who you are".
+  git -C "$NOTES_PATH" config user.email "horus@local" 2>/dev/null || true
+  git -C "$NOTES_PATH" config user.name "Horus Anvil Sync" 2>/dev/null || true
+  # Create an initial commit so the repo has a HEAD. Without this the branch is
+  # unborn, the push engine has nothing to push against, and sync stays stuck.
+  if ! git -C "$NOTES_PATH" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    touch "$NOTES_PATH/.gitkeep"
+    git -C "$NOTES_PATH" add .gitkeep 2>/dev/null || true
+    git -C "$NOTES_PATH" commit -q -m "bootstrap: initialize notes repository" 2>/dev/null \
+      || log_warn "Initial bootstrap commit failed (non-fatal) — sync engine will retry."
+  fi
+  # If a remote was configured but the clone failed, wire it up so the sync
+  # engine can push/pull to it once the network recovers.
+  if [ -n "$REPO_URL" ] && ! git -C "$NOTES_PATH" remote get-url origin >/dev/null 2>&1; then
+    git -C "$NOTES_PATH" remote add origin "$REPO_URL" 2>/dev/null \
+      || log_warn "Could not add origin remote (non-fatal)."
+  fi
 fi
 
 # Step 2: Configure git for token-based auth if GITHUB_TOKEN is set
