@@ -2,6 +2,7 @@ import { simpleGit, type SimpleGit } from 'simple-git';
 import { GitMutex } from './mutex.js';
 import { type SyncHealthState, createInitialHealthState } from './health.js';
 import type { AnvilWatcher } from '../../storage/watcher.js';
+import { repoHasCommit } from '../../sync/git-sync.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 
@@ -115,6 +116,12 @@ export class GitSyncEngine {
       await this.cleanStaleLocks();
       const git = this.createGit();
 
+      // Self-heal an unborn repo: a `.git` with no HEAD commit (fresh init, or a
+      // clone that failed mid-transfer) cannot be pushed. Give it an initial
+      // commit so the branch is born and the push engine has something to push
+      // against. Without this, sync stays silently stuck forever.
+      await this.ensureBootstrapped(git);
+
       await this.stageFiles(git);
 
       // Check staged files via git.status() — simple-git's diff() does not
@@ -123,30 +130,57 @@ export class GitSyncEngine {
       const statusBeforeCommit = await git.status();
       const filesCommitted = statusBeforeCommit.staged?.length ?? 0;
 
-      if (filesCommitted === 0) {
+      // A freshly bootstrapped/self-healed repo may have nothing new staged but
+      // still hold un-pushed commits (the bootstrap commit, or a branch that has
+      // never reached its remote). Push those too rather than short-circuiting.
+      const hasUnpushedCommits =
+        (statusBeforeCommit.ahead ?? 0) > 0 || !statusBeforeCommit.tracking;
+
+      if (filesCommitted === 0 && !hasUnpushedCommits) {
         return { status: 'no_changes' };
       }
+
+      // Record the attempt BEFORE committing so a failure anywhere in the
+      // commit/push path is diagnosable via health. Previously this was set
+      // only after a successful commit, so a repo that could never commit left
+      // lastPushAttempt null forever — the reported "daemon alive but never
+      // pushes" symptom.
+      this.health.lastPushAttempt = new Date().toISOString();
 
       const timestamp = new Date().toISOString();
       let commitHash = '';
       try {
-        const commitResult = await git.commit(`auto: sync ${timestamp}`);
-        commitHash = commitResult.commit;
-        // If git.commit() returned silently with no hash, nothing was committed
-        if (!commitHash) {
-          return { status: 'no_changes' };
+        // Nothing new to commit but there ARE unpushed commits — skip the
+        // commit and go straight to the push below.
+        if (filesCommitted === 0) {
+          commitHash = statusBeforeCommit.current ? 'existing' : '';
+        } else {
+          const commitResult = await git.commit(`auto: sync ${timestamp}`);
+          commitHash = commitResult.commit;
+          // If git.commit() returned silently with no hash, nothing was committed
+          if (!commitHash && !hasUnpushedCommits) {
+            return { status: 'no_changes' };
+          }
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.message?.includes('nothing to commit')) {
           return { status: 'no_changes' };
         }
-        throw err;
+        // Surface commit failures in health instead of throwing silently into
+        // schedulePush().catch(), which never touches health.
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.health.pushConsecutiveFailures++;
+        this.health.lastPushError = errMsg;
+        this.log('error', 'Commit failed', {
+          error: errMsg,
+          failures: this.health.pushConsecutiveFailures,
+        });
+        this.scheduleRetryPush();
+        return { status: 'push_failed', error: errMsg };
       }
 
-      this.health.lastPushAttempt = new Date().toISOString();
-
       try {
-        await git.push();
+        await this.pushCurrentBranch(git);
 
         this.health.lastPushSuccess = new Date().toISOString();
         this.health.lastPushError = null;
@@ -270,6 +304,63 @@ export class GitSyncEngine {
   }
 
   /**
+   * Ensure the repo has a real HEAD commit. A repo whose initial clone failed
+   * (network down) or that was freshly `git init`ed has an unborn branch — no
+   * HEAD — which the push engine cannot push against. Creating an initial
+   * commit here lets sync recover on its own once the process is running,
+   * without an operator manually deleting/re-cloning the notes repo. No-op when
+   * the repo already has a commit.
+   */
+  private async ensureBootstrapped(git: SimpleGit): Promise<void> {
+    if (await repoHasCommit(this.opts.notesPath)) return;
+
+    this.log('warn', 'Repository has no commits — creating initial bootstrap commit');
+    try {
+      // Identity may not be configured in-process (entrypoint sets it, but be
+      // defensive so the bootstrap commit never fails with "who are you").
+      await git.addConfig('user.email', 'horus@local');
+      await git.addConfig('user.name', 'Horus Anvil Sync');
+
+      const keepPath = path.join(this.opts.notesPath, '.gitkeep');
+      try {
+        await fs.access(keepPath);
+      } catch {
+        await fs.writeFile(keepPath, '');
+      }
+      await git.add(['.gitkeep']);
+      await git.commit('bootstrap: initialize notes repository');
+      this.log('info', 'Bootstrap commit created — repository is now push-ready');
+    } catch (err: unknown) {
+      // Non-fatal: log and let the caller's normal error handling record health.
+      this.log('error', 'Failed to create bootstrap commit', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Push the current branch. When the branch has no upstream tracking ref
+   * (first push on a freshly-born branch), set it with `-u` so subsequent
+   * pushes and pulls resolve the tracking branch. A plain `git.push()` on a
+   * branch with no upstream rejects with "has no upstream branch", which would
+   * otherwise keep sync permanently stuck after a self-healed bootstrap.
+   */
+  private async pushCurrentBranch(git: SimpleGit): Promise<void> {
+    const status = await git.status();
+    if (status.tracking) {
+      await git.push();
+      return;
+    }
+    const branch = status.current;
+    if (branch) {
+      await git.push(['-u', 'origin', branch]);
+    } else {
+      // Detached HEAD or unknown branch — fall back to a plain push.
+      await git.push();
+    }
+  }
+
+  /**
    * Stage .md, .anvil/types/*.yaml, custom-types/*.yaml, and _graph/*.json —
    * mirrors the staging rules from syncPush so both code paths stay consistent.
    */
@@ -338,7 +429,7 @@ export class GitSyncEngine {
     }
 
     try {
-      await git.push();
+      await this.pushCurrentBranch(git);
       this.health.lastPushSuccess = new Date().toISOString();
       this.health.lastPushError = null;
       this.health.pushConsecutiveFailures = 0;

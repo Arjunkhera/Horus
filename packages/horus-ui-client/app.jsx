@@ -42,15 +42,28 @@ function App() {
     try { return localStorage.getItem(SCOPE_KEY) || 'anvil'; } catch { return 'anvil'; }
   });
 
-  // System status cache for vault availability gate
+  // System status cache for vault availability gate + control-plane banner.
+  // Polled (not one-shot) so a transient control-plane outage (off-VPN / DNS
+  // flap) surfaces a banner that auto-clears once connectivity returns.
   const [sysStatus, setSysStatus] = uS(null);
   uE(() => {
-    fetch('/api/system/status')
+    let cancelled = false;
+    const load = () => fetch('/api/system/status')
       .then(r => r.json())
-      .then(s => setSysStatus(s))
-      .catch(() => setSysStatus(null));
+      .then(s => { if (!cancelled) setSysStatus(s); })
+      .catch(() => { if (!cancelled) setSysStatus(null); });
+    load();
+    const id = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
   const vaultAvailable = sysStatus && sysStatus.tabs && sysStatus.tabs.vault === 'available';
+  // Connected mode but the control plane can't be reached right now. Vault/Forge
+  // data is proxied through here, so those surfaces will be empty until it
+  // recovers — show a non-alarming banner explaining why.
+  const cpStatus = sysStatus && sysStatus.services && sysStatus.services.control_plane;
+  const controlPlaneUnreachable = !!(cpStatus && cpStatus.status === 'unreachable');
+  const controlPlaneDetail = (cpStatus && cpStatus.detail)
+    || "Can't reach the Horus control plane — check your VPN / network. The app is running; remote data is temporarily unavailable.";
 
   // A stale localStorage scope can boot us into vault while the CP is unavailable;
   // once status resolves, fall back to anvil rather than show failing vault fetches.
@@ -325,6 +338,12 @@ function App() {
           <div style={{ padding: '10px 16px', background: 'oklch(0.22 0.04 60)', borderBottom: '1px solid oklch(0.35 0.08 60)', color: 'oklch(0.85 0.10 60)', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', lineHeight: '1.4' }}>
             <span>⚠ Could not load notes from Anvil. Showing cached/demo data.</span>
             <button onClick={handleRetry} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: '4px', border: '1px solid oklch(0.45 0.10 60)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: '12px' }}>Retry</button>
+          </div>
+        )}
+        {controlPlaneUnreachable && (
+          <div style={{ padding: '10px 16px', background: 'oklch(0.22 0.04 250)', borderBottom: '1px solid oklch(0.35 0.06 250)', color: 'oklch(0.85 0.08 250)', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', lineHeight: '1.4' }}>
+            <span>⚠ {controlPlaneDetail}</span>
+            <span style={{ marginLeft: 'auto', opacity: 0.7, fontSize: '12px', whiteSpace: 'nowrap' }}>Retrying automatically…</span>
           </div>
         )}
         {route.kind === 'note' && window.__chatReturnContext && (
