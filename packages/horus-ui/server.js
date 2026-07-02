@@ -81,7 +81,21 @@ if (CONTROL_PLANE_URL) {
       },
       onError: (err, _req, res) => {
         console.error('[horus-ui] Vault proxy error:', err.message);
-        if (!res.headersSent) {
+        if (res.headersSent) return;
+        // Distinguish "can't reach the control plane at all" (off-VPN / DNS
+        // flap) from the control plane answering with an error. The client keys
+        // off `controlPlaneUnreachable` to show a "check your VPN" banner
+        // instead of a raw proxy error.
+        const code = err?.code || err?.cause?.code;
+        if (code && CONNECTIVITY_ERROR_CODES.has(code)) {
+          res.status(503).json({
+            error: 'control_plane_unreachable',
+            controlPlaneUnreachable: true,
+            code,
+            detail:
+              'Cannot reach the Horus control plane. Check your VPN / network connection — the app is running, but remote data is temporarily unavailable.',
+          });
+        } else {
           res.status(502).json({ error: 'Vault proxy error', detail: err.message });
         }
       },
@@ -171,15 +185,44 @@ app.get('/api/ai/enabled', (_req, res) => {
   res.json({ enabled: chatEnabled() });
 });
 
+// Connectivity-class error codes: the host couldn't be resolved or reached at
+// all (off-VPN / DNS flap / connection refused / timed out) — as opposed to the
+// host answering with an HTTP error. Used to tell the user "check your VPN"
+// rather than showing a generic failure.
+const CONNECTIVITY_ERROR_CODES = new Set([
+  'EAI_AGAIN',   // transient DNS failure (the reported off-VPN symptom)
+  'ENOTFOUND',   // DNS name does not resolve
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ERR_CANCELED', // AbortSignal.timeout fired
+]);
+
+// Classify a thrown fetch error into a coarse reason. AbortSignal.timeout
+// rejects with an AbortError (name), not a code, so check both.
+function classifyProbeError(err) {
+  const code = err?.code || err?.cause?.code;
+  if (code && CONNECTIVITY_ERROR_CODES.has(code)) return { reason: 'network', code };
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
+    return { reason: 'network', code: code || 'ETIMEDOUT' };
+  }
+  return { reason: 'error', code: code || null };
+}
+
 // Probe a /health endpoint, capturing reachability, status, and JSON body.
+// On failure, classify WHY so the UI can distinguish a connectivity/VPN problem
+// from the remote answering with an error.
 async function probeHealth(baseUrl, timeoutMs = 5000) {
   try {
     const resp = await fetch(baseUrl.replace(/\/$/, '') + '/health', { signal: AbortSignal.timeout(timeoutMs) });
     let body = null;
     try { body = await resp.json(); } catch { /* non-JSON health body is fine */ }
     return { reachable: true, httpStatus: resp.status, body };
-  } catch {
-    return { reachable: false };
+  } catch (err) {
+    const { reason, code } = classifyProbeError(err);
+    return { reachable: false, reason, code };
   }
 }
 
